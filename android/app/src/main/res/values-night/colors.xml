@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dark-mode overrides for values/colors.xml. -->
+<resources>
+    <!-- NimboTheme's dark background (ui/theme/Theme.kt). -->
+    <color name="nimbo_window_background">#FF1C1B1F</color>
+</resources>
