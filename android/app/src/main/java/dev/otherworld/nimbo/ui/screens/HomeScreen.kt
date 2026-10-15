@@ -136,9 +136,9 @@ fun HomeScreen(
                                 text = { Text("Nextcloud apps") },
                                 onClick = { overflowOpen = false; onOpenApps() },
                             )
-                            DropdownMenuItem(
-                                text = { Text("Settings") },
+                            SettingsMenuItem(
                                 onClick = { overflowOpen = false; onOpenSettings() },
+                                withIcon = false,
                             )
                             DropdownMenuItem(
                                 text = { Text("Diagnostics") },

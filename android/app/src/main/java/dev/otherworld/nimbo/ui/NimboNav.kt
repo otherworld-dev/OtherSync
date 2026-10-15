@@ -192,6 +192,7 @@ fun NimboNav(vm: NimboViewModel, supporterVm: SupporterViewModel) {
                             onOpenNotifications = { vm.openNotifications() },
                             notificationCount = state.notificationCount,
                             onOpenTrash = { vm.openTrash() },
+                            onOpenSettings = { vm.openSettings() },
                         )
 
                         Tab.SYNC -> HomeScreen(
@@ -240,6 +241,7 @@ fun NimboNav(vm: NimboViewModel, supporterVm: SupporterViewModel) {
                             onBack = null, // a tab, not a pushed screen
                             onOpenNotifications = { vm.openNotifications() },
                             notificationCount = state.notificationCount,
+                            onOpenSettings = { vm.openSettings() },
                         )
                     }
                 }

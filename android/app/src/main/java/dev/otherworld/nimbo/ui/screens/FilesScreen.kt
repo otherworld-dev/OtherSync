@@ -118,6 +118,7 @@ fun FilesScreen(
     onOpenNotifications: () -> Unit,
     notificationCount: Int,
     onOpenTrash: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val segments = remember(path) {
         path.trim().trim('/').split('/').filter { it.isNotBlank() }
@@ -141,7 +142,8 @@ fun FilesScreen(
                         Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
                     }
                     // Favourites and Trash are views of the same files, so they
-                    // belong here rather than beside the sync settings.
+                    // belong here rather than beside the sync settings. Settings
+                    // sits below them, as it does in every tab's menu.
                     Box {
                         IconButton(onClick = { viewsMenuOpen = true }) {
                             Icon(Icons.Filled.MoreVert, contentDescription = "More")
@@ -171,6 +173,8 @@ fun FilesScreen(
                                 },
                                 onClick = { viewsMenuOpen = false; onOpenTrash() },
                             )
+                            HorizontalDivider()
+                            SettingsMenuItem(onClick = { viewsMenuOpen = false; onOpenSettings() })
                         }
                     }
                 }

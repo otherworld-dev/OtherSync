@@ -21,11 +21,19 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,13 +49,27 @@ fun AppsScreen(
     onOpen: (NcApp) -> Unit,
     onOpenNotifications: () -> Unit,
     notificationCount: Int,
+    onOpenSettings: () -> Unit,
     onBack: (() -> Unit)? = null,
 ) {
+    var overflowOpen by remember { mutableStateOf(false) }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
             NimboTopBar(title = "Nextcloud apps", onBack = onBack) {
                 NotificationBell(notificationCount, onOpenNotifications)
+                Box {
+                    IconButton(onClick = { overflowOpen = true }) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "More")
+                    }
+                    DropdownMenu(
+                        expanded = overflowOpen,
+                        onDismissRequest = { overflowOpen = false },
+                    ) {
+                        SettingsMenuItem(onClick = { overflowOpen = false; onOpenSettings() })
+                    }
+                }
             }
         },
     ) { inner ->

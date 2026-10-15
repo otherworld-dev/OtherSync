@@ -30,7 +30,9 @@ import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -275,6 +277,27 @@ fun NotificationBell(count: Int, onClick: () -> Unit) {
             )
         }
     }
+}
+
+/**
+ * The "Settings" entry for a tab's ⋮ menu.
+ *
+ * Every tab carries one, so Settings is never more than two taps away whichever
+ * tab you are on; sharing the item keeps the tabs from drifting apart again.
+ * [onClick] should close the menu as well as open Settings. [withIcon] matches
+ * the menu it sits in: on when the other items carry icons, off when they don't.
+ */
+@Composable
+fun SettingsMenuItem(onClick: () -> Unit, withIcon: Boolean = true) {
+    DropdownMenuItem(
+        text = { Text("Settings") },
+        leadingIcon = if (withIcon) {
+            { Icon(Icons.Filled.Settings, contentDescription = null) }
+        } else {
+            null
+        },
+        onClick = onClick,
+    )
 }
 
 /* ------------------------------------------------------------------ */
