@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"strings"
 	"testing"
 
 	"golang.org/x/sys/windows/registry"
@@ -92,8 +91,9 @@ func TestRegisterWritesTheMenuForFilesAndFolders(t *testing.T) {
 		t.Errorf("folders menu:\n got %v\nwant %v", got, wantDirs)
 	}
 
-	// The parent is a cascade titled with the product name ("OtherSync"; the
-	// key stays "Nimbo") and the app's icon.
+	// The parent is a cascade titled with the product name ("OtherSync") and
+	// the app's icon. (The keys it lives under stay "Nimbo":
+	// TestIdentifiersStayNimbo.)
 	for _, root := range []string{fileRoot, dirRoot} {
 		k, err := registry.OpenKey(registry.CURRENT_USER, root, registry.QUERY_VALUE)
 		if err != nil {
@@ -103,7 +103,7 @@ func TestRegisterWritesTheMenuForFilesAndFolders(t *testing.T) {
 		icon, _, _ := k.GetStringValue("Icon")
 		_, _, subErr := k.GetStringValue("SubCommands")
 		_ = k.Close()
-		if title != "OtherSync" || !strings.HasSuffix(root, `\shell\Nimbo`) || icon != exe+",0" || subErr != nil {
+		if title != "OtherSync" || icon != exe+",0" || subErr != nil {
 			t.Errorf("%s: title %q, icon %q, SubCommands err %v", root, title, icon, subErr)
 		}
 	}
