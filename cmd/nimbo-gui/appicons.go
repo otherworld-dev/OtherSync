@@ -39,7 +39,11 @@ var icoSizes = []int{16, 24, 32, 48, 64, 256}
 //
 //	(taskbar pins, .lnk icons) renders PNG-compressed frames below 256px
 //	as a blank page, even though LoadImageW copes.
-const appIconsRev = "3"
+//
+// rev 4: the badge and the fallback are the OtherSync mark, taken from the
+//
+//	brand .ico frame drawn nearest each size (Deck #996).
+const appIconsRev = "4"
 
 // appIconsDir is the live icon folder: beside the Start-menu shortcuts, whose
 // path names no package identity, so a change of signing identity (or a move
@@ -77,54 +81,79 @@ func (a *App) appIconPath(id string) string {
 	return filepath.Join(d, sanitizeFileName(id)+"."+appIconsRev+".ico")
 }
 
-// brandBadge returns the Nimbo tile as an image for corner-badging, decoded
-// once from the largest PNG frame of the embedded brand .ico (our generator
-// emits PNG-payload ICOs, so frames are plain PNG).
-var brandBadgeOnce sync.Once
-var brandBadgeImg image.Image
+// brandFrames holds the embedded brand .ico's frames, decoded once and keyed
+// by pixel size (our generator emits PNG-payload ICOs, so frames are plain
+// PNG). The generator draws each size natively — the small ones with a
+// heavier, simplified mark — so a frame of the right size beats resampling
+// the 256 one.
+var brandFramesOnce sync.Once
+var brandFrames map[int]image.Image
 
-func brandBadge() image.Image {
-	brandBadgeOnce.Do(func() {
-		b := navIconICO
-		if len(b) < 6 {
-			return
-		}
-		n := int(binary.LittleEndian.Uint16(b[4:6]))
-		bestW, off, ln := -1, 0, 0
-		for i := 0; i < n; i++ {
-			e := 6 + 16*i
-			if e+16 > len(b) {
-				return
-			}
-			w := int(b[e])
-			if w == 0 {
-				w = 256
-			}
-			if w > bestW {
-				bestW = w
-				ln = int(binary.LittleEndian.Uint32(b[e+8 : e+12]))
-				off = int(binary.LittleEndian.Uint32(b[e+12 : e+16]))
-			}
-		}
-		if off <= 0 || off+ln > len(b) {
-			return
-		}
-		img, err := png.Decode(bytes.NewReader(b[off : off+ln]))
-		if err == nil {
-			brandBadgeImg = img
-		}
-	})
-	return brandBadgeImg
+func loadBrandFrames() map[int]image.Image {
+	brandFramesOnce.Do(func() { brandFrames = decodeICOFrames(navIconICO) })
+	return brandFrames
 }
 
-// badgeAppIcon composites the Nimbo tile into the bottom-right corner (~38%,
-// like a browser's PWA badge) so windows, Start entries and taskbar pins all
-// read as "this app, opened via Nimbo".
-func badgeAppIcon(src image.Image) image.Image {
-	badge := brandBadge()
-	if badge == nil {
-		return src
+// decodeICOFrames decodes every PNG frame of a PNG-payload .ico by size.
+// Anything malformed is skipped.
+func decodeICOFrames(b []byte) map[int]image.Image {
+	out := map[int]image.Image{}
+	if len(b) < 6 {
+		return out
 	}
+	n := int(binary.LittleEndian.Uint16(b[4:6]))
+	for i := 0; i < n; i++ {
+		e := 6 + 16*i
+		if e+16 > len(b) {
+			break
+		}
+		w := int(b[e])
+		if w == 0 {
+			w = 256
+		}
+		ln := int(binary.LittleEndian.Uint32(b[e+8 : e+12]))
+		off := int(binary.LittleEndian.Uint32(b[e+12 : e+16]))
+		if off <= 0 || ln <= 0 || off+ln > len(b) {
+			continue
+		}
+		if img, err := png.Decode(bytes.NewReader(b[off : off+ln])); err == nil {
+			out[w] = img
+		}
+	}
+	return out
+}
+
+// brandFrame returns the brand tile at size px: the frame drawn at that size
+// when the .ico has one, otherwise the smallest larger frame resampled down
+// (or the largest frame, if none is larger). Nil when the .ico has no frames.
+func brandFrame(size int) image.Image {
+	frames := loadBrandFrames()
+	if img, ok := frames[size]; ok {
+		return img
+	}
+	src := 0
+	for s := range frames {
+		switch {
+		case src == 0,
+			s > size && (src < size || s < src),
+			src < size && s > src:
+			src = s
+		}
+	}
+	if src == 0 {
+		return nil
+	}
+	return resize.Resize(uint(size), uint(size), frames[src], resize.Lanczos3)
+}
+
+// brandBadge returns the brand tile at its largest size.
+func brandBadge() image.Image { return brandFrame(256) }
+
+// badgeAppIcon composites the brand tile into the bottom-right corner (~38%,
+// like a browser's PWA badge) so windows, Start entries and taskbar pins all
+// read as "this app, opened via OtherSync". The tile is the brand .ico frame
+// nearest the badge size, so call it per icon size, not once on the source.
+func badgeAppIcon(src image.Image) image.Image {
 	b := src.Bounds()
 	out := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
 	draw.Draw(out, out.Bounds(), src, b.Min, draw.Src)
@@ -132,7 +161,10 @@ func badgeAppIcon(src image.Image) image.Image {
 	if bw < 8 {
 		return src // too small to badge legibly
 	}
-	scaled := resize.Resize(uint(bw), uint(bw), badge, resize.Lanczos3)
+	scaled := brandFrame(bw)
+	if scaled == nil {
+		return src
+	}
 	m := b.Dx() / 64 // whisker of margin
 	pos := image.Rect(b.Dx()-bw-m, b.Dy()-bw-m, b.Dx()-m, b.Dy()-m)
 	draw.Draw(out, pos, scaled, image.Point{}, draw.Over)
@@ -234,8 +266,8 @@ func ensureIconFile(path string, fetch func(path string) error) {
 		// Fallback re-encodes the brand image (shell-safe DIB frames) rather
 		// than copying the raw embedded ico, whose all-PNG frames the shell
 		// icon extractor can't render for .lnk/pin icons.
-		if badge := brandBadge(); badge != nil {
-			if err := writeIcoFromImage(path, badge); err == nil {
+		if brandBadge() != nil {
+			if err := writeIcoFrames(path, brandFrame); err == nil {
 				_ = os.WriteFile(marker, nil, 0o600)
 				return
 			}
@@ -268,15 +300,27 @@ func (a *App) fetchAppIcon(id, path string) error {
 	if err != nil {
 		return err
 	}
-	return writeIcoFromImage(path, badgeAppIcon(src)) // + "via Nimbo" corner badge
+	// The "via OtherSync" corner badge goes on per size, so each frame carries
+	// the mark drawn for its size rather than the 256 one shrunk to a smudge.
+	return writeIcoFrames(path, func(s int) image.Image {
+		return badgeAppIcon(resize.Resize(uint(s), uint(s), src, resize.Lanczos3))
+	})
 }
 
 // writeIcoFromImage renders an image into a multi-size .ico at path
 // (atomically, via a unique temp file — concurrent fetches must not share one).
 func writeIcoFromImage(path string, src image.Image) error {
+	return writeIcoFrames(path, func(s int) image.Image {
+		return resize.Resize(uint(s), uint(s), src, resize.Lanczos3)
+	})
+}
+
+// writeIcoFrames writes a multi-size ICO whose frame at each size is
+// frame(size).
+func writeIcoFrames(path string, frame func(int) image.Image) error {
 	var frames [][]byte
 	for _, s := range icoSizes {
-		img := resize.Resize(uint(s), uint(s), src, resize.Lanczos3)
+		img := frame(s)
 		var frame []byte
 		if s >= 256 {
 			var b bytes.Buffer
