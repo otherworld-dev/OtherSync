@@ -98,10 +98,12 @@ try {
     # The launcher alias must be brand-unique too (Go derives it from brand appId,
     # lowercased + "-app" — keep in step with launcherAlias() in shortcut_windows.go).
     $m = $m -replace '(<desktop:ExecutionAlias Alias=")[^"]*"', "`${1}$($appId.ToLower())-app.exe`""
-    # The unvirtualized Start-menu folder is "<brand name> Apps" (shortcutsDir() in
-    # shortcut_windows.go); a stale "Nimbo Apps" would leave the partner's app
+    # The unvirtualized Start-menu folder is "<brand InstalledName> Apps"
+    # (shortcutsDir() in shortcut_windows.go): formerName when the brand has been
+    # renamed, else name. A stale "Nimbo Apps" would leave the partner's app
     # shortcuts in the package's private copy, where Start can't see them.
-    $brandName = (Get-Content $brandSrc -Raw | ConvertFrom-Json).name
+    $partnerBrand = Get-Content $brandSrc -Raw | ConvertFrom-Json
+    $brandName = if ($partnerBrand.formerName) { $partnerBrand.formerName } else { $partnerBrand.name }
     if (-not $brandName) { throw "brand.json is missing 'name'" }
     $appsDir = [System.Security.SecurityElement]::Escape("$brandName Apps") -replace '\$', '$$$$'
     $m = $m -replace '(<virtualization:ExcludedDirectory>\$\(KnownFolder:Programs\)\\)[^<]*', "`${1}$appsDir"

@@ -31,7 +31,7 @@ param(
     [string]$StorePublisherDisplay = "Otherworld Dev Ltd",  # Publisher display name (must match Partner Center exactly)
     # Store listing title = the package's Properties>DisplayName, which must match a
     # reserved app name in Partner Center. The keyworded name ranks in Store search
-    # ("nextcloud"/"sync"); VisualElements (Start menu) stays plain "Nimbo".
+    # ("nextcloud"/"sync"); VisualElements (Start menu) stays plain "OtherSync".
     # Store DisplayName. MUST NOT contain "Nextcloud": Nextcloud's trademark
     # guidelines (nextcloud.com/trademarks) say of desktop clients, verbatim,
     # "you can NOT use the term 'Nextcloud' in the name of your client. You MUST
@@ -44,7 +44,7 @@ param(
     # Either way the description MUST state plainly that Nimbo is not the
     # official Nextcloud client and is not affiliated with Nextcloud GmbH — that
     # half of the policy is a hard MUST and costs nothing.
-    [string]$StoreDisplayName = "Nimbo",
+    [string]$StoreDisplayName = "OtherSync",  # the name must be reserved on the app in Partner Center first
 
     # --- Testing the Store build's behaviour (-StoreChannel) ---
     # Builds an ordinary, dev-signed, normally-installable package whose binary
@@ -191,7 +191,7 @@ try {
     $rc = [System.IO.File]::ReadAllText($verRc)
     $rc = $rc -replace '(FILEVERSION|PRODUCTVERSION) 0,0,0,0', "`$1 $verCommas"
     $rc = $rc -replace '("(?:FileVersion|ProductVersion)", )"0\.0\.0\.0"', "`$1`"$pkgVersion`""
-    $rc = $rc -replace '("(?:FileDescription|ProductName)", )"Nimbo"', "`$1`"$name`""
+    $rc = $rc -replace '("(?:FileDescription|ProductName)", )"[^"]*"', "`$1`"$name`""
     $rc = $rc -replace '("CompanyName", )"[^"]*"', "`$1`"$company`""
     [System.IO.File]::WriteAllText($verRc, $rc, (New-Object System.Text.UTF8Encoding $false))
     Push-Location $guiDir
@@ -278,7 +278,7 @@ if ($Store) {
     $manifest = $manifest -replace '(<Identity Name=")[^"]*"', "`${1}$StoreIdentityName`""
     $manifest = $manifest -replace '<PublisherDisplayName>[^<]*</PublisherDisplayName>', "<PublisherDisplayName>$StorePublisherDisplay</PublisherDisplayName>"
     # Element form only (Properties>DisplayName) - the VisualElements DisplayName is an
-    # attribute and deliberately untouched, so Start menu / taskbar keep showing "Nimbo".
+    # attribute and deliberately untouched, so Start menu / taskbar keep showing "OtherSync".
     $manifest = $manifest -replace '<DisplayName>[^<]*</DisplayName>', "<DisplayName>$StoreDisplayName</DisplayName>"
 }
 [System.IO.File]::WriteAllText(

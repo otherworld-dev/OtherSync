@@ -20,11 +20,11 @@ BEGIN
     BLOCK "080904B0"
     BEGIN
       VALUE "CompanyName", "Otherworld Dev Ltd"
-      VALUE "FileDescription", "Nimbo"
+      VALUE "FileDescription", "OtherSync"
       VALUE "FileVersion", "0.0.0.0"
       VALUE "InternalName", "nimbo-gui"
       VALUE "OriginalFilename", "nimbo-gui.exe"
-      VALUE "ProductName", "Nimbo"
+      VALUE "ProductName", "OtherSync"
       VALUE "ProductVersion", "0.0.0.0"
     END
   END
