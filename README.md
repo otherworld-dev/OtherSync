@@ -1,4 +1,7 @@
-# Nimbo
+# OtherSync
+
+Formerly **Nimbo**: same app, new name. Existing installs update in place and keep
+their settings, accounts and folders.
 
 A from-scratch, cross-platform Nextcloud client in Go, focused on doing the
 things the official desktop client does poorly: **reliable sync & conflict
@@ -122,7 +125,7 @@ login):
 
 - **Tray menu** — quick access to your **Nextcloud apps**, **favourited folders**
   (open locally if synced, else in the browser), and **local synced folders**,
-  plus **Open Nimbo / Sync now / Pause / Quit**.
+  plus **Open OtherSync / Sync now / Pause / Quit**.
 - **Status window** — live tabs for **Activity**, **Notifications** (Accept/
   Decline/Open/Dismiss), **Conflicts** (choose **Keep mine / Keep server / Keep
   both / Open folder** per conflict), **Can't sync**, and **Issues** (Retry).
@@ -216,23 +219,23 @@ contact@otherworld.dev.
 Bug reports and feature requests are welcome on the
 [issue tracker](https://github.com/otherworld-dev/Nimbo/issues).
 
-This repository carries Nimbo's real development history. `dev` is the default
+This repository carries OtherSync's (formerly Nimbo's) real development history. `dev` is the default
 branch, where changes are integrated, and `main` only changes when a release is
 made. Up to 18 September 2026 the source was published as squashed snapshots,
 which is why the history up to that date is only eight commits.
 
-Code contributions are not accepted yet. Nimbo is dual licensed: anyone can use
+Code contributions are not accepted yet. OtherSync is dual licensed: anyone can use
 it under the PolyForm Noncommercial licence above, and Otherworld Dev Ltd also
-sells commercial licences, which only works while every part of Nimbo can be
+sells commercial licences, which only works while every part of OtherSync can be
 offered under both. Pull requests will be accepted once a contributor licence
 agreement (CLA) is in place to cover this, and should then be opened against
 `dev`.
 
-Translations cannot be accepted yet either. Nimbo is English only at the moment,
+Translations cannot be accepted yet either. OtherSync is English only at the moment,
 and the desktop app has no translation support to add them to.
 
-The **Nimbo** name and icon are not covered by the licence, so please do not
-distribute builds of your own under the Nimbo name.
+The **OtherSync** and **Nimbo** names and icons are not covered by the licence, so
+please do not distribute builds of your own under either name.
 
-Nimbo is an independent client, not affiliated with or endorsed by
+OtherSync is an independent client, not affiliated with or endorsed by
 Nextcloud GmbH.

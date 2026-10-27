@@ -45,6 +45,11 @@ All notable changes to Nimbo are recorded here. The format follows
 
 ### Changed
 
+- Nimbo is now called OtherSync. Nothing else changes: it is the same app and it
+  updates in place, your settings, accounts, folders, pinned app windows and
+  Explorer integration all stay as they are, and existing folders and Explorer
+  sidebar entries keep their names. After the update it says so once. The
+  website is now www.othersync.com (#996).
 - The flyout says what Nimbo is doing right now, in one line under your account:
   the file it is uploading or downloading with a progress bar, "Checking folders…"
   while it looks for changes, "Can't reach the server" with how many changes are
