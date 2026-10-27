@@ -401,7 +401,7 @@ func raiseActionable(title, message, attribution, bodyArgs string, buttons []Toa
 		return
 	}
 	if title == "" {
-		title = "Nimbo"
+		title = brand.Current.Name
 	}
 	for i := range buttons {
 		buttons[i].Label = sanitizeToastText(buttons[i].Label)

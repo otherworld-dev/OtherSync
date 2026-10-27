@@ -4720,7 +4720,7 @@ func (a *App) SetSidebar(on bool) string {
 		return err.Error()
 	}
 	name := a.ownSidebarLabel()
-	if err := shellns.Register(brand.Current.Name, name, target, icon); err != nil {
+	if err := shellns.Register(sidebarIconFolder(), name, target, icon); err != nil {
 		return err.Error()
 	}
 	rememberSidebarEntry(target, name)
@@ -4799,7 +4799,7 @@ func (a *App) syncSidebar() {
 		slog.Warn("sidebar icon unavailable", "err", err)
 		return
 	}
-	if err := shellns.Register(brand.Current.Name, name, target, icon); err != nil {
+	if err := shellns.Register(sidebarIconFolder(), name, target, icon); err != nil {
 		slog.Warn("sidebar registration failed", "err", err)
 		return
 	}

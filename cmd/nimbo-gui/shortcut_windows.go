@@ -103,13 +103,21 @@ func utf16Arg(s string) (uintptr, error) {
 // name must match the manifest's virtualization:ExcludedDirectory (patched by
 // build-partner.ps1 for white-label builds), or a packaged install writes the
 // shortcuts into its private AppData copy and Start never shows them.
+//
+// It is named after brand.InstalledName, not the product name: it keeps
+// "Nimbo Apps" after the rename to OtherSync. Existing installs have their
+// shortcuts in it and the app icons the pinned ones point at (appIconsDir), so
+// a new name would orphan the shortcuts and blank every pinned icon.
 func shortcutsDir() string {
 	appData := os.Getenv("APPDATA")
 	if appData == "" {
 		return ""
 	}
-	return filepath.Join(appData, "Microsoft", "Windows", "Start Menu", "Programs", brand.Current.Name+" Apps")
+	return filepath.Join(appData, "Microsoft", "Windows", "Start Menu", "Programs", shortcutsFolderName())
 }
+
+// shortcutsFolderName is the Start-menu folder's own name, "Nimbo Apps".
+func shortcutsFolderName() string { return brand.Current.InstalledName() + " Apps" }
 
 // shortcutExists reports whether a .lnk with this filename exists in our
 // Start-menu folder. Filename-keyed (resolved from settings by app id) so a

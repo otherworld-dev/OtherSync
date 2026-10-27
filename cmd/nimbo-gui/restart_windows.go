@@ -100,7 +100,7 @@ func applyUpdate(msixURL string) error {
 	if err != nil {
 		return err
 	}
-	taskName := brand.Current.AppID + "SelfUpdate"
+	taskName := selfUpdateTaskName()
 	ps1 := filepath.Join(home, "nimbo-update.ps1")
 	vbs := filepath.Join(home, "nimbo-update.vbs")
 	taskXML := filepath.Join(home, "nimbo-update-task.xml")
@@ -313,3 +313,7 @@ func utf16LEBOM(s string) []byte {
 	}
 	return b
 }
+
+// selfUpdateTaskName names the scheduled task the in-app update runs from. It
+// is keyed off the app id ("NimboSelfUpdate"), never the product name.
+func selfUpdateTaskName() string { return brand.Current.AppID + "SelfUpdate" }

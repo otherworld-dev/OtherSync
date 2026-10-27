@@ -42,3 +42,44 @@ func TestHelpPage(t *testing.T) {
 		}
 	}
 }
+
+// The rename to OtherSync is display-only. Everything an existing install, or
+// Windows, recognises the app by keeps its old value: the app id (AUMID,
+// config/data dir, self-update task), the update feed, and the name things
+// already on disk were created under (InstalledName).
+func TestStockRenameKeepsIdentity(t *testing.T) {
+	if Current.Name != "OtherSync" {
+		t.Errorf("Name = %q, want OtherSync", Current.Name)
+	}
+	if Current.AppID != "Nimbo" {
+		t.Errorf("AppID = %q, want Nimbo (the AUMID, config dir and task names hang off it)", Current.AppID)
+	}
+	if got := Current.InstalledName(); got != "Nimbo" {
+		t.Errorf("InstalledName() = %q, want Nimbo (Start-menu folder, icon folder, existing labels)", got)
+	}
+	if want := "https://github.com/otherworld-dev/Nimbo/releases/latest/download/Nimbo.appinstaller"; Current.FeedURL != want {
+		t.Errorf("FeedURL = %q, want %q", Current.FeedURL, want)
+	}
+	if want := "https://api.github.com/repos/otherworld-dev/Nimbo"; Current.APIBase != want {
+		t.Errorf("APIBase = %q, want %q", Current.APIBase, want)
+	}
+}
+
+// The fallback used when brand.json is broken must be the same brand, or a
+// broken build would quietly move every identifier back to other values.
+func TestStockFallbackMatchesBrandJSON(t *testing.T) {
+	if got := stockBrand(); got != Current {
+		t.Errorf("stockBrand() = %+v\nbrand.json  = %+v", got, Current)
+	}
+}
+
+// InstalledName is FormerName when the product has been renamed, else Name, so
+// a brand that was never renamed (a white-label build) keeps today's values.
+func TestInstalledName(t *testing.T) {
+	if got := (Brand{Name: "AcmeCloud Sync"}).InstalledName(); got != "AcmeCloud Sync" {
+		t.Errorf("never renamed: %q", got)
+	}
+	if got := (Brand{Name: "OtherSync", FormerName: "Nimbo"}).InstalledName(); got != "Nimbo" {
+		t.Errorf("renamed: %q", got)
+	}
+}

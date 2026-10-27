@@ -16,10 +16,11 @@ import (
 //go:embed brand.json
 var brandJSON []byte
 
-// Brand is the set of identity values that differ between the stock Nimbo build
-// and a white-label build.
+// Brand is the set of identity values that differ between the stock build and
+// a white-label build.
 type Brand struct {
-	Name         string `json:"name"`         // product name shown to users ("Nimbo")
+	Name         string `json:"name"`         // product name shown to users ("OtherSync")
+	FormerName   string `json:"formerName"`   // the name before a rename ("Nimbo"); "" = never renamed. See InstalledName
 	Company      string `json:"company"`      // legal entity ("Otherworld Dev Ltd")
 	Tagline      string `json:"tagline"`      // short descriptor
 	Website      string `json:"website"`      // marketing site
@@ -39,15 +40,40 @@ func init() {
 		// A malformed brand.json is a build mistake; fall back to safe stock
 		// values so the app still runs while it's noticed.
 		slog.Error("brand.json invalid, using stock defaults", "err", err)
-		Current = Brand{
-			Name: "Nimbo", Company: "Otherworld Dev Ltd",
-			Website: "https://www.nimbosync.com", SupportEmail: "contact@otherworld.dev",
-			HelpURL:   "https://www.nimbosync.com/help/",
-			FeedURL:   "https://github.com/otherworld-dev/Nimbo/releases/latest/download/Nimbo.appinstaller",
-			APIBase:   "https://api.github.com/repos/otherworld-dev/Nimbo",
-			AccentHex: "#5856E0", AppID: "Nimbo",
-		}
+		Current = stockBrand()
 	}
+}
+
+// stockBrand is the stock brand.json, for when the embedded file can't be read.
+func stockBrand() Brand {
+	return Brand{
+		Name: "OtherSync", FormerName: "Nimbo", Company: "Otherworld Dev Ltd",
+		Tagline: "Native Nextcloud sync for desktop",
+		Website: "https://www.othersync.com", SupportEmail: "contact@otherworld.dev",
+		HelpURL:   "https://www.othersync.com/help/",
+		FeedURL:   "https://github.com/otherworld-dev/Nimbo/releases/latest/download/Nimbo.appinstaller",
+		APIBase:   "https://api.github.com/repos/otherworld-dev/Nimbo",
+		AccentHex: "#22D3C4", AppID: "Nimbo",
+	}
+}
+
+// InstalledName is the product name that names what existing installs have
+// already made under it: the Start-menu "<name> Apps" folder (and the app
+// icons inside it, which pinned shortcuts point at), the folder the sidebar
+// icon is kept in, and the automatic Explorer label of accounts set up before
+// a rename. It is FormerName when the product has been renamed, so those keep
+// working after the rename, and Name otherwise. Text people read uses Name.
+func (b Brand) InstalledName() string {
+	if b.FormerName != "" {
+		return b.FormerName
+	}
+	return b.Name
+}
+
+// Renamed reports whether this build carries a new product name that existing
+// installs knew by another (FormerName).
+func (b Brand) Renamed() bool {
+	return b.FormerName != "" && b.FormerName != b.Name
 }
 
 // HelpPage returns the address of one help page ("" = the help home), or ""

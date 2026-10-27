@@ -97,6 +97,13 @@ func main() {
 			slog.Warn("file logging unavailable, using stderr only", "err", lerr)
 		}
 		setupCrashLog(filepath.Join(filepath.Dir(d.LogFile()), "crash.log"))
+		// The rename to OtherSync: before anything mounts or writes the
+		// sidebar entry, which read what it records (see migrateRename).
+		if show, rerr := migrateRename(d, brand.Current); rerr != nil {
+			slog.Warn("could not record the product rename, will try again next launch", "err", rerr)
+		} else {
+			renameNoticeDue = show
+		}
 	} else {
 		applog.SetVerbose(verbose)
 		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: applog.Level()})))
@@ -135,6 +142,9 @@ func main() {
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		startedOnce.Do(func() { close(svc.started) })
 	})
+	if renameNoticeDue {
+		svc.afterStart(svc.showRenameNotice)
+	}
 	// Logged here, not earlier: a second launch (Explorer's Share menu) hands
 	// its arguments to the running app and exits inside application.New, and
 	// must not read as a start that never logged "exiting".

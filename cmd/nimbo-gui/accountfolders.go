@@ -160,20 +160,46 @@ func suggestAccountFolder(home, login string, others []accountFolder, usable fun
 	if dir := filepath.Join(home, "Nextcloud"); ok(dir) {
 		return dir
 	}
-	name := brand.Current.Name
-	if login != "" {
-		name += " - " + login
+	// An older install may have made "Nimbo - <login>" before the rename to
+	// OtherSync without recording it (mountAccountOnDemand's "older install"
+	// case): find that folder, already there, rather than make a new one
+	// beside it and leave it behind.
+	if brand.Current.Renamed() {
+		former := accountFolderBase(home, brand.Current.FormerName, login)
+		for n := 1; n < suggestAttempts; n++ {
+			if dir := numberedFolder(former, n); isDir(dir) && ok(dir) {
+				return dir
+			}
+		}
 	}
-	base := filepath.Join(home, name)
-	if ok(base) {
-		return base
-	}
-	for n := 2; n < suggestAttempts; n++ {
-		if dir := fmt.Sprintf("%s (%d)", base, n); ok(dir) {
+	base := accountFolderBase(home, brand.Current.Name, login)
+	for n := 1; n < suggestAttempts; n++ {
+		if dir := numberedFolder(base, n); ok(dir) {
 			return dir
 		}
 	}
 	return ""
+}
+
+// accountFolderBase is "<home>/<product> - <login>".
+func accountFolderBase(home, product, login string) string {
+	if login != "" {
+		product += " - " + login
+	}
+	return filepath.Join(home, product)
+}
+
+// numberedFolder is base for n == 1, else "base (n)".
+func numberedFolder(base string, n int) string {
+	if n == 1 {
+		return base
+	}
+	return fmt.Sprintf("%s (%d)", base, n)
+}
+
+func isDir(dir string) bool {
+	fi, err := os.Stat(dir)
+	return err == nil && fi.IsDir()
 }
 
 // missingOrEmpty accepts a folder that doesn't exist yet or holds nothing.

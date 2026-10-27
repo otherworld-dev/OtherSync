@@ -22,9 +22,14 @@ type Account struct {
 	// the local-network-route design (2026-09-13).
 	Local *LocalRoute `json:"local,omitempty"`
 	// Label is the name the user chose for this account's Explorer sidebar
-	// entry. "" = the automatic one ("Nimbo - <login>"); see sidebarLabel in
+	// entry. "" = the automatic one ("OtherSync - <login>"); see sidebarLabel in
 	// cmd/nimbo-gui.
 	Label string `json:"label,omitempty"`
+	// LabelBrand is the product name the automatic label starts with when it
+	// is not today's: accounts set up before the rename to OtherSync keep
+	// "Nimbo - <login>", because renaming an on-demand sync root re-registers
+	// it. "" = the current product name. Set once by the rename migration.
+	LabelBrand string `json:"labelBrand,omitempty"`
 }
 
 // LocalRoute is the saved setup of an account's local network address.

@@ -10,6 +10,7 @@ import (
 
 	"github.com/gen2brain/beeep"
 	"github.com/go-toast/toast"
+	"github.com/otherworld/nimbo/internal/brand"
 	"github.com/otherworld/nimbo/internal/transport"
 )
 
@@ -28,7 +29,7 @@ func Toast(title, message, link string) {
 	message = sanitizeToastText(message)
 	link = sanitizeToastText(link)
 	if title == "" {
-		title = "Nimbo"
+		title = brand.Current.Name
 	}
 	// Native in-process WinRT is the real path (no child process, no injection
 	// surface). During bring-up the sanitised go-toast path is kept as a fallback
@@ -40,7 +41,9 @@ func Toast(title, message, link string) {
 	} else if toastAUMID() != "" {
 		slog.Warn("native toast raise failed, falling back", "err", err)
 	}
-	t := toast.Notification{AppID: "Nimbo", Title: title, Message: message}
+	// AppID is the AUMID the fallback toast is raised under (an identity, not
+	// text), so it stays the brand's app id, "Nimbo", across the rename.
+	t := toast.Notification{AppID: brand.Current.AppID, Title: title, Message: message}
 	if link != "" && !strings.HasPrefix(link, "action=") { // an action is not a URL
 		t.ActivationType = "protocol"
 		t.ActivationArguments = link

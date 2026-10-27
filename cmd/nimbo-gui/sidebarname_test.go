@@ -13,6 +13,7 @@ func TestSidebarLabel(t *testing.T) {
 	adam := account.Account{ID: "a", ServerURL: "https://cloud.example.com", LoginName: "adam"}
 	adam2 := account.Account{ID: "b", ServerURL: "https://other.example.org/nc", LoginName: "Adam"}
 	work := account.Account{ID: "c", ServerURL: "https://cloud.example.com", LoginName: "work"}
+	old := account.Account{ID: "a", ServerURL: "https://cloud.example.com", LoginName: "adam", LabelBrand: "Nimbo"}
 
 	for _, tc := range []struct {
 		name string
@@ -27,10 +28,25 @@ func TestSidebarLabel(t *testing.T) {
 		{"and for the other one too", adam2, []account.Account{adam, adam2}, n + " - Adam on other.example.org"},
 		{"no login falls back to the product", account.Account{ID: "x"}, nil, n},
 		{"a chosen name wins", account.Account{ID: "a", LoginName: "adam", Label: "Work (ServerA)"}, []account.Account{adam, adam2}, "Work (ServerA)"},
+		{"an account from before the rename keeps its name", old, []account.Account{old}, "Nimbo - adam"},
+		{"with the server too", old, []account.Account{old, adam2}, "Nimbo - adam on cloud.example.com"},
+		{"and with no login", account.Account{ID: "x", LabelBrand: "Nimbo"}, nil, "Nimbo"},
+		{"a chosen name still wins over it", account.Account{ID: "a", LoginName: "adam", LabelBrand: "Nimbo", Label: "Mine"}, nil, "Mine"},
 	} {
 		if got := sidebarLabel(tc.acc, tc.all); got != tc.want {
 			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
 		}
+	}
+}
+
+// New accounts are named after the product as it is called now; the icon
+// folder our own entry uses is one existing installs have, so it keeps its name.
+func TestSidebarNamesAfterRename(t *testing.T) {
+	if got := sidebarLabel(account.Account{ID: "n", LoginName: "amy"}, nil); got != "OtherSync - amy" {
+		t.Errorf("new account: %q", got)
+	}
+	if got := sidebarIconFolder(); got != "Nimbo" {
+		t.Errorf("sidebar icon folder = %q, want Nimbo", got)
 	}
 }
 
