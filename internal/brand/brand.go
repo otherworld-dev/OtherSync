@@ -9,6 +9,7 @@ package brand
 import (
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 )
@@ -42,6 +43,38 @@ func init() {
 		slog.Error("brand.json invalid, using stock defaults", "err", err)
 		Current = stockBrand()
 	}
+	Current = sanitize(Current)
+}
+
+// stockFormerName is the stock build's name before the rename to OtherSync.
+const stockFormerName = "Nimbo"
+
+// Validate checks the rename fields: a former name differs from the name, and
+// the stock build's former name only goes with the stock app id, so a
+// white-label brand.json copied from the stock one can't pass as a renamed
+// Nimbo.
+func (b Brand) Validate() error {
+	if b.FormerName == "" {
+		return nil
+	}
+	if b.FormerName == b.Name {
+		return fmt.Errorf("brand.json: formerName %q is the same as name", b.FormerName)
+	}
+	if b.FormerName == stockFormerName && b.AppID != stockFormerName {
+		return fmt.Errorf("brand.json: formerName %q is the stock build's, but appId is %q; leave formerName out of a white-label brand", b.FormerName, b.AppID)
+	}
+	return nil
+}
+
+// sanitize drops a former name that fails Validate, so such a build runs as a
+// brand that was never renamed: its own Start-menu folder and labels, no
+// rename notice.
+func sanitize(b Brand) Brand {
+	if err := b.Validate(); err != nil {
+		slog.Error("ignoring formerName", "err", err)
+		b.FormerName = ""
+	}
+	return b
 }
 
 // stockBrand is the stock brand.json, for when the embedded file can't be read.

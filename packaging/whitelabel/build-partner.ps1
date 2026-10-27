@@ -37,6 +37,15 @@ foreach ($k in 'identityName','publisher','displayName','publisherDisplayName','
 }
 $appId = (Get-Content $brandSrc -Raw | ConvertFrom-Json).appId
 if (-not $appId) { throw "brand.json is missing 'appId'" }
+# formerName is the stock brand's (the rename Nimbo -> OtherSync). Copied into a
+# partner brand it would put the partner's shortcuts in "Nimbo Apps", share the
+# stock sidebar icon folder, label its accounts "Nimbo - <user>" and tell its
+# users "Nimbo is now <partner>". Only a partner that really renamed its own
+# product may carry one, and partner.json must say so with the same name.
+$formerName = (Get-Content $brandSrc -Raw | ConvertFrom-Json).formerName
+if ($formerName -and $formerName -ne $cfg.renamedFrom) {
+    throw "brand.json sets formerName '$formerName', which is the stock build's. Remove it from the partner's brand.json, or, if this partner really renamed its product from '$formerName', add `"renamedFrom`": `"$formerName`" to partner.json."
+}
 
 # Make Go + windres reachable even if not on PATH.
 function Ensure-Tool($exe, $candidates) {

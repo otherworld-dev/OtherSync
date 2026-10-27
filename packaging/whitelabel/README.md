@@ -45,10 +45,12 @@ user-visible identity value:
 | `feedUrl`, `apiBase` | the in-app update check + "Update now" target — point these at the partner's OWN release feed |
 | `accentHex` | brand accent — **drives the app icon** (tile + cloud, auto-derived), plus the tray badge and UI accent fallback |
 | `appId` | the MSIX Application Id used in the AUMID and the self-update task name — must match the manifest's `<Application Id="…">` |
+| `formerName` | **Stock only: leave it out for partners.** The stock build's name before the rename to OtherSync ("Nimbo"). It keeps what existing stock installs made under the old name (the "Nimbo Apps" Start-menu folder, the `%LOCALAPPDATA%\Nimbo` sidebar icon folder, "Nimbo - <user>" sidebar labels) and triggers the one-time "Nimbo is now OtherSync" notice. A partner brand carrying it would share those with stock and tell its users "Nimbo is now <partner>". `build-partner.ps1` refuses a partner `brand.json` that sets it, unless `partner.json` has `"renamedFrom"` equal to it (a partner that really renamed its own product) |
 
 ## Steps to build a branded copy
 
-1. **Edit `internal/brand/brand.json`** — set every field for the partner. Point
+1. **Edit `internal/brand/brand.json`** — set every field for the partner, and
+   remove `formerName` (stock only, see above). Point
    `feedUrl`/`apiBase` at their release hosting (the updater installs from there).
 
 2. **Regenerate the icons.** The app icon and MSIX logos derive automatically
@@ -87,6 +89,7 @@ user-visible identity value:
   build → its own slugged folder (e.g. `appId` "AcmeCloud" → `…\acmecloud`), so a
   partner install never shares state with stock Nimbo. No code change needed. The
   CLI executable name (`nimbo.exe`) itself is still unbranded (developer-facing).
-- Keep `brand.json` for the stock build committed as Nimbo; produce partner
+- Keep `brand.json` for the stock build committed as the stock brand (OtherSync,
+  `appId` "Nimbo", `formerName` "Nimbo"); produce partner
   builds on a branch or from an out-of-tree overlay so stock releases are never
   accidentally shipped with partner branding.

@@ -83,3 +83,35 @@ func TestInstalledName(t *testing.T) {
 		t.Errorf("renamed: %q", got)
 	}
 }
+
+// formerName "Nimbo" belongs to the stock build. A white-label brand copied
+// from the stock file must not inherit it, or it would share the stock Start
+// menu folder and icon folder and label its accounts "Nimbo - <user>".
+func TestValidateFormerName(t *testing.T) {
+	for _, c := range []struct {
+		b  Brand
+		ok bool
+	}{
+		{stockBrand(), true},
+		{Brand{Name: "AcmeCloud Sync", AppID: "AcmeCloud"}, true},
+		{Brand{Name: "AcmeCloud Sync", FormerName: "Nimbo", AppID: "AcmeCloud"}, false},
+		{Brand{Name: "Nimbo", FormerName: "Nimbo", AppID: "Nimbo"}, false},
+		{Brand{Name: "Acme Two", FormerName: "Acme One", AppID: "AcmeOne"}, true},
+	} {
+		if err := c.b.Validate(); (err == nil) != c.ok {
+			t.Errorf("%+v: Validate() = %v, want ok=%v", c.b, err, c.ok)
+		}
+	}
+}
+
+// A brand that fails the check runs as never renamed rather than wearing the
+// stock build's former name.
+func TestSanitizeDropsBadFormerName(t *testing.T) {
+	b := sanitize(Brand{Name: "AcmeCloud Sync", FormerName: "Nimbo", AppID: "AcmeCloud"})
+	if b.FormerName != "" || b.Renamed() || b.InstalledName() != "AcmeCloud Sync" {
+		t.Errorf("got %+v", b)
+	}
+	if got := sanitize(stockBrand()); got != stockBrand() {
+		t.Errorf("stock brand changed: %+v", got)
+	}
+}
