@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/otherworld/nimbo/internal/activity"
+	"github.com/otherworld/nimbo/internal/brand"
 	"github.com/otherworld/nimbo/internal/config"
 	"github.com/otherworld/nimbo/internal/engine"
 	"github.com/otherworld/nimbo/internal/state"
@@ -209,7 +210,7 @@ func (e *Engine) toastDetached(roots []string, movedTo string) {
 	if movedTo != "" {
 		tail = "your copy was moved to “" + movedTo + "” and is not syncing. Choose what to do with it."
 	}
-	e.toast("Nimbo — no longer shared with you",
+	e.toast(brand.Current.Name+" — no longer shared with you",
 		what+" "+verb+" no longer shared with you (or the storage was unmounted). Nothing was deleted: "+tail,
 		"action=detached")
 }

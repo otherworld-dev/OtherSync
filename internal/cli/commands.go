@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/otherworld/nimbo/internal/account"
+	"github.com/otherworld/nimbo/internal/brand"
 	"github.com/otherworld/nimbo/internal/transport"
 )
 
@@ -26,7 +27,7 @@ func cmdLogin(ctx context.Context, args []string) error {
 		return err
 	}
 
-	fmt.Println("Open this URL in your browser to authorise Nimbo:")
+	fmt.Println("Open this URL in your browser to authorise " + brand.Current.Name + ":")
 	fmt.Println("  " + flow.LoginURL)
 	if err := openBrowser(flow.LoginURL); err == nil {
 		fmt.Println("(attempted to open it for you)")

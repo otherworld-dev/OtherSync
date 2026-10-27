@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/otherworld/nimbo/internal/brand"
 	"github.com/otherworld/nimbo/internal/config"
 	"github.com/otherworld/nimbo/internal/engine"
 	"github.com/otherworld/nimbo/internal/state"
@@ -191,7 +192,7 @@ func (e *Engine) toastFrozen(local, reason string) {
 	if throttled {
 		return
 	}
-	e.toast("Nimbo — sync paused",
+	e.toast(brand.Current.Name+" — sync paused",
 		"“"+filepath.Base(local)+"”: "+reason+". Nothing on this PC was changed. "+
 			"Review it in Settings and resume if this was expected.", "")
 }

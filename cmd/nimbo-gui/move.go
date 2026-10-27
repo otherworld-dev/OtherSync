@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/otherworld/nimbo/internal/brand"
 )
 
 // MoveSyncFolder re-points the sync folder at oldLocal to newLocal WITHOUT
@@ -77,7 +79,7 @@ func relocateFolder(src, dst string) string {
 	// (with the watcher stopped) — letting the user pre-move the folder in Explorer
 	// while Nimbo is watching is exactly what propagates deletions to the server.
 	if di, err := os.Stat(dst); err == nil && di.IsDir() && !folderEmpty(dst) {
-		return "That folder already has files in it. Pick a new or empty location and Nimbo will move your synced files there.\n\nDon't move the folder yourself in Explorer while Nimbo is running — that's what can delete files on the server."
+		return "That folder already has files in it. Pick a new or empty location and " + brand.Current.Name + " will move your synced files there.\n\nDon't move the folder yourself in Explorer while " + brand.Current.Name + " is running — that's what can delete files on the server."
 	}
 	si, serr := os.Stat(src)
 	if serr != nil || !si.IsDir() {

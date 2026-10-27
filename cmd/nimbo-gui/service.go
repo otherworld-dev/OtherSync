@@ -4538,7 +4538,7 @@ func (a *App) versionsLocalPath(localAbs string) {
 		if a.app != nil {
 			a.app.Dialog.Warning().
 				SetTitle("No version history").
-				SetMessage(filepath.Base(localAbs) + " isn't inside a folder synced by Nimbo.").
+				SetMessage(filepath.Base(localAbs) + " isn't inside a folder synced by " + brand.Current.Name + ".").
 				Show()
 		}
 		return
@@ -4561,7 +4561,7 @@ func (a *App) shareLocalPath(localAbs string) {
 		if a.app != nil {
 			a.app.Dialog.Warning().
 				SetTitle("Can't share").
-				SetMessage(filepath.Base(localAbs) + " isn't inside a folder synced by Nimbo.").
+				SetMessage(filepath.Base(localAbs) + " isn't inside a folder synced by " + brand.Current.Name + ".").
 				Show()
 		}
 		return
@@ -5322,7 +5322,7 @@ func (a *App) testLocalAddress(ctx context.Context, addr, pin string) (LocalTest
 	switch {
 	case p.PlainHTTP:
 		dto.Result = "not-https"
-		dto.Message = "This address doesn't use HTTPS. Nimbo needs HTTPS here too; a self-signed certificate is fine. If Nextcloud sits behind a reverse proxy, use the proxy's address, not the Nextcloud machine's."
+		dto.Message = "This address doesn't use HTTPS. " + brand.Current.Name + " needs HTTPS here too; a self-signed certificate is fine. If Nextcloud sits behind a reverse proxy, use the proxy's address, not the Nextcloud machine's."
 		return dto, nil
 	case !p.Verified && !p.Pinned:
 		// Before anyone is asked to trust this certificate, check that a

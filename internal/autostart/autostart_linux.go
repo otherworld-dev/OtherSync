@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/otherworld/nimbo/internal/brand"
 )
 
 const desktopName = "nimbo.desktop"
@@ -56,7 +58,7 @@ func Enable(exePath string) error {
 	}
 	content := "[Desktop Entry]\n" +
 		"Type=Application\n" +
-		"Name=Nimbo\n" +
+		"Name=" + brand.Current.Name + "\n" +
 		"Comment=Nextcloud sync client\n" +
 		fmt.Sprintf("Exec=%s\n", exec) +
 		"Terminal=false\n" +

@@ -23,6 +23,7 @@ import (
 	"log/slog"
 	"path/filepath"
 
+	"github.com/otherworld/nimbo/internal/brand"
 	"github.com/otherworld/nimbo/internal/state"
 	"github.com/otherworld/nimbo/internal/transfer"
 )
@@ -102,7 +103,7 @@ const (
 
 func relistStartMessage(localDir string) string {
 	return fmt.Sprintf("An earlier version could leave a file out if its download failed during the first sync. "+
-		"Nimbo is checking every folder in \"%s\" once to find any. You can keep working.", filepath.Base(localDir))
+		"%s is checking every folder in \"%s\" once to find any. You can keep working.", brand.Current.Name, filepath.Base(localDir))
 }
 
 func relistDoneMessage(localDir string, downloaded int) string {
