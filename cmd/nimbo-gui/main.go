@@ -114,6 +114,14 @@ func main() {
 	app := application.New(application.Options{
 		Name:        brand.Current.Name,
 		Description: brand.Current.Tagline,
+		// Name is display only on Windows, but on Linux Wails derives the GTK
+		// application id from it: pin that to the pre-rename value. Setting
+		// the id would also make it the program name (WM_CLASS / Wayland
+		// app_id), so keep that at the executable's name, as before.
+		Linux: application.LinuxOptions{
+			ApplicationID: linuxApplicationID(),
+			ProgramName:   filepath.Base(os.Args[0]),
+		},
 		Services:    []application.Service{application.NewService(svc)},
 		Assets:      application.AssetOptions{Handler: application.AssetFileServerFS(assets)},
 		// App windows host pages from the user's own server, and those pages
