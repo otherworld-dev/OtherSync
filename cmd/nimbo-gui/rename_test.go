@@ -131,3 +131,32 @@ func TestRenameNoticeText(t *testing.T) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
+
+// A settings file that can't be read must not skip the account marking: the
+// accounts mount right after, and an unmarked one would be re-registered as
+// "OtherSync - <login>" now and back to "Nimbo - <login>" once the settings
+// read again. Nothing is recorded as done and no notice is due, so a later
+// launch with readable settings finishes the job.
+func TestMigrateRenameCorruptSettings(t *testing.T) {
+	d := renameDirs(t)
+	seedAccounts(t, d, account.Account{ID: "a", ServerURL: "https://one.example.com", LoginName: "adam"})
+	if err := os.WriteFile(d.SettingsFile(), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	show, err := migrateRename(d, renamed)
+	if err == nil || show {
+		t.Fatalf("show=%v err=%v, want an error and no notice", show, err)
+	}
+	st, _ := account.LoadStore(d.AccountsFile())
+	if acc, _ := st.Find("a"); acc.LabelBrand != "Nimbo" || sidebarLabel(acc, st.Accounts) != "Nimbo - adam" {
+		t.Fatalf("account not marked: LabelBrand %q", acc.LabelBrand)
+	}
+
+	// Settings readable again: the notice is shown then, once.
+	if err := os.Remove(d.SettingsFile()); err != nil {
+		t.Fatal(err)
+	}
+	if show, err := migrateRename(d, renamed); err != nil || !show {
+		t.Fatalf("after repair: show=%v err=%v, want the notice", show, err)
+	}
+}
