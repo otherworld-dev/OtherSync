@@ -7,6 +7,11 @@ import (
 	"image/png"
 	"math"
 	"runtime"
+	"strings"
+	"sync"
+
+	"github.com/otherworld/nimbo/internal/brand"
+	"github.com/otherworld/nimbo/internal/brandmark"
 )
 
 // Tray badge colours.
@@ -33,6 +38,14 @@ var traySizes = []int{16, 20, 24, 32, 40, 48}
 // On Windows it is a multi-size .ico (Wails picks the frame for the tray's
 // size); elsewhere a 32 px PNG.
 func trayIcon(state string, frame int, badge bool) []byte {
+	if state == "sync" && stockTray() {
+		return cachedSpinIcon(frame, badge)
+	}
+	return renderTrayIcon(state, frame, badge)
+}
+
+// renderTrayIcon encodes trayImage at every size the platform wants.
+func renderTrayIcon(state string, frame int, badge bool) []byte {
 	if runtime.GOOS != "windows" {
 		var buf bytes.Buffer
 		_ = png.Encode(&buf, trayImage(state, frame, badge, 32))
@@ -50,7 +63,14 @@ func trayIcon(state string, frame int, badge bool) []byte {
 // trayImage draws the tray icon at size x size pixels.
 func trayImage(state string, frame int, badge bool, size int) *image.NRGBA {
 	img := image.NewNRGBA(image.Rect(0, 0, size, size))
-	if tile := brandFrame(size); tile != nil {
+	spin := state == "sync" && stockTray()
+	if spin {
+		// The stock mark's glyph turns in place of a corner spinner.
+		img = brandmark.DrawWith(size, brandmark.Options{
+			GlyphAngle:   trayGlyphAngle(frame),
+			GlyphSamples: 4,
+		})
+	} else if tile := brandFrame(size); tile != nil {
 		b := tile.Bounds()
 		for y := 0; y < size; y++ {
 			for x := 0; x < size; x++ {
@@ -87,6 +107,9 @@ func trayImage(state string, frame int, badge bool, size int) *image.NRGBA {
 	}
 	switch state {
 	case "sync":
+		if spin {
+			break
+		}
 		fillDisc(img, bx, by, br+ring, trayWhite)
 		// Rotating open arc with a leading arrowhead.
 		rr := br * 0.62
@@ -197,4 +220,55 @@ func distSeg(px, py, x0, y0, x1, y1 float64) float64 {
 	}
 	t := math.Max(0, math.Min(1, ((px-x0)*dx+(py-y0)*dy)/l2))
 	return math.Hypot(px-(x0+t*dx), py-(y0+t*dy))
+}
+
+// trayLoopFrames is how many frames one loop of the stock sync animation has.
+// The glyph (two arcs and two arrowheads) repeats every half turn, so a loop
+// is 180 degrees: 15 degrees a frame, a half turn every 1.44 s at the 120 ms
+// tick.
+const trayLoopFrames = 12
+
+// trayGlyphAngle is the glyph's clockwise turn, in degrees, at a frame.
+func trayGlyphAngle(frame int) float64 {
+	f := frame % trayLoopFrames
+	if f < 0 {
+		f += trayLoopFrames
+	}
+	return float64(f) * 180 / trayLoopFrames
+}
+
+// stockTray reports whether the tray carries the stock OtherSync mark, whose
+// sync state turns the glyph. Partner builds keep the nimbus with a corner
+// spinner.
+func stockTray() bool {
+	return strings.EqualFold(strings.TrimPrefix(strings.TrimSpace(brand.Current.AccentHex), "#"), "22D3C4")
+}
+
+// spinCache holds the encoded stock sync icons, drawn on first use, so a tick
+// only looks one up.
+var spinCache struct {
+	sync.Mutex
+	icons map[[2]int][]byte // frame in the loop, notification dot (0/1)
+}
+
+func cachedSpinIcon(frame int, badge bool) []byte {
+	f := frame % trayLoopFrames
+	if f < 0 {
+		f += trayLoopFrames
+	}
+	b := 0
+	if badge {
+		b = 1
+	}
+	spinCache.Lock()
+	defer spinCache.Unlock()
+	if ic, ok := spinCache.icons[[2]int{f, b}]; ok {
+		return ic
+	}
+	if spinCache.icons == nil {
+		spinCache.icons = map[[2]int][]byte{}
+	}
+	ic := renderTrayIcon("sync", f, badge)
+	spinCache.icons[[2]int{f, b}] = ic
+	return ic
 }

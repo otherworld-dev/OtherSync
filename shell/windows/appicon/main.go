@@ -35,6 +35,7 @@ import (
 	"strings"
 
 	"github.com/otherworld/nimbo/internal/brand"
+	"github.com/otherworld/nimbo/internal/brandmark"
 )
 
 // The white-label nimbus palette: a GOLDEN nimbus cloud (think Dragon Ball's
@@ -347,7 +348,7 @@ func writeICO(path string, sizes []int) {
 // otherwise the white-label nimbus.
 func draw(size int) image.Image {
 	if stockMark {
-		return drawMark(size)
+		return brandmark.Draw(size)
 	}
 	return drawNimbus(size)
 }

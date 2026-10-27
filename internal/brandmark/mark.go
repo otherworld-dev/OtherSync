@@ -1,4 +1,6 @@
-// The OtherSync family mark: a night tile carrying a teal portal ring, with two
+// Package brandmark draws the OtherSync family mark.
+//
+// The mark: a night tile carrying a teal portal ring, with two
 // paper-white sync arcs turning around a glowing centre point.
 //
 // It is drawn procedurally from the 512 px design in the Other family brand
@@ -6,7 +8,7 @@
 // downscaled. At the small sizes the sheet's hairlines would vanish (a 20 px
 // ring stroke is 0.6 px at 16 px), so those sizes use a heavier preset: no glow,
 // thicker ring and arcs, larger arrowheads, wider gaps between the arcs.
-package main
+package brandmark
 
 import (
 	"image"
@@ -16,11 +18,11 @@ import (
 
 // The sheet's colours.
 var (
-	markNightCentre = color.RGBA{0x12, 0x20, 0x2B, 0xff} // tile gradient centre
-	markNightEdge   = color.RGBA{0x0A, 0x0F, 0x16, 0xff} // tile gradient edge
-	markTeal        = color.RGBA{0x22, 0xD3, 0xC4, 0xff} // portal ring
-	markPaper       = color.RGBA{0xF2, 0xEF, 0xE6, 0xff} // glyph
-	markGlow        = color.RGBA{0x5E, 0xEA, 0xD4, 0xff} // sync point
+	nightCentre = color.RGBA{0x12, 0x20, 0x2B, 0xff} // tile gradient centre
+	nightEdge   = color.RGBA{0x0A, 0x0F, 0x16, 0xff} // tile gradient edge
+	Teal        = color.RGBA{0x22, 0xD3, 0xC4, 0xff} // portal ring
+	Paper       = color.RGBA{0xF2, 0xEF, 0xE6, 0xff} // glyph
+	Glow        = color.RGBA{0x5E, 0xEA, 0xD4, 0xff} // sync point
 )
 
 // markSpec is the mark's geometry in the 512-unit design space.
@@ -61,9 +63,9 @@ func specFor(size int) markSpec {
 	}
 }
 
-// markMargin is the transparent border around the tile, snapped to whole
+// Margin is the transparent border around the tile, snapped to whole
 // pixels so the tile's straight edges land on the pixel grid.
-func markMargin(size int) int {
+func Margin(size int) int {
 	switch {
 	case size <= 20:
 		return 0 // every pixel counts at taskbar/tray sizes
@@ -95,10 +97,23 @@ var arrowLocal = func() (l [3][2]float64) {
 	return l
 }()
 
-// drawMark renders the family mark at size x size pixels.
-func drawMark(size int) *image.NRGBA {
+// Options tunes Draw. The zero value is the static mark.
+type Options struct {
+	// GlyphAngle turns the sync glyph (both arcs and both arrowheads, not the
+	// tile, ring or centre point) clockwise about the tile centre, in degrees.
+	GlyphAngle float64
+	// GlyphSamples is the glyph's anti-aliasing grid (n x n samples per pixel).
+	// 0 or 1 uses the analytic one-pixel ramp.
+	GlyphSamples int
+}
+
+// Draw renders the family mark at size x size pixels.
+func Draw(size int) *image.NRGBA { return DrawWith(size, Options{}) }
+
+// DrawWith renders the family mark at size x size pixels with options.
+func DrawWith(size int, o Options) *image.NRGBA {
 	sp := specFor(size)
-	m := float64(markMargin(size))
+	m := float64(Margin(size))
 	f := float64(size)
 	tile := f - 2*m
 	k := tile / 512 // pixels per design unit
@@ -130,7 +145,7 @@ func drawMark(size int) *image.NRGBA {
 			du, dv := (cx-m)/k, (cy-m)/k
 			// Radial night gradient: cx 50% cy 42% r 65% of the tile.
 			t := math.Min(1, math.Hypot(du-256, dv-0.42*512)/(0.65*512))
-			r, g, b := rgbF(lerpColor(markNightCentre, markNightEdge, t))
+			r, g, b := rgbF(lerpColor(nightCentre, nightEdge, t))
 			paint := func(col color.RGBA, alpha float64) {
 				if alpha <= 0 {
 					return
@@ -142,17 +157,39 @@ func drawMark(size int) *image.NRGBA {
 			}
 			d := math.Hypot(du-256, dv-256)
 			if sp.glowA > 0 {
-				paint(markTeal, sp.glowA*cover((math.Abs(d-sp.ringR)-sp.glowW/2)*k))
+				paint(Teal, sp.glowA*cover((math.Abs(d-sp.ringR)-sp.glowW/2)*k))
 			}
-			paint(markTeal, cover((math.Abs(d-sp.ringR)-sp.ringW/2)*k))
-			arcs := math.Min(
-				sdArc(du, dv, sp.arcR, 180+sp.gapDeg, 360-sp.gapDeg),
-				sdArc(du, dv, sp.arcR, sp.gapDeg, 180-sp.gapDeg),
-			) - sp.arcW/2
-			heads := math.Min(sdTriangle(du, dv, arrows[0]), sdTriangle(du, dv, arrows[1])) - arrowPad
-			paint(markPaper, cover(math.Min(arcs, heads)*k))
+			paint(Teal, cover((math.Abs(d-sp.ringR)-sp.ringW/2)*k))
+			glyph := func(u, v float64) float64 {
+				if o.GlyphAngle != 0 {
+					// Sample the unrotated glyph at the point turned back.
+					u, v = rot(u, v, -o.GlyphAngle)
+				}
+				arcs := math.Min(
+					sdArc(u, v, sp.arcR, 180+sp.gapDeg, 360-sp.gapDeg),
+					sdArc(u, v, sp.arcR, sp.gapDeg, 180-sp.gapDeg),
+				) - sp.arcW/2
+				heads := math.Min(sdTriangle(u, v, arrows[0]), sdTriangle(u, v, arrows[1])) - arrowPad
+				return math.Min(arcs, heads)
+			}
+			if n := o.GlyphSamples; n > 1 {
+				var sum float64
+				for j := 0; j < n; j++ {
+					for i := 0; i < n; i++ {
+						sx := cx + (float64(i)+0.5)/float64(n) - 0.5
+						sy := cy + (float64(j)+0.5)/float64(n) - 0.5
+						// Each sub-sample is a point: inside or out.
+						if glyph((sx-m)/k, (sy-m)/k) <= 0 {
+							sum++
+						}
+					}
+				}
+				paint(Paper, sum/float64(n*n))
+			} else {
+				paint(Paper, cover(glyph(du, dv)*k))
+			}
 			if sp.dotR > 0 {
-				paint(markGlow, cover((d-sp.dotR)*k))
+				paint(Glow, cover((d-sp.dotR)*k))
 			}
 			img.SetNRGBA(x, y, color.NRGBA{toByte(r), toByte(g), toByte(b), toByte(a)})
 		}
@@ -219,4 +256,19 @@ func sdTriangle(px, py float64, v [3][2]float64) float64 {
 		return -d
 	}
 	return d
+}
+
+// rot turns (u, v) by deg degrees clockwise on screen about the design centre.
+func rot(u, v, deg float64) (float64, float64) {
+	s, c := math.Sincos(deg * math.Pi / 180)
+	du, dv := u-256, v-256
+	return 256 + du*c - dv*s, 256 + du*s + dv*c
+}
+
+func clamp01(f float64) float64 { return math.Max(0, math.Min(1, f)) }
+
+// lerpColor linearly interpolates between two colours.
+func lerpColor(a, b color.RGBA, t float64) color.RGBA {
+	l := func(x, y uint8) uint8 { return uint8(float64(x) + (float64(y)-float64(x))*t) }
+	return color.RGBA{l(a.R, b.R), l(a.G, b.G), l(a.B, b.B), 0xff}
 }

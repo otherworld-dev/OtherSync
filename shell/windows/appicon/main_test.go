@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/otherworld/nimbo/internal/brand"
+	"github.com/otherworld/nimbo/internal/brandmark"
 )
 
 var legacyPalette = palette{
@@ -59,8 +60,8 @@ func TestStockAccentSelectsTheMark(t *testing.T) {
 
 // The master render carries the sheet's colours where they belong.
 func TestMarkColours(t *testing.T) {
-	img := drawMark(512)
-	m := float64(markMargin(512))
+	img := brandmark.Draw(512)
+	m := float64(brandmark.Margin(512))
 	k := (512 - 2*m) / 512
 	at := func(u, v float64) color.NRGBA { return img.NRGBAAt(int(m+u*k), int(m+v*k)) }
 	want := func(name string, got color.NRGBA, c color.RGBA) {
@@ -69,9 +70,9 @@ func TestMarkColours(t *testing.T) {
 			t.Errorf("%s = %v, want %v", name, got, c)
 		}
 	}
-	want("centre dot", at(256, 256), markGlow)
-	want("ring", at(256+178, 256), markTeal)
-	want("top arc", at(256, 256-92), markPaper)
+	want("centre dot", at(256, 256), brandmark.Glow)
+	want("ring", at(256+178, 256), brandmark.Teal)
+	want("top arc", at(256, 256-92), brandmark.Paper)
 	if c := img.NRGBAAt(0, 0); c.A != 0 {
 		t.Errorf("corner should be transparent, got %v", c)
 	}
