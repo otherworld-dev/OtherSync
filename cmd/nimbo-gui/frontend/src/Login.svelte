@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Events } from "@wailsio/runtime";
   import { App } from "../bindings/github.com/otherworld/nimbo/cmd/nimbo-gui";
+  import { brand } from "./brand.svelte";
   import Setup from "./Setup.svelte";
 
   const startMsg = "Enter your Nextcloud server address to begin.";
@@ -76,7 +77,7 @@
     {#if again && target}
       <h1>Sign in again</h1>
       <p class="who">{target.address}</p>
-      <p class="note">Nimbo can't sign in to this account any more, for example because its access was
+      <p class="note">{brand.name} can't sign in to this account any more, for example because its access was
         removed in Nextcloud. Sign in again and it carries on where it left off: your folders and
         settings are kept, and nothing needs setting up again.</p>
       <button class="primary" onclick={login} disabled={busy}>Sign in again</button>

@@ -2,6 +2,7 @@
   import { kindIcon, kindLabel } from "./kinds";
   import { Events } from "@wailsio/runtime";
   import { App } from "../bindings/github.com/otherworld/nimbo/cmd/nimbo-gui";
+  import { brand } from "./brand.svelte";
   import { ask, tell, askText } from "./dialogs.svelte";
 
   type Activity = { time: string; kind: string; path: string; err: string; account: string };
@@ -610,7 +611,7 @@
 
     {:else if tab === "inuse"}
       {#if !lockingAvailable}
-        <p class="empty">Your server doesn't have the Files Lock app, so Nimbo can't tell
+        <p class="empty">Your server doesn't have the Files Lock app, so {brand.name} can't tell
           when someone else has a file open.</p>
       {:else if locks.length === 0}
         <p class="empty">Nobody else has any of your files open.</p>

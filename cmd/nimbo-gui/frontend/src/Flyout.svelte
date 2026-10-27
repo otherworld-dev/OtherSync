@@ -3,8 +3,8 @@
   import { Events } from "@wailsio/runtime";
   import { App } from "../bindings/github.com/otherworld/nimbo/cmd/nimbo-gui";
 
-  let brandName = $state("Nimbo");
-  (async () => { brandName = (await App.Brand()).name || "Nimbo"; })();
+  let brandName = $state("OtherSync");
+  (async () => { brandName = (await App.Brand()).name || "OtherSync"; })();
 
   type AppInfo = { id: string; name: string; href: string; icon: string; pinned: boolean };
 
