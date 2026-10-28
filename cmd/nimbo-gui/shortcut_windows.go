@@ -107,7 +107,8 @@ func utf16Arg(s string) (uintptr, error) {
 // It is named after brand.InstalledName, not the product name: it keeps
 // "Nimbo Apps" after the rename to OtherSync. Existing installs have their
 // shortcuts in it and the app icons the pinned ones point at (appIconsDir), so
-// a new name would orphan the shortcuts and blank every pinned icon.
+// a new name would orphan the shortcuts and blank every pinned icon. Start
+// shows it under the new name all the same (labelShortcutsFolder).
 func shortcutsDir() string {
 	appData := os.Getenv("APPDATA")
 	if appData == "" {
@@ -140,22 +141,23 @@ func removeShortcutFile(filename string) error {
 	if err := os.Remove(filepath.Join(d, filename)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	// Prune when empty. The hidden icon folder lives in here, so "empty" means
-	// "nothing but that" — and once the user has removed the last shortcut, the
-	// icons it held have nothing left to point at either.
-	if entries, err := os.ReadDir(d); err == nil {
-		spent := true
-		for _, e := range entries {
-			if e.Name() != appIconsFolder {
-				spent = false
-				break
-			}
-		}
-		if spent {
-			_ = os.RemoveAll(filepath.Join(d, appIconsFolder))
-		}
+	// Prune when empty. The hidden icon folder and the desktop.ini that names
+	// the folder live in here, so "empty" means "nothing but those" — and once
+	// the user has removed the last shortcut, the icons it held have nothing
+	// left to point at either.
+	entries, err := os.ReadDir(d)
+	if err != nil {
+		return nil
 	}
-	_ = os.Remove(d) // prune when empty (fails silently otherwise)
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name()
+	}
+	if shortcutsFolderSpent(names) {
+		_ = os.RemoveAll(filepath.Join(d, appIconsFolder))
+		unlabelShortcutsFolder(d) // read-only, which RemoveDirectory refuses
+		_ = os.Remove(d)
+	}
 	return nil
 }
 
@@ -207,6 +209,7 @@ func createAppShortcut(id, name, aumid, icoPath string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
+	labelShortcutsFolder()
 
 	// COM wants a consistent apartment; lock the thread for the whole dance.
 	runtime.LockOSThread()

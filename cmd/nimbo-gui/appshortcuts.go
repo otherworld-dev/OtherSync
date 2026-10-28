@@ -65,6 +65,7 @@ func ensureAppIconsDir(dir string) error {
 		return err
 	}
 	hidePath(dir)
+	labelShortcutsFolder() // making it may have made the Start-menu folder too
 	return nil
 }
 

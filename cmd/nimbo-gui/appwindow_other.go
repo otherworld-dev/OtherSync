@@ -28,4 +28,6 @@ func shortcutsDir() string { return "" }
 
 func hidePath(p string) {}
 
+func labelShortcutsFolder() {}
+
 func (a *App) repairAppShortcutIcons() {}

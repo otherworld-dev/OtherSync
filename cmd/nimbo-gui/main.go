@@ -260,6 +260,9 @@ func main() {
 	// identity (a re-signing, or a move to the Store build) — taskbar pins in
 	// particular, which nothing else ever rewrites. See appshortcuts.go.
 	go svc.repairAppShortcutIcons()
+	// Show the Start-menu folder under the product's name after a rename
+	// (it keeps its path). See shortcutsfolder.go.
+	go labelShortcutsFolder()
 
 	signedIn := hasAccount()
 	if !signedIn {
