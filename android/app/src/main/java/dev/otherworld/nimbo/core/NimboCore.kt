@@ -150,11 +150,15 @@ object NimboCore {
             }
             // Before anything can start the engine (which points the core at
             // defaultBaseDir): an install already in use keeps its folder.
+            // Only pinned when the account question was really answered: a
+            // signed-in install whose hasAccount() failed must not be pinned
+            // to the new name.
             val created = client
+            val signedIn = created?.let { c -> runCatching { c.hasAccount() } }
             baseDirName = BaseDirName.resolve(
                 appContext,
-                hasAccount = created != null && runCatching { created.hasAccount() }.getOrDefault(false),
-                canPin = created != null,
+                hasAccount = signedIn?.getOrNull() ?: false,
+                canPin = signedIn?.isSuccess == true,
             )
         }
     }
