@@ -1,6 +1,10 @@
-# Nimbo for Android
+# OtherSync for Android
 
-A native Android client for Nextcloud built on [Nimbo](..)'s sync
+Formerly **Nimbo for Android**: same app (package `dev.otherworld.nimbo`), new
+name. Existing installs update in place and keep their accounts and their
+`Nimbo` sync folder; new installs sync into `OtherSync`.
+
+A native Android client for Nextcloud built on [OtherSync](..)'s sync
 engine, focused on what the official Android app does poorly: **reliable
 two-way folder sync**, **folder monitoring**, and **instant push-driven
 updates** — plus launching your server's Nextcloud web apps (Deck, Notes,
@@ -117,9 +121,9 @@ real fix is a unique temp name in `internal/config`, which also affects desktop.
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE), matching Nimbo — source available for
+[PolyForm Noncommercial 1.0.0](LICENSE), matching OtherSync — source available for
 any noncommercial use; commercial use and resale need a licence from
 Otherworld Dev Ltd. The app itself is distributed commercially by Otherworld
 Dev (which, as licensor, is not bound by the noncommercial restriction).
 
-Nimbo is an independent client, not affiliated with or endorsed by Nextcloud GmbH.
+OtherSync is an independent client, not affiliated with or endorsed by Nextcloud GmbH.
