@@ -368,7 +368,7 @@ fun NimboNav(vm: NimboViewModel, supporterVm: SupporterViewModel) {
                     tier = supporter.tier,
                     notice = supporter.notice,
                     onDismissNotice = { supporterVm.clearNotice() },
-                    onOpenBusiness = { host.openUrl("https://www.nimbosync.com/business.html") },
+                    onOpenBusiness = { host.openUrl("https://www.othersync.com/business.html") },
                     onBack = { vm.navigate(state.supportReturn) },
                 ) {
                     SupportActions(Supporter.repository)
