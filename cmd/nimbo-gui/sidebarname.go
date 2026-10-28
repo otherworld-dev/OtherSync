@@ -31,14 +31,13 @@ func sidebarLabel(acc account.Account, all []account.Account) string {
 //
 // The login is shown even with a single account. Adding it only once a second
 // account appears would mean renaming the first account's entry at that point,
-// and renaming a sync root re-registers it. For the same reason an account set
-// up before the rename keeps the old product name ("Nimbo - adam", recorded as
-// acc.LabelBrand by migrateRename).
+// and renaming a sync root re-registers it.
+//
+// An account set up before the rename to OtherSync had "Nimbo - adam"; it
+// becomes "OtherSync - adam" in place, under the same sync-root id, the next
+// time its folder is mounted (on-demand) or our entry is written (live).
 func autoSidebarLabel(acc account.Account, all []account.Account) string {
 	product := brand.Current.Name
-	if acc.LabelBrand != "" {
-		product = acc.LabelBrand
-	}
 	if acc.LoginName == "" {
 		return product
 	}

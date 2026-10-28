@@ -200,23 +200,3 @@ func TestCompleteKeepsLabel(t *testing.T) {
 		t.Fatalf("re-login dropped the sidebar name: %q", stored.Label)
 	}
 }
-
-// An account set up before the rename keeps "Nimbo - <login>" as its automatic
-// sidebar name (renaming an on-demand root re-registers it), so a re-login
-// must not drop the product name that label keeps.
-func TestCompleteKeepsLabelBrand(t *testing.T) {
-	SetSecretStore(newFakeSecretStore())
-	defer SetSecretStore(keychainStore{})
-	path := filepath.Join(t.TempDir(), "accounts.json")
-	first := Account{ID: newID("https://cloud.example.com", "alice"),
-		ServerURL: "https://cloud.example.com", LoginName: "alice", LabelBrand: "Nimbo"}
-	update(t, path, func(st *Store) { st.Upsert(first) })
-	got, err := Complete(path, Credentials{Server: "https://cloud.example.com", LoginName: "alice", AppPassword: "pw2"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	st, _ := LoadStore(path)
-	if stored, _ := st.Find(got.ID); stored.LabelBrand != "Nimbo" {
-		t.Fatalf("re-login dropped the label's product name: %q", stored.LabelBrand)
-	}
-}

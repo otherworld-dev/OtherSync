@@ -28,42 +28,38 @@ func seedAccounts(t *testing.T, d config.Dirs, accs ...account.Account) {
 	}
 }
 
-// An install that ran Nimbo is told once, and its accounts keep "Nimbo -
-// <login>" as their sidebar name; a chosen name or an earlier record is left
-// alone. The next launch does nothing.
+// An install that ran Nimbo is told once; the next launch does nothing. Its
+// accounts are left as they are: their automatic sidebar names follow the
+// product name, so they say OtherSync now, and a chosen name stays.
 func TestMigrateRenameExistingInstall(t *testing.T) {
 	d := renameDirs(t)
 	seedAccounts(t, d,
 		account.Account{ID: "a", ServerURL: "https://one.example.com", LoginName: "adam"},
 		account.Account{ID: "b", ServerURL: "https://two.example.com", LoginName: "bob", Label: "Work"},
 	)
+	before, err := os.ReadFile(d.AccountsFile())
+	if err != nil {
+		t.Fatal(err)
+	}
 	show, err := migrateRename(d, renamed)
 	if err != nil || !show {
 		t.Fatalf("first launch: show=%v err=%v, want the notice", show, err)
 	}
+	if after, _ := os.ReadFile(d.AccountsFile()); string(after) != string(before) {
+		t.Errorf("accounts file changed: %s, was: %s", after, before)
+	}
+	if s, _ := d.LoadSettings(); s.RenamedFrom != "Nimbo" {
+		t.Errorf("RenamedFrom = %q, want Nimbo", s.RenamedFrom)
+	}
 	st, _ := account.LoadStore(d.AccountsFile())
-	for _, id := range []string{"a", "b"} {
-		if acc, _ := st.Find(id); acc.LabelBrand != "Nimbo" {
-			t.Errorf("account %s LabelBrand = %q, want Nimbo", id, acc.LabelBrand)
+	for id, want := range map[string]string{"a": "OtherSync - adam", "b": "Work"} {
+		if acc, _ := st.Find(id); sidebarLabel(acc, st.Accounts) != want {
+			t.Errorf("account %s label %q, want %q", id, sidebarLabel(acc, st.Accounts), want)
 		}
 	}
-	if acc, _ := st.Find("b"); acc.Label != "Work" {
-		t.Errorf("chosen name changed: %q", acc.Label)
-	}
-	if acc, _ := st.Find("a"); sidebarLabel(acc, st.Accounts) != "Nimbo - adam" {
-		t.Errorf("sidebar label changed: %q", sidebarLabel(acc, st.Accounts))
-	}
 
-	// An account added after the rename gets the new name, and is not marked
-	// by a later launch.
-	seedAccounts(t, d, account.Account{ID: "c", ServerURL: "https://one.example.com", LoginName: "cat"})
-	show, err = migrateRename(d, renamed)
-	if err != nil || show {
+	if show, err = migrateRename(d, renamed); err != nil || show {
 		t.Fatalf("second launch: show=%v err=%v, want nothing", show, err)
-	}
-	st, _ = account.LoadStore(d.AccountsFile())
-	if acc, _ := st.Find("c"); acc.LabelBrand != "" || sidebarLabel(acc, st.Accounts) != "OtherSync - cat" {
-		t.Errorf("new account: LabelBrand %q, label %q", acc.LabelBrand, sidebarLabel(acc, st.Accounts))
 	}
 }
 
@@ -92,10 +88,6 @@ func TestMigrateRenameFreshInstall(t *testing.T) {
 	seedAccounts(t, d, account.Account{ID: "a", ServerURL: "https://one.example.com", LoginName: "adam"})
 	if show, err := migrateRename(d, renamed); err != nil || show {
 		t.Fatalf("after sign-in: show=%v err=%v, want nothing", show, err)
-	}
-	st, _ := account.LoadStore(d.AccountsFile())
-	if acc, _ := st.Find("a"); acc.LabelBrand != "" {
-		t.Errorf("fresh install's account marked: %q", acc.LabelBrand)
 	}
 }
 
@@ -132,11 +124,9 @@ func TestRenameNoticeText(t *testing.T) {
 	}
 }
 
-// A settings file that can't be read must not skip the account marking: the
-// accounts mount right after, and an unmarked one would be re-registered as
-// "OtherSync - <login>" now and back to "Nimbo - <login>" once the settings
-// read again. Nothing is recorded as done and no notice is due, so a later
-// launch with readable settings finishes the job.
+// A settings file that can't be read can't say whether the rename was already
+// handled, so nothing is recorded as done and no notice is due; a later launch
+// with readable settings finishes the job (once).
 func TestMigrateRenameCorruptSettings(t *testing.T) {
 	d := renameDirs(t)
 	seedAccounts(t, d, account.Account{ID: "a", ServerURL: "https://one.example.com", LoginName: "adam"})
@@ -147,9 +137,8 @@ func TestMigrateRenameCorruptSettings(t *testing.T) {
 	if err == nil || show {
 		t.Fatalf("show=%v err=%v, want an error and no notice", show, err)
 	}
-	st, _ := account.LoadStore(d.AccountsFile())
-	if acc, _ := st.Find("a"); acc.LabelBrand != "Nimbo" || sidebarLabel(acc, st.Accounts) != "Nimbo - adam" {
-		t.Fatalf("account not marked: LabelBrand %q", acc.LabelBrand)
+	if data, _ := os.ReadFile(d.SettingsFile()); string(data) != "{not json" {
+		t.Errorf("the unreadable settings file was overwritten: %q", data)
 	}
 
 	// Settings readable again: the notice is shown then, once.

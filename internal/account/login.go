@@ -202,12 +202,10 @@ func complete(path string, creds Credentials, makeDefault bool) (Account, error)
 	err := Update(path, func(store *Store) error {
 		// A re-login replaces the whole record (Upsert), so carry the local
 		// route over — it belongs to the server, not to this sign-in — and the
-		// sidebar name the user chose, or the product name its automatic
-		// one keeps.
+		// sidebar name the user chose.
 		if prev, ok := store.Find(a.ID); ok {
 			a.Local = prev.Local
 			a.Label = prev.Label
-			a.LabelBrand = prev.LabelBrand
 		}
 		store.Upsert(a)
 		if !makeDefault {

@@ -97,8 +97,9 @@ func main() {
 			slog.Warn("file logging unavailable, using stderr only", "err", lerr)
 		}
 		setupCrashLog(filepath.Join(filepath.Dir(d.LogFile()), "crash.log"))
-		// The rename to OtherSync: before anything mounts or writes the
-		// sidebar entry, which read what it records (see migrateRename).
+		// The rename to OtherSync: before anything writes settings.json,
+		// which is how it tells an existing install from a fresh one (see
+		// migrateRename).
 		if show, rerr := migrateRename(d, brand.Current); rerr != nil {
 			slog.Warn("could not record the product rename, will try again next launch", "err", rerr)
 		} else {
