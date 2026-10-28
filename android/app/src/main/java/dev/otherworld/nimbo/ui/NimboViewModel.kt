@@ -265,7 +265,7 @@ class NimboViewModel(app: Application) : AndroidViewModel(app) {
 
     fun onPermissionsContinue() {
         if (!_state.value.hasAllFiles) {
-            setMessage("All files access is required before Nimbo can sync")
+            setMessage("All files access is required before OtherSync can sync")
             return
         }
         _state.update { it.copy(route = Route.HOME) }

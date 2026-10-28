@@ -177,7 +177,7 @@ class MainActivity : ComponentActivity(), NimboHost {
         if (text.isBlank()) return
         try {
             val clipboard = getSystemService(ClipboardManager::class.java) ?: return
-            clipboard.setPrimaryClip(ClipData.newPlainText("Nimbo", text))
+            clipboard.setPrimaryClip(ClipData.newPlainText("OtherSync", text))
             // Android 13+ shows its own copy confirmation; a second one is noise.
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
                 Toast.makeText(this, confirmation, Toast.LENGTH_SHORT).show()

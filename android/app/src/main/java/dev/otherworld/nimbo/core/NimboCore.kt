@@ -548,9 +548,9 @@ object NimboCore {
     private fun notInitialised(): IllegalStateException {
         val cause = initError
         return if (cause != null) {
-            IllegalStateException("Nimbo core failed to start: ${cause.message}", cause)
+            IllegalStateException("OtherSync core failed to start: ${cause.message}", cause)
         } else {
-            IllegalStateException("Nimbo core is not initialised")
+            IllegalStateException("OtherSync core is not initialised")
         }
     }
 

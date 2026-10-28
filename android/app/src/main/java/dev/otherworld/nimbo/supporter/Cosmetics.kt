@@ -8,7 +8,7 @@ package dev.otherworld.nimbo.supporter
 
 /** One launcher alias per icon (see AndroidManifest.xml). */
 enum class AppIcon(val aliasName: String, val label: String) {
-    DEFAULT("dev.otherworld.nimbo.LauncherDefault", "Nimbo"),
+    DEFAULT("dev.otherworld.nimbo.LauncherDefault", "OtherSync"),
     FOREST("dev.otherworld.nimbo.LauncherForest", "Forest"),
     EMBER("dev.otherworld.nimbo.LauncherEmber", "Ember"),
     SLATE("dev.otherworld.nimbo.LauncherSlate", "Slate");

@@ -352,7 +352,7 @@ private fun DeleteDialog(row: FileRow, onDismiss: () -> Unit, onConfirm: () -> U
                     Spacer(Modifier.height(8.dp))
                     Text(
                         "It's in a synced folder, so the copy on this phone goes too " +
-                            "the next time Nimbo syncs.",
+                            "the next time OtherSync syncs.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -195,7 +195,7 @@ class SyncService : LifecycleService() {
                 Log.w(TAG, "startEngine failed", error)
                 Notifications.showAlert(
                     this@SyncService,
-                    "Nimbo could not start",
+                    "OtherSync could not start",
                     error.message ?: "The sync engine failed to start.",
                     "",
                 )
@@ -217,7 +217,7 @@ class SyncService : LifecycleService() {
                     Log.w(TAG, "startEngine (for sync now) failed", error)
                     Notifications.showAlert(
                         this@SyncService,
-                        "Nimbo could not start",
+                        "OtherSync could not start",
                         error?.message ?: "The sync engine failed to start.",
                         "",
                     )
