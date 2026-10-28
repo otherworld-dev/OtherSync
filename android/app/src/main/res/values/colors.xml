@@ -5,7 +5,8 @@
     window background that is visible for the first frame or two.
 -->
 <resources>
-    <!-- Nimbo indigo, the brand accent shared with the desktop app. -->
-    <color name="nimbo_indigo">#FF5856E0</color>
-    <color name="nimbo_window_background">#FFFFFFFF</color>
+    <!-- OtherSync deep teal, the brand accent on light surfaces (BrandDeepTeal
+         in Theme.kt). The window theme is light, so this rather than #22D3C4. -->
+    <color name="brand_accent">#FF0D9488</color>
+    <color name="window_background">#FFFFFFFF</color>
 </resources>

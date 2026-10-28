@@ -36,6 +36,23 @@ class CosmeticsTest {
         assertEquals(AccentChoice.FOLLOW_NEXTCLOUD, AccentChoice.fromStored("GOLD"))
     }
 
+    @Test
+    fun `a supporter who saved Indigo before the rename still gets Indigo`() {
+        // SupporterPrefs stores the enum name; the Nimbo-era colour must survive.
+        val saved = AccentChoice.fromStored("INDIGO")
+        assertEquals(AccentChoice.INDIGO, saved)
+        assertEquals(0xFF5856E0, saved.argb)
+        assertEquals(AccentChoice.INDIGO, effectiveAccent(saved, Perks.of(SupporterTier.PATRON)))
+    }
+
+    @Test
+    fun `every saved accent name still loads`() {
+        // Renaming an entry would silently reset that supporter's choice.
+        for (name in listOf("FOLLOW_NEXTCLOUD", "INDIGO", "TEAL", "FOREST", "CRIMSON", "OCEAN", "VIOLET")) {
+            assertEquals(name, AccentChoice.fromStored(name).name)
+        }
+    }
+
     // WCAG relative luminance — the yardstick the fixed accents are held to.
     private fun channel(argb: Long, shift: Int): Double {
         val c = ((argb shr shift) and 0xFF) / 255.0
