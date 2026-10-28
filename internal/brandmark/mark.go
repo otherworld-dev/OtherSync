@@ -105,20 +105,40 @@ type Options struct {
 	// GlyphSamples is the glyph's anti-aliasing grid (n x n samples per pixel).
 	// 0 or 1 uses the analytic one-pixel ramp.
 	GlyphSamples int
+	// Square fills the whole canvas with the tile: no margin and square
+	// corners, for surfaces that apply their own mask (the Google Play icon).
+	Square bool
 }
 
-// Draw renders the family mark at size x size pixels.
-func Draw(size int) *image.NRGBA { return DrawWith(size, Options{}) }
+// Geometry is the mark's shape at one pixel size, in the 512-unit design
+// space centred on (256,256), for drawing it as vectors (the Android icons).
+type Geometry struct {
+	RingR, RingW float64 // portal ring radius and stroke
+	GlowW, GlowA float64 // soft glow ring stroke and opacity (0 = none)
+	ArcR, ArcW   float64 // sync arcs: radius and stroke (round caps)
+	// The top arc runs clockwise from 180+GapDeg to 360-GapDeg degrees and the
+	// bottom one from GapDeg to 180-GapDeg (0 = +x, y down).
+	GapDeg float64
+	// Arrows are the two arrowhead triangles; each is also stroked ArrowPad*2
+	// wide with round joins, as the master strokes its polygons.
+	Arrows   [2][3][2]float64
+	ArrowPad float64
+	DotR     float64 // centre point radius (0 = none)
+}
 
-// DrawWith renders the family mark at size x size pixels with options.
-func DrawWith(size int, o Options) *image.NRGBA {
+// GeometryFor returns the geometry Draw uses at a pixel size (64 and up is
+// the master, othersync.svg exactly).
+func GeometryFor(size int) Geometry {
 	sp := specFor(size)
-	m := float64(Margin(size))
-	f := float64(size)
-	tile := f - 2*m
-	k := tile / 512 // pixels per design unit
-	// The two arrowheads, in design units.
-	var arrows [2][3][2]float64
+	return Geometry{
+		RingR: sp.ringR, RingW: sp.ringW, GlowW: sp.glowW, GlowA: sp.glowA,
+		ArcR: sp.arcR, ArcW: sp.arcW, GapDeg: sp.gapDeg,
+		Arrows: arrowheads(sp), ArrowPad: 3.0 * sp.arrow, DotR: sp.dotR,
+	}
+}
+
+// arrowheads places the master arrowhead at the end of each arc, scaled.
+func arrowheads(sp markSpec) (arrows [2][3][2]float64) {
 	phi := -sp.gapDeg * math.Pi / 180 // end of the top arc (right-hand side)
 	ux, uy := math.Cos(phi), math.Sin(phi)
 	vx, vy := -uy, ux
@@ -129,6 +149,24 @@ func DrawWith(size int, o Options) *image.NRGBA {
 		arrows[0][i] = [2]float64{x, y}
 		arrows[1][i] = [2]float64{512 - x, 512 - y}
 	}
+	return arrows
+}
+
+// Draw renders the family mark at size x size pixels.
+func Draw(size int) *image.NRGBA { return DrawWith(size, Options{}) }
+
+// DrawWith renders the family mark at size x size pixels with options.
+func DrawWith(size int, o Options) *image.NRGBA {
+	sp := specFor(size)
+	m := float64(Margin(size))
+	if o.Square {
+		m, sp.cornerR = 0, 0
+	}
+	f := float64(size)
+	tile := f - 2*m
+	k := tile / 512 // pixels per design unit
+	// The two arrowheads, in design units.
+	arrows := arrowheads(sp)
 	// The master strokes its arrowheads 6 wide with round joins.
 	arrowPad := 3.0 * sp.arrow
 

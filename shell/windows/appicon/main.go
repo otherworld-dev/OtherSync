@@ -8,7 +8,10 @@
 //	go run . logos <dir>    # MSIX PNG logo set into <dir>
 //	go run . [-accent #hex] [-name ic_launcher_x] android [dir]
 //	                        # Android adaptive-icon layers; defaults to
-//	                        # ../../../android/app/src/main/res
+//	                        # ../../../android/app/src/main/res; the stock
+//	                        # brand also writes the notification icon
+//	go run . play <file>    # the 512 px Google Play icon
+//	                        # (../../../android/store/icon-512.png)
 //
 //	The Android supporter icon variants (run from this directory):
 //
@@ -26,6 +29,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	stdraw "image/draw"
 	"image/png"
 	"math"
 	"os"
@@ -280,18 +284,17 @@ func logoSizes() map[string]int {
 }
 
 // writePlayIcon writes the Google Play listing icon: 512 px and square, with
-// the tile gradient running full-bleed under the nimbus, as Play rounds the
-// corners itself and asks for artwork without its own corners or shadow.
+// the tile running full-bleed, as Play rounds the corners itself and asks for
+// artwork without its own corners or shadow.
 func writePlayIcon(path string) {
 	const size = 512
 	img := image.NewRGBA(image.Rect(0, 0, size, size))
-	for y := 0; y < size; y++ {
-		row := lerpColor(indigoTop, indigoBot, float64(y)/float64(size-1))
-		for x := 0; x < size; x++ {
-			img.Set(x, y, row)
-		}
+	if stockMark {
+		// The mark's tile filling the square, at the master's proportions.
+		stdraw.Draw(img, img.Bounds(), brandmark.DrawWith(size, brandmark.Options{Square: true}), image.Point{}, stdraw.Src)
+	} else {
+		paintPlayNimbus(img, size)
 	}
-	drawCloud(img, size)
 	// Play's spec asks for a 32-bit PNG, and Go's encoder writes plain RGB when
 	// every pixel is opaque. One corner pixel a shade off opaque keeps the alpha
 	// channel, and Play's rounded mask hides that corner anyway.
@@ -305,6 +308,18 @@ func writePlayIcon(path string) {
 	if err := png.Encode(f, img); err != nil {
 		panic(err)
 	}
+}
+
+// paintPlayNimbus paints the white-label Play icon: the tile gradient
+// full-bleed under the nimbus.
+func paintPlayNimbus(img *image.RGBA, size int) {
+	for y := 0; y < size; y++ {
+		row := lerpColor(indigoTop, indigoBot, float64(y)/float64(size-1))
+		for x := 0; x < size; x++ {
+			img.Set(x, y, row)
+		}
+	}
+	drawCloud(img, float64(size))
 }
 
 func writeICO(path string, sizes []int) {

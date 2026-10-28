@@ -9,6 +9,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -231,5 +232,92 @@ func TestWriteAndroidDefaultLeavesTheHandWrittenIcon(t *testing.T) {
 	// ic_launcher.xml carries a hand-written comment; the generator must not replace it.
 	if _, err := os.Stat(filepath.Join(res, "mipmap-anydpi-v26", "ic_launcher.xml")); !os.IsNotExist(err) {
 		t.Fatalf("default name wrote mipmap-anydpi-v26/ic_launcher.xml")
+	}
+}
+
+// The committed Android icons are the generator's output: the stock adaptive
+// layers and notification icon, and each supporter variant at its accent.
+// Catches a generator change that was not re-run (or a hand edit).
+func TestCommittedAndroidIconsMatchGenerator(t *testing.T) {
+	committed := filepath.Join("..", "..", "..", "android", "app", "src", "main", "res")
+	defer setAccent(brand.Current.AccentHex)
+	cases := []struct{ accent, name string }{
+		{stockAccent, "ic_launcher"},
+		{"#2E7D5B", "ic_launcher_forest"},
+		{"#B4441C", "ic_launcher_ember"},
+		{"#3D4B5C", "ic_launcher_slate"},
+	}
+	for _, c := range cases {
+		setAccent(c.accent)
+		res := t.TempDir()
+		writeAndroid(res, c.name)
+		files := []string{c.name + "_background.xml", c.name + "_foreground.xml", c.name + "_monochrome.xml"}
+		if c.name == "ic_launcher" {
+			files = append(files, "ic_notification.xml")
+		}
+		for _, f := range files {
+			want, err := os.ReadFile(filepath.Join(res, "drawable", f))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.ReadFile(filepath.Join(committed, "drawable", f))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(bytes.ReplaceAll(got, []byte("\r\n"), []byte("\n")), want) {
+				t.Errorf("%s differs from the generator: run go run . android (accent %s, -name %s)", f, c.accent, c.name)
+			}
+		}
+	}
+}
+
+// The stock foreground's ring (outer edge) spans ringSafeFill of the 66dp
+// safe zone, and the glow stays inside it.
+func TestAndroidMarkFitsTheSafeZone(t *testing.T) {
+	g := brandmark.GeometryFor(512)
+	s := markScale(g)
+	ring := 2 * (g.RingR + g.RingW/2) * s
+	if math.Abs(ring-ringSafeFill*adaptiveSafe) > 0.01 {
+		t.Errorf("ring spans %.2fdp, want %.2fdp", ring, ringSafeFill*adaptiveSafe)
+	}
+	if glow := 2 * (g.RingR + g.GlowW/2) * s; glow > adaptiveSafe {
+		t.Errorf("glow spans %.2fdp, past the %vdp safe zone", glow, adaptiveSafe)
+	}
+}
+
+// The stock Play icon is the mark's tile filling the square: opaque night in
+// the corners (Play masks them), the ring where the master has it.
+func TestPlayIconIsTheSquareMark(t *testing.T) {
+	defer setAccent(brand.Current.AccentHex)
+	setAccent(stockAccent)
+	path := filepath.Join(t.TempDir(), "play.png")
+	writePlayIcon(path)
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	img, err := png.Decode(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if img.Bounds().Dx() != 512 {
+		t.Fatalf("size %v", img.Bounds())
+	}
+	_, _, _, a := img.At(511, 511).RGBA()
+	if a != 0xffff {
+		t.Errorf("corner is not opaque (alpha %d)", a)
+	}
+	r, g, b, _ := img.At(256+178, 256).RGBA()
+	if want := brandmark.Teal; d(uint8(r>>8), want.R) > 2 || d(uint8(g>>8), want.G) > 2 || d(uint8(b>>8), want.B) > 2 {
+		t.Errorf("ring pixel %02x%02x%02x, want teal", r>>8, g>>8, b>>8)
+	}
+	committed, err := os.ReadFile(filepath.Join("..", "..", "..", "android", "store", "icon-512.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gen, _ := os.ReadFile(path)
+	if !bytes.Equal(committed, gen) {
+		t.Errorf("android/store/icon-512.png differs from the generator: run go run . play ../../../android/store/icon-512.png")
 	}
 }

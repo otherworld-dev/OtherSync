@@ -1,6 +1,8 @@
 // Android adaptive-icon output.
 //
-// The same artwork as the desktop .ico, emitted as VectorDrawables instead of
+// The stock brand's layers are the OtherSync mark (android_mark.go); this file
+// draws the white-label nimbus, used for any other accent and for the
+// supporter icon variants. The same artwork as the desktop .ico, emitted as VectorDrawables instead of
 // PNGs: the Android project deliberately carries no raster assets, and this
 // icon is circles, a rectangle and a linear gradient — all of which a vector
 // expresses exactly. One source of truth, so a white-label accent will later
@@ -93,9 +95,14 @@ func writeAndroid(res, name string) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		panic(err)
 	}
-	writeFile(filepath.Join(dir, name+"_background.xml"), backgroundVector())
-	writeFile(filepath.Join(dir, name+"_foreground.xml"), cloudVector(false))
-	writeFile(filepath.Join(dir, name+"_monochrome.xml"), cloudVector(true))
+	if stockMark {
+		// The stock brand: the OtherSync mark, and the notification icon with it.
+		writeAndroidMark(dir, name)
+	} else {
+		writeFile(filepath.Join(dir, name+"_background.xml"), backgroundVector())
+		writeFile(filepath.Join(dir, name+"_foreground.xml"), cloudVector(false))
+		writeFile(filepath.Join(dir, name+"_monochrome.xml"), cloudVector(true))
+	}
 	fmt.Println("wrote adaptive icon layers to", dir)
 
 	if name == "ic_launcher" {
