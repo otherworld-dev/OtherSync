@@ -121,11 +121,17 @@ func ShellNotifyCreated(path string, isDir bool) {
 //   - Unmanifested TEST binaries stay disguised unless they opt in; tests
 //     probing across a Disconnect use fsutil (exempt) as the observer.
 
-// providerName is the ProviderName every sync root is registered with: the
-// product's name, which Windows shows beside the root. It is a display string,
-// not part of how a root is matched (that is the path, the identity blob and
-// providerID), and registerRoot always passes CF_REGISTER_FLAG_UPDATE, so an
-// existing root registered as "Nimbo" takes the new name in place.
+// providerName is the ProviderName a new sync root is registered with: the
+// product's name. It is not part of how a root is matched (that is the path,
+// the identity blob and providerID), and nothing reads it back.
+//
+// Windows keeps the name a root was FIRST registered with: a re-registration
+// with CF_REGISTER_FLAG_UPDATE succeeds but leaves it as it was (measured on
+// the VM, 2026-10-28: a root registered as "Nimbo" still reports "Nimbo" via
+// CfGetSyncRootInfoByPath after an OtherSync build re-registered it). Changing
+// it would mean unregistering the root, which is never worth it (#569), so
+// roots made before the rename keep "Nimbo" there; the name people see in
+// Explorer is the shell registration's display name, which does update.
 func providerName() string { return brand.Current.Name }
 
 // providerID identifies Nimbo as the sync provider (fixed GUID).
