@@ -26,6 +26,8 @@ import (
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
+
+	"github.com/otherworld/nimbo/internal/brand"
 )
 
 var (
@@ -119,10 +121,12 @@ func ShellNotifyCreated(path string, isDir bool) {
 //   - Unmanifested TEST binaries stay disguised unless they opt in; tests
 //     probing across a Disconnect use fsutil (exempt) as the observer.
 
-// providerName is the ProviderName every sync root is registered with. It is
-// part of the registration Windows already has for existing roots, so it stays
-// "Nimbo" after the rename to OtherSync.
-const providerName = "Nimbo"
+// providerName is the ProviderName every sync root is registered with: the
+// product's name, which Windows shows beside the root. It is a display string,
+// not part of how a root is matched (that is the path, the identity blob and
+// providerID), and registerRoot always passes CF_REGISTER_FLAG_UPDATE, so an
+// existing root registered as "Nimbo" takes the new name in place.
+func providerName() string { return brand.Current.Name }
 
 // providerID identifies Nimbo as the sync provider (fixed GUID).
 // {7C9F2B41-5E3A-4D88-9C16-2A0F8B7D3E20}
@@ -223,7 +227,7 @@ func registerRoot(path string, hydration, population uint16) error {
 	if err != nil {
 		return err
 	}
-	name, _ := windows.UTF16PtrFromString(providerName)
+	name, _ := windows.UTF16PtrFromString(providerName())
 	ver, _ := windows.UTF16PtrFromString("1.0")
 	idW, err := windows.UTF16FromString(path) // identity blob = the root path
 	if err != nil {
@@ -741,12 +745,12 @@ func Purge(path string) error {
 	hydrate := func(context.Context, []byte, int64, int64) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("cfapi: purge (hydration disabled)")
 	}
-	connKey, err := MountStream(path, "Nimbo", "", hydrate, nil)
+	connKey, err := MountStream(path, brand.Current.Name, "", hydrate, nil)
 	if err != nil {
 		// A stale registration can block re-register; clear it and retry once.
 		UnregisterShellSyncRoot(path)
 		_ = UnregisterSyncRoot(path)
-		connKey, err = MountStream(path, "Nimbo", "", hydrate, nil)
+		connKey, err = MountStream(path, brand.Current.Name, "", hydrate, nil)
 	}
 	if err != nil {
 		// No provider available; unregister and remove best-effort.
