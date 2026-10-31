@@ -34,7 +34,7 @@
   #define Publisher "Otherworld Dev Ltd"
 #endif
 #ifndef FeedUrl
-  #define FeedUrl "https://github.com/otherworld-dev/Nimbo/releases/latest/download/Nimbo.appinstaller"
+  #define FeedUrl "https://github.com/otherworld-dev/OtherSync/releases/latest/download/Nimbo.appinstaller"
 #endif
 
 [Setup]

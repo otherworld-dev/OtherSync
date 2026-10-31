@@ -18,7 +18,7 @@ It talks to Nextcloud entirely over documented HTTP APIs:
 
 ## Support
 
-- [Report an issue](https://github.com/otherworld-dev/Nimbo/issues)
+- [Report an issue](https://github.com/otherworld-dev/OtherSync/issues)
 
 ## What's new
 
@@ -217,7 +217,7 @@ contact@otherworld.dev.
 ## Contributing
 
 Bug reports and feature requests are welcome on the
-[issue tracker](https://github.com/otherworld-dev/Nimbo/issues).
+[issue tracker](https://github.com/otherworld-dev/OtherSync/issues).
 
 This repository carries OtherSync's (formerly Nimbo's) real development history. `dev` is the default
 branch, where changes are integrated, and `main` only changes when a release is

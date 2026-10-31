@@ -57,10 +57,10 @@ func TestStockRenameKeepsIdentity(t *testing.T) {
 	if got := Current.InstalledName(); got != "Nimbo" {
 		t.Errorf("InstalledName() = %q, want Nimbo (Start-menu folder, icon folder, existing labels)", got)
 	}
-	if want := "https://github.com/otherworld-dev/Nimbo/releases/latest/download/Nimbo.appinstaller"; Current.FeedURL != want {
+	if want := "https://github.com/otherworld-dev/OtherSync/releases/latest/download/Nimbo.appinstaller"; Current.FeedURL != want {
 		t.Errorf("FeedURL = %q, want %q", Current.FeedURL, want)
 	}
-	if want := "https://api.github.com/repos/otherworld-dev/Nimbo"; Current.APIBase != want {
+	if want := "https://api.github.com/repos/otherworld-dev/OtherSync"; Current.APIBase != want {
 		t.Errorf("APIBase = %q, want %q", Current.APIBase, want)
 	}
 }

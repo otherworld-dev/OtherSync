@@ -6,8 +6,8 @@
   "website": "https://www.othersync.com",
   "supportEmail": "contact@otherworld.dev",
   "helpUrl": "https://www.othersync.com/help/",
-  "feedUrl": "https://github.com/otherworld-dev/Nimbo/releases/latest/download/Nimbo.appinstaller",
-  "apiBase": "https://api.github.com/repos/otherworld-dev/Nimbo",
+  "feedUrl": "https://github.com/otherworld-dev/OtherSync/releases/latest/download/Nimbo.appinstaller",
+  "apiBase": "https://api.github.com/repos/otherworld-dev/OtherSync",
   "accentHex": "#22D3C4",
   "appId": "Nimbo"
 }

@@ -4993,7 +4993,7 @@ func (a *App) ReportProblem() string {
 		return err.Error()
 	}
 	revealPath(out)
-	openURL("https://github.com/otherworld-dev/Nimbo/issues/new?template=bug_report.yml")
+	openURL("https://github.com/otherworld-dev/OtherSync/issues/new?template=bug_report.yml")
 	return ""
 }
 
