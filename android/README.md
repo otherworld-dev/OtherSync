@@ -88,9 +88,9 @@ the generator disagree. From `shell/windows/appicon`:
 ```
 go run . android                                  # stock icon + notification icon
 go run . play ../../../android/store/icon-512.png  # Play listing icon
-go run . -accent "#2E7D5B" -name ic_launcher_forest android
-go run . -accent "#B4441C" -name ic_launcher_ember android
-go run . -accent "#3D4B5C" -name ic_launcher_slate android
+go run . -variant forest android                  # supporter icons: the mark
+go run . -variant ember android                   # in their own palettes
+go run . -variant slate android
 ```
 
 ## Status

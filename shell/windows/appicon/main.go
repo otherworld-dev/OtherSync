@@ -6,18 +6,20 @@
 //
 //	go run .                # writes ../../../cmd/nimbo-gui/assets/nimbo.ico
 //	go run . logos <dir>    # MSIX PNG logo set into <dir>
-//	go run . [-accent #hex] [-name ic_launcher_x] android [dir]
+//	go run . [-accent #hex] [-name ic_launcher_x | -variant v] android [dir]
 //	                        # Android adaptive-icon layers; defaults to
 //	                        # ../../../android/app/src/main/res; the stock
 //	                        # brand also writes the notification icon
 //	go run . play <file>    # the 512 px Google Play icon
 //	                        # (../../../android/store/icon-512.png)
 //
-//	The Android supporter icon variants (run from this directory):
+//	The Android supporter icon variants, the OtherSync mark in the palettes
+//	of markVariants (android_mark.go), written as ic_launcher_<variant>
+//	(run from this directory):
 //
-//	  go run . -accent "#2E7D5B" -name ic_launcher_forest android
-//	  go run . -accent "#B4441C" -name ic_launcher_ember android
-//	  go run . -accent "#3D4B5C" -name ic_launcher_slate android
+//	  go run . -variant forest android
+//	  go run . -variant ember android
+//	  go run . -variant slate android
 //
 // Committed; re-run only to change the artwork.
 package main
@@ -62,6 +64,7 @@ func main() {
 	// icon without editing brand.json.
 	accent := flag.String("accent", "", "brand accent hex (#RRGGBB) to use instead of brand.json")
 	name := flag.String("name", "ic_launcher", "android: base name of the icon resources (variants: ic_launcher_<x>)")
+	variant := flag.String("variant", "", "android: write the supporter icon variant ic_launcher_<variant> (forest, ember, slate)")
 	flag.Parse()
 	hex := brand.Current.AccentHex
 	if *accent != "" {
@@ -87,6 +90,14 @@ func main() {
 		res := filepath.Join("..", "..", "..", "android", "app", "src", "main", "res")
 		if len(args) >= 2 {
 			res = args[1]
+		}
+		if *variant != "" {
+			if _, ok := markVariants[*variant]; !ok {
+				fmt.Fprintln(os.Stderr, "-variant must be forest, ember or slate")
+				os.Exit(2)
+			}
+			writeAndroidVariant(res, *variant)
+			return
 		}
 		if !regexp.MustCompile(`^[a-z][a-z0-9_]*$`).MatchString(*name) {
 			fmt.Fprintln(os.Stderr, "-name must be a lowercase Android resource name")

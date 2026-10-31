@@ -236,39 +236,110 @@ func TestWriteAndroidDefaultLeavesTheHandWrittenIcon(t *testing.T) {
 }
 
 // The committed Android icons are the generator's output: the stock adaptive
-// layers and notification icon, and each supporter variant at its accent.
+// layers and notification icon, and each supporter variant (the mark in its
+// markVariants palette) with its adaptive-icon wrapper.
 // Catches a generator change that was not re-run (or a hand edit).
 func TestCommittedAndroidIconsMatchGenerator(t *testing.T) {
 	committed := filepath.Join("..", "..", "..", "android", "app", "src", "main", "res")
 	defer setAccent(brand.Current.AccentHex)
-	cases := []struct{ accent, name string }{
-		{stockAccent, "ic_launcher"},
-		{"#2E7D5B", "ic_launcher_forest"},
-		{"#B4441C", "ic_launcher_ember"},
-		{"#3D4B5C", "ic_launcher_slate"},
+	compare := func(res, f, how string) {
+		t.Helper()
+		want, err := os.ReadFile(filepath.Join(res, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(filepath.Join(committed, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(bytes.ReplaceAll(got, []byte("\r\n"), []byte("\n")), want) {
+			t.Errorf("%s differs from the generator: run go run . %s", f, how)
+		}
 	}
-	for _, c := range cases {
-		setAccent(c.accent)
+	layers := func(name string) []string {
+		return []string{"drawable/" + name + "_background.xml", "drawable/" + name + "_foreground.xml", "drawable/" + name + "_monochrome.xml"}
+	}
+
+	setAccent(stockAccent)
+	res := t.TempDir()
+	writeAndroid(res, "ic_launcher")
+	for _, f := range append(layers("ic_launcher"), "drawable/ic_notification.xml") {
+		compare(res, f, "android")
+	}
+
+	for _, v := range []string{"forest", "ember", "slate"} {
+		if _, ok := markVariants[v]; !ok {
+			t.Fatalf("no palette for the %s variant", v)
+		}
 		res := t.TempDir()
-		writeAndroid(res, c.name)
-		files := []string{c.name + "_background.xml", c.name + "_foreground.xml", c.name + "_monochrome.xml"}
-		if c.name == "ic_launcher" {
-			files = append(files, "ic_notification.xml")
+		writeAndroidVariant(res, v)
+		name := "ic_launcher_" + v
+		for _, f := range append(layers(name), "mipmap-anydpi-v26/"+name+".xml") {
+			compare(res, f, "-variant "+v+" android")
 		}
-		for _, f := range files {
-			want, err := os.ReadFile(filepath.Join(res, "drawable", f))
-			if err != nil {
-				t.Fatal(err)
+		// A variant writes only its own files: the notification icon is the stock one.
+		if _, err := os.Stat(filepath.Join(res, "drawable", "ic_notification.xml")); !os.IsNotExist(err) {
+			t.Errorf("-variant %s wrote ic_notification.xml", v)
+		}
+	}
+}
+
+// The supporter variants are the stock mark recoloured: the same geometry and
+// the same themed-icon silhouette, a palette of their own, and a ring that
+// stands out from its tile enough to read at 48 px.
+func TestMarkVariantsAreTheMarkRecoloured(t *testing.T) {
+	body := func(xml string) string { return xml[strings.Index(xml, "<vector"):] }
+	stockMono := body(markForegroundVector(stockPalette, true))
+	strip := func(xml string, p markPalette) string {
+		for _, c := range []color.RGBA{p.ring, p.glyph, p.dot} {
+			xml = strings.ReplaceAll(xml, hexOf(c), "#COLOUR")
+		}
+		return body(xml)
+	}
+	stockFg := strip(markForegroundVector(stockPalette, false), stockPalette)
+	seen := map[color.RGBA]string{stockPalette.ring: "stock"}
+	for v, p := range markVariants {
+		if p.name != v {
+			t.Errorf("variant %s carries name %q", v, p.name)
+		}
+		if got := body(markForegroundVector(p, true)); got != stockMono {
+			t.Errorf("%s: the monochrome layer differs from the stock one", v)
+		}
+		if got := strip(markForegroundVector(p, false), p); got != stockFg {
+			t.Errorf("%s: the foreground's geometry differs from the stock mark's", v)
+		}
+		if other, dup := seen[p.ring]; dup {
+			t.Errorf("%s: ring colour %s is the same as %s's", v, hexOf(p.ring), other)
+		}
+		seen[p.ring] = v
+		for _, tile := range []color.RGBA{p.tileCentre, p.tileEdge} {
+			if c := contrast(p.ring, tile); c < 7 {
+				t.Errorf("%s: ring %s on tile %s is %.1f:1, want at least 7:1", v, hexOf(p.ring), hexOf(tile), c)
 			}
-			got, err := os.ReadFile(filepath.Join(committed, "drawable", f))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !bytes.Equal(bytes.ReplaceAll(got, []byte("\r\n"), []byte("\n")), want) {
-				t.Errorf("%s differs from the generator: run go run . android (accent %s, -name %s)", f, c.accent, c.name)
+			if c := contrast(p.glyph, tile); c < 10 {
+				t.Errorf("%s: glyph %s on tile %s is %.1f:1, want at least 10:1", v, hexOf(p.glyph), hexOf(tile), c)
 			}
 		}
 	}
+}
+
+// contrast is the WCAG contrast ratio of two opaque colours.
+func contrast(a, b color.RGBA) float64 {
+	lum := func(c color.RGBA) float64 {
+		ch := func(v uint8) float64 {
+			x := float64(v) / 255
+			if x <= 0.03928 {
+				return x / 12.92
+			}
+			return math.Pow((x+0.055)/1.055, 2.4)
+		}
+		return 0.2126*ch(c.R) + 0.7152*ch(c.G) + 0.0722*ch(c.B)
+	}
+	la, lb := lum(a), lum(b)
+	if la < lb {
+		la, lb = lb, la
+	}
+	return (la + 0.05) / (lb + 0.05)
 }
 
 // The stock foreground's ring (outer edge) spans ringSafeFill of the 66dp
