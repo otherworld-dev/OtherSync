@@ -3,14 +3,21 @@
 // Package shellmenu manages the Windows Explorer right-click "Nimbo" cascading
 // menu. It registers (under HKCU, no admin) a parent "Nimbo" submenu whose
 // children launch the app: "Share" (--share), "Version history" (--versions,
-// files only), and the on-demand actions "Always keep on this device" (--keep)
-// and "Free up space" (--free). Cascading menus are built with the documented
-// SubCommands + nested `shell` subkey technique (no COM).
+// files only), the on-demand actions "Always keep on this device" (--keep) and
+// "Free up space" (--free), and "Sync this first" (--sync-first). Cascading
+// menus are built with the documented SubCommands + nested `shell` subkey
+// technique (no COM).
 package shellmenu
 
-import "golang.org/x/sys/windows/registry"
+import (
+	"github.com/otherworld/nimbo/internal/brand"
+	"golang.org/x/sys/windows/registry"
+)
 
-const (
+// The keys under HKCU the menu is written to. Variables so a test can write
+// somewhere other than the real Explorer menu. The key names stay "Nimbo"
+// after the rename to OtherSync (only the MUIVerb title follows the brand).
+var (
 	fileRoot = `Software\Classes\*\shell\Nimbo`
 	dirRoot  = `Software\Classes\Directory\shell\Nimbo`
 	// legacy single verb from earlier versions, removed on (re)register.
@@ -36,7 +43,7 @@ func Register(exePath string) error {
 	// Remove any prior layout so children/labels don't go stale.
 	_ = Unregister()
 
-	// Files: Nimbo ▸ Share / Version history.
+	// Files: Nimbo ▸ Share / Version history / keep / free / sync first.
 	if err := writeParent(fileRoot, exePath); err != nil {
 		return err
 	}
@@ -52,7 +59,10 @@ func Register(exePath string) error {
 	if err := writeChild(fileRoot, "04free", "Free up space", exePath, "--free"); err != nil {
 		return err
 	}
-	// Folders: Nimbo ▸ Share / keep / free (no versions for folders).
+	if err := writeChild(fileRoot, "05syncfirst", "Sync this first", exePath, "--sync-first"); err != nil {
+		return err
+	}
+	// Folders: Nimbo ▸ Share / keep / free / sync first (no versions for folders).
 	if err := writeParent(dirRoot, exePath); err != nil {
 		return err
 	}
@@ -65,6 +75,9 @@ func Register(exePath string) error {
 	if err := writeChild(dirRoot, "04free", "Free up space", exePath, "--free"); err != nil {
 		return err
 	}
+	if err := writeChild(dirRoot, "05syncfirst", "Sync this first", exePath, "--sync-first"); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -75,7 +88,7 @@ func writeParent(root, exePath string) error {
 		return err
 	}
 	defer k.Close()
-	if err := k.SetStringValue("MUIVerb", "Nimbo"); err != nil {
+	if err := k.SetStringValue("MUIVerb", brand.Current.Name); err != nil {
 		return err
 	}
 	_ = k.SetStringValue("Icon", exePath+",0")

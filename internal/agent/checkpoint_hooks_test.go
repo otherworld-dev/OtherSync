@@ -48,6 +48,7 @@ type davNode struct {
 	body     string
 	perm     string
 	checksum string // SHA1 hex sent as OC-Checksum on GET; need not match body
+	fileid   string // oc:fileid served in listings ("" = none); stable across a move
 }
 
 // fakeDAV serves just enough WebDAV for real sync passes: PROPFIND depth 1
@@ -66,6 +67,10 @@ type fakeDAV struct {
 	mkcols  map[string]int    // dir -> MKCOLs seen
 	deletes []string          // paths DELETEd, in order
 	getN    map[string]int    // file -> GETs served, failures included
+	getLog  []string          // files GET, in the order asked for
+	// onGET, when set, runs before a GET is served and outside the lock, so a
+	// test can hold one download while it changes something.
+	onGET func(rel string)
 }
 
 func newFakeDAV(nodes map[string]davNode) *fakeDAV {
@@ -117,6 +122,13 @@ func (f *fakeDAV) getCount(file string) int {
 	return f.getN[file]
 }
 
+// gets returns the files asked for so far, in order.
+func (f *fakeDAV) gets() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.getLog...)
+}
+
 func (f *fakeDAV) pfCount(dir string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -138,6 +150,9 @@ func (f *fakeDAV) forgetDeletes() { f.mu.Lock(); f.deletes = nil; f.mu.Unlock() 
 
 func (f *fakeDAV) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rel := strings.Trim(strings.TrimPrefix(r.URL.Path, davPrefix), "/")
+	if r.Method == "GET" && f.onGET != nil {
+		f.onGET(rel)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	switch r.Method {
@@ -158,6 +173,7 @@ func (f *fakeDAV) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(f.multistatus(rel, r.Header.Get("Depth") == "infinity")))
 	case "GET":
 		f.getN[rel]++
+		f.getLog = append(f.getLog, rel)
 		if code, ok := f.failGET[rel]; ok {
 			w.WriteHeader(code)
 			return
@@ -238,14 +254,21 @@ func (f *fakeDAV) row(p string, n davNode) string {
 		if perm == "" {
 			perm = "RGDNVCK"
 		}
-		return fmt.Sprintf(`<d:response><d:href>%s</d:href><d:propstat><d:status>HTTP/1.1 200 OK</d:status><d:prop><d:resourcetype><d:collection/></d:resourcetype><d:getetag>&quot;%s&quot;</d:getetag><oc:permissions>%s</oc:permissions></d:prop></d:propstat></d:response>`, href, n.etag, perm)
+		return fmt.Sprintf(`<d:response><d:href>%s</d:href><d:propstat><d:status>HTTP/1.1 200 OK</d:status><d:prop><d:resourcetype><d:collection/></d:resourcetype><d:getetag>&quot;%s&quot;</d:getetag>%s<oc:permissions>%s</oc:permissions></d:prop></d:propstat></d:response>`, href, n.etag, davFileID(n), perm)
 	}
 	if perm == "" {
 		perm = "RGDNVW"
 	}
 	// Files carry a fixed Last-Modified (unix 1700000000): the adopt scan
 	// classifies against it, so tests must see it survive cold AND warm scans.
-	return fmt.Sprintf(`<d:response><d:href>%s</d:href><d:propstat><d:status>HTTP/1.1 200 OK</d:status><d:prop><d:resourcetype/><d:getetag>&quot;%s&quot;</d:getetag><d:getcontentlength>%d</d:getcontentlength><d:getlastmodified>Tue, 14 Nov 2023 22:13:20 GMT</d:getlastmodified><oc:permissions>%s</oc:permissions></d:prop></d:propstat></d:response>`, href, n.etag, len(n.body), perm)
+	return fmt.Sprintf(`<d:response><d:href>%s</d:href><d:propstat><d:status>HTTP/1.1 200 OK</d:status><d:prop><d:resourcetype/><d:getetag>&quot;%s&quot;</d:getetag><d:getcontentlength>%d</d:getcontentlength><d:getlastmodified>Tue, 14 Nov 2023 22:13:20 GMT</d:getlastmodified>%s<oc:permissions>%s</oc:permissions></d:prop></d:propstat></d:response>`, href, n.etag, len(n.body), davFileID(n), perm)
+}
+
+func davFileID(n davNode) string {
+	if n.fileid == "" {
+		return ""
+	}
+	return "<oc:fileid>" + n.fileid + "</oc:fileid>"
 }
 
 func davUnder(p, dir string) bool {

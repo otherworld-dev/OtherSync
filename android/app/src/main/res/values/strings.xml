@@ -4,5 +4,5 @@
     in the Compose screens for now; localisation is post-prototype work.
 -->
 <resources>
-    <string name="app_name">Nimbo</string>
+    <string name="app_name">OtherSync</string>
 </resources>

@@ -160,20 +160,46 @@ func suggestAccountFolder(home, login string, others []accountFolder, usable fun
 	if dir := filepath.Join(home, "Nextcloud"); ok(dir) {
 		return dir
 	}
-	name := brand.Current.Name
-	if login != "" {
-		name += " - " + login
+	// An older install may have made "Nimbo - <login>" before the rename to
+	// OtherSync without recording it (mountAccountOnDemand's "older install"
+	// case): find that folder, already there, rather than make a new one
+	// beside it and leave it behind.
+	if brand.Current.Renamed() {
+		former := accountFolderBase(home, brand.Current.FormerName, login)
+		for n := 1; n < suggestAttempts; n++ {
+			if dir := numberedFolder(former, n); isDir(dir) && ok(dir) {
+				return dir
+			}
+		}
 	}
-	base := filepath.Join(home, name)
-	if ok(base) {
-		return base
-	}
-	for n := 2; n < suggestAttempts; n++ {
-		if dir := fmt.Sprintf("%s (%d)", base, n); ok(dir) {
+	base := accountFolderBase(home, brand.Current.Name, login)
+	for n := 1; n < suggestAttempts; n++ {
+		if dir := numberedFolder(base, n); ok(dir) {
 			return dir
 		}
 	}
 	return ""
+}
+
+// accountFolderBase is "<home>/<product> - <login>".
+func accountFolderBase(home, product, login string) string {
+	if login != "" {
+		product += " - " + login
+	}
+	return filepath.Join(home, product)
+}
+
+// numberedFolder is base for n == 1, else "base (n)".
+func numberedFolder(base string, n int) string {
+	if n == 1 {
+		return base
+	}
+	return fmt.Sprintf("%s (%d)", base, n)
+}
+
+func isDir(dir string) bool {
+	fi, err := os.Stat(dir)
+	return err == nil && fi.IsDir()
 }
 
 // missingOrEmpty accepts a folder that doesn't exist yet or holds nothing.
@@ -332,7 +358,7 @@ func (a *App) regateAll() {
 	if a.eng != nil {
 		_ = a.eng.ReloadPairs()
 	}
-	for _, se := range a.secondaries {
+	for _, se := range a.secs() {
 		_ = se.eng.ReloadPairs()
 	}
 }
@@ -358,8 +384,8 @@ func abandonedRoots(before []string, mountedNow map[string]bool, claimed []strin
 
 // mountedRoots lists the folders mounted right now, with the owning account.
 func (a *App) mountedRoots() map[string]string {
-	out := make(map[string]string, len(a.onDemandMounts))
-	for dir, m := range a.onDemandMounts {
+	out := make(map[string]string, len(a.mounts()))
+	for dir, m := range a.mounts() {
 		out[dir] = m.accountID
 	}
 	return out
@@ -388,7 +414,7 @@ func (a *App) unregisterAbandonedRoots(before map[string]string) {
 		}
 	}
 	now := map[string]bool{}
-	for dir := range a.onDemandMounts {
+	for dir := range a.mounts() {
 		now[dir] = true
 	}
 	for _, dir := range abandonedRoots(dirs, now, claimed) {
@@ -403,22 +429,22 @@ func (a *App) unregisterAbandonedRoots(before map[string]string) {
 // state from those trees, by design. Other accounts' mounts are left alone;
 // tearing them down too flattened the accounts that stayed (GitHub #11).
 func (a *App) unmountOnDemandFor(accountID string) {
-	for dir, m := range a.onDemandMounts {
+	for dir, m := range a.mounts() {
 		if m.accountID != accountID {
 			continue
 		}
 		if m.convertCancel != nil {
 			m.convertCancel()
 		}
-		if m.watcher != nil {
-			m.watcher.Close()
+		if w := a.watcherOf(m); w != nil {
+			w.Close()
 		}
 		if m.healCancel != nil {
 			m.healCancel()
 		}
 		cfapi.Unmount(dir, m.connKey)
 		clearAdoptResume(m.accountID)
-		delete(a.onDemandMounts, dir)
+		a.dropMount(dir)
 		slog.Info("on-demand mount removed", "dir", dir, "account", accountID)
 	}
 	a.refreshOverlayRoots()
@@ -430,7 +456,7 @@ func (a *App) shownAccountMounted() bool {
 	if a.eng == nil {
 		return false
 	}
-	for _, m := range a.onDemandMounts {
+	for _, m := range a.mounts() {
 		if m.accountID == a.eng.Account.ID {
 			return true
 		}

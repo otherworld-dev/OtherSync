@@ -21,6 +21,10 @@ type Account struct {
 	// same server. nil = off. Only ever set on https:// accounts. Spec:
 	// the local-network-route design (2026-09-13).
 	Local *LocalRoute `json:"local,omitempty"`
+	// Label is the name the user chose for this account's Explorer sidebar
+	// entry. "" = the automatic one ("OtherSync - <login>"); see sidebarLabel in
+	// cmd/nimbo-gui.
+	Label string `json:"label,omitempty"`
 }
 
 // LocalRoute is the saved setup of an account's local network address.
@@ -41,4 +45,15 @@ func newID(serverURL, loginName string) string {
 // DAVRoot returns the WebDAV files endpoint for this account.
 func (a Account) DAVRoot() string {
 	return a.ServerURL + "/remote.php/dav/files/" + a.LoginName
+}
+
+// Address names the account the way Nextcloud's own clients do, "login@host"
+// (host without the scheme, subpath kept), for telling a user which account
+// something belongs to.
+func (a Account) Address() string {
+	host := a.ServerURL
+	if _, rest, ok := strings.Cut(host, "://"); ok {
+		host = rest
+	}
+	return a.LoginName + "@" + strings.TrimRight(host, "/")
 }

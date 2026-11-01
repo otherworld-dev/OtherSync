@@ -1,9 +1,224 @@
 # Changelog
 
-All notable changes to Nimbo are recorded here. The format follows
+All notable changes to OtherSync (formerly Nimbo) are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] - 2026-11-01
+
+### Added
+
+- Large files (64 MB or more) sync two at a time per account, alongside the rest of
+  the sync, and have a tab of their own: Status → Large files lists each one
+  running with its progress, waiting with its place in the queue, paused, or set
+  aside with when it's due back. The flyout's status line mentions them while any
+  are syncing, waiting or set aside. "Sync first" moves a
+  waiting file to the front of the queue, it never interrupts one that's already
+  running. "Set aside" stops one for an hour, four hours, until tomorrow at 8am, or
+  until you bring it back yourself, so a file that keeps failing or is crawling
+  stops holding up the others. A restart ends a set-aside, and when the file comes
+  back it rejoins the queue and carries on from where it got to rather than
+  starting again, an upload picks up from the chunks already on the server (#702).
+- When setting up Nimbo on a new computer you can choose folders to download first,
+  so the folder you need today doesn't end up last behind hundreds of GB. The
+  setup window has a "Choose folders to download first" link under Synchronize
+  everything, and while the first sync runs the flyout's status line offers it
+  (clicking opens the First sync tab in Status) to choose, change or clear them. Chosen folders are
+  listed and downloaded before everything else, even one deep inside a bigger
+  folder, a change counts straight away, and the choice is kept if Nimbo is
+  restarted part way through (#766).
+- "Sync this first" in the Explorer right-click menu, under Nimbo, for a file or
+  a folder. A large file waiting in the queue moves to the front (one that is
+  already transferring is never interrupted) and one you had set aside comes
+  back. Anything else with changes still to send is synced straight away, even
+  while Nimbo is waiting to retry after a failed sync. In on-demand mode a
+  waiting upload starts now, and a file you have set to always keep on this
+  device jumps the download queue. It never downloads a file that is only
+  online, and it does nothing while syncing is paused (#702).
+- The Explorer sidebar entry is now named after the account, "Nimbo - adam" rather
+  than just "Nimbo", so with more than one account you can tell which entry is
+  which. If two accounts have the same login on different servers the server is
+  added as well. Existing entries are renamed the next time Nimbo starts, and one
+  you have hidden stays hidden. If you would rather call an entry something else,
+  give it your own name in Settings → General, under the sidebar option, it is
+  renamed straight away and leaving the box empty goes back to the automatic
+  name (#19).
+
+### Changed
+
+- Nimbo is now called OtherSync. Nothing else changes: it is the same app and it
+  updates in place, your settings, accounts, folders, pinned app windows and
+  Explorer integration all stay as they are. Your sync folders keep their names on
+  disk; the Explorer sidebar entries and the Start menu say OtherSync. After the
+  update it says so once. The website is now www.othersync.com (#996).
+- Nimbo now runs on Windows 10 (version 2004 or later) as well as Windows 11.
+  Until now Setup failed on Windows 10 with "step returned 1" and then said it had
+  finished anyway. The right-click menu entry shows in the classic menu there.
+  One gap remains on Windows 10: shortcuts for Nextcloud apps opened as their own
+  windows don't appear in the Start menu yet (#985).
+- When Setup can't install Nimbo, it now stops with Windows' own reason instead of
+  a bare "step returned 1" followed by the finish page (#985).
+- The flyout says what Nimbo is doing right now, in one line under your account:
+  the file it is uploading or downloading with a progress bar, "Checking folders…"
+  while it looks for changes, "Can't reach the server" with how many changes are
+  waiting, Paused, or "Up to date" with when it last finished checking everything.
+  Anything that needs you (conflicts, files that can't sync, folders no longer
+  shared) takes the line over in amber, and clicking the line opens the matching
+  tab. The tray icon and its tooltip follow the same line. Status → Activity now
+  starts with a "Right now" list of every upload, download and folder check in
+  progress, with the full path and progress, and the history below it is headed
+  "Earlier". The flyout is tidier as a result: the separate bars for items that
+  need you, files in use, large files and the first sync are gone (their details
+  now show on the status line's second line), each recent item is one line, and
+  your Nextcloud status ("Online" and so on) has moved into the menu you get by
+  clicking your account name. Your Appearance settings all still apply (#988).
+- The first time this version runs, Nimbo checks every folder in each of your sync
+  folders once. Earlier versions could leave a file out for good if its download
+  failed during the first sync, and this is how the ones already missing are
+  found. It lists the folders on the server again, downloads anything that isn't
+  on this PC, and leaves everything else alone. On a large account it can take a
+  few minutes, you can keep working while it runs, and a notification says when
+  it starts and what it found. On-demand mode isn't affected (#949).
+- Syncing now also pauses for review when a single change from the server would
+  remove or replace more than 1,000 of your files, however large the folder is.
+  Until now it only paused when 50 or more files and at least half of the whole
+  sync folder were affected, which on a large account meant losing over half of
+  everything. If you clear out that many files yourself on another device, check
+  the list and press Resume syncing (#947).
+- Choose folders (Settings → Folders) is now a tree you can expand, with the size
+  of each folder next to it and a part-ticked box on any folder with something
+  unticked inside it. It only lists folders, sorted A-Z, and leaves out anything
+  your ignore rules exclude. Ticks and unticks are now collected up and applied
+  together with one Apply, with a single keep-or-delete question for everything
+  unticked and roughly how much space that frees (#539).
+- Switching a folder that already holds your files to on-demand mode converts them
+  faster, the files are now marked several at a time and plain files skip a step
+  that only placeholders need. The log also records how far it has got every
+  10,000 files, so a big folder no longer looks stuck while it works through
+  (#510).
+
+### Fixed
+
+- Choosing virtual files for a folder that doesn't exist yet, at sign-in or in
+  Settings, stopped with "Couldn't read that folder ... cannot find the file".
+  Nimbo now creates the folder and carries on (#985).
+- In on-demand mode, a folder renamed on the server is now renamed on this PC
+  too, with everything in it, instead of being deleted here and created again, so
+  files you had downloaded stay downloaded. A folder deleted on the server, or moved
+  somewhere Nimbo can't follow, no longer takes with it any file you changed that
+  hadn't finished uploading: that file is kept and uploaded, and only what can be
+  downloaded again is removed (#986).
+- In on-demand mode, a file that failed to upload while the server couldn't be
+  reached is sent within seconds of the connection coming back, instead of
+  waiting up to half an hour for its next retry (#991).
+- The activity lists say "Renamed" for a rename, "Moved" for a move and "New
+  folder" for a folder that appeared on the server. A rename showed as "move", a
+  new folder as "Downloaded", and the Status window's Activity tab showed internal
+  names such as "delete-local" (#987).
+- A folder or file renamed on the server where only the capitals changed (for
+  example "14 days" to "14 Days") is now renamed on this PC too, and online-only
+  files in it still open. Before, Nimbo kept looking for the old name, which also
+  made every sync pass in on-demand mode recheck the whole account, so changes made
+  by other people could take up to an hour to arrive. A folder that can't be read
+  no longer forces those full rechecks, and a change that arrives while a pass is
+  running is no longer missed (#984).
+- Names that end in a space or a full stop, which Windows can't use, no longer get
+  mixed up with the same name without it. In on-demand mode Nimbo could put a
+  colleague's file into the look-alike folder and then move it there on the server
+  too. Such items are not synced (Windows can't hold them), but they are no longer
+  just missing: they are listed in Status → Can't sync, in both modes, with a
+  "Rename on server" button that suggests a name without the trailing space or full
+  stop and never replaces anything already there. A leftover folder of this kind
+  that an earlier version made is cleared automatically when it holds nothing but
+  online-only files. The tray icon now shows an amber "!" while anything needs
+  you (files that can't sync, conflicts, folders no longer shared), so they don't
+  go unnoticed with the Nimbo window closed (#984).
+- Signing in again after Nextcloud stops accepting an account (its access removed
+  under Security, or a changed password) is clearer. If the account you were
+  looking at is the one affected, your other accounts carry on syncing and one of
+  them is shown instead, where before Nimbo stopped them all and read as signed
+  out. The sign-in window names the account, says its folders and settings are
+  kept, and once you have signed in it carries on without going through setup
+  again. An account that needs signing in has a Sign in again button in Settings →
+  Account, and the notification's Sign in button opens the window for that account.
+  Signing in with your login typed in a different case (Nextcloud accepts either)
+  no longer adds the same account a second time (#953).
+- A notification button that links to a website, such as "Open iplookup.flagfox.net"
+  on Nextcloud's suspicious login warning, now opens in your browser. It used to do
+  nothing, and Nimbo sent the link a request with your login and app password
+  attached, so if you clicked one, revoke Nimbo's app password in Nextcloud
+  (Personal settings → Security) and sign in again. Nimbo now only ever sends your
+  login to your own server. Notifications also say which account they came to, in
+  Status and on the Windows notification, and their text can be selected and
+  copied. The Android app had the same button problem and is fixed too (#952).
+- Pausing now stops large uploads and downloads, they carried on regardless in
+  0.2.0 even though the notes for that release said pausing covered them. Removing
+  or moving a sync folder, blacklisting a file, or unticking a folder now stops its
+  large transfers too (#702).
+- Saving a document in on-demand mode with LibreOffice, Word or a PDF tool no
+  longer leaves a `~RF….TMP` copy on the server or uploads the save as a new
+  file, it now updates the server's copy in place so its versions and share
+  links stay with it. Saving over an online-only file uploads the new content
+  rather than leaving it local, and an edit made while Nimbo wasn't running is
+  now sent the next time it checks the folder (#7).
+- In on-demand mode, files downloaded by apps that write to a `.part` file first,
+  such as Libation, now upload properly. Nimbo tried to sync the `.part` file,
+  which Nextcloud doesn't allow, and then kept failing with "Failed to rename",
+  leaving an empty file on the server. `.part` files are now ignored as they
+  already were in live mode (#18).
+- On Linux, deleting a folder that held read-only files no longer fails with
+  permission denied and leaves folders that can't be opened, and folders an
+  earlier build left that way are fixed on the next delete.
+- In on-demand mode, opening an online-only file in the first moments after Nimbo
+  starts now gets the same handling as any other download, it can be cancelled and
+  is given up on if the server stops sending, rather than possibly leaving the app
+  that opened it waiting. Before, a file opened while the folder was still being
+  set up went through an older download path that had neither (#701).
+- Switching from on-demand back to live mode no longer says that online-only files
+  in excluded folders, such as an old `node_modules` on the server, will download
+  after the switch. Live mode never syncs those, so the dialog now counts them
+  separately and says they stay on the server, and the download size it shows only
+  covers the files that really will come down (#512).
+- In on-demand mode, files are less likely to end up unopenable with error 363. A
+  Windows bug can leave the files created in the same batch as one with a long
+  server path impossible to open or delete, and Nimbo now creates any entry with a
+  path of 64 bytes or more on its own rather than only those of 128 or more, as a
+  margin for Windows versions the fault wasn't measured on (#685).
+- Two conflicts in the same folder can no longer be given the same "conflicted
+  copy" name. A file and an older conflicted copy of it, both in conflict within
+  the same second, got one name between them and the second replaced the first,
+  so one of your versions was lost. Each now gets a name of its own, on this PC
+  and on the server, in both live and on-demand mode.
+- "Resume syncing" on a folder that was paused for review, and "Sync now", start
+  the sync straight away. Both could be ignored for several minutes, up to an
+  hour, because the paused folder counted as a failed sync and Nimbo was waiting
+  before trying again (#589).
+- A folder renamed or moved on the server is now just renamed on this PC when the
+  change arrives. Nimbo was deleting the folder's files and downloading them all
+  again, and a big rename could pause syncing for review as if the files had been
+  lost. Only the hourly full check handled a rename properly, the quick checks
+  that follow most changes did not (#947).
+- Switching from on-demand back to live mode no longer says your sync folders are
+  restored, or that online-only files will download, when no sync folder is set up
+  (after a "Start fresh", for example). The dialog now counts the online-only
+  files that no sync folder covers separately and says nothing will sync until
+  you add a folder, and the notification at the end says the same (#948).
+- A file that fails to download during the first sync of a folder is now tried
+  again on the next check. It was being left out for good, with Nimbo showing "Up
+  to date", until something else changed in the same folder on the server. A
+  server that was briefly busy or a dropped connection was enough to cause it.
+- A download the server refuses because it is busy with the file for a moment
+  (a 423 answer) is now tried again a few times before it counts as failed, and
+  if it still fails it no longer says someone else has the file open. The dialogs
+  shown when switching file mode also say "1 is" rather than "1 are" (#950).
+
 ## [0.2.0] - 2026-09-26
+
+Mostly about file locking and multiple accounts. On-demand mode now takes and
+respects locks the way live mode does, locks are let go of when Nimbo quits, and a
+colleague opening a document no longer makes everyone else download it again or
+end up with a conflicted copy. Each account now gets a folder of its own, large
+uploads and downloads no longer hold up the rest of the sync, and there are help
+pages linked from the app along with a way to sign in and quit when signed out.
 
 ### Added
 

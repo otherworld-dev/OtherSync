@@ -40,6 +40,7 @@ type fakeCf struct {
 	repointed     []string          // paths passed to UpdateIdentity (MARK_IN_SYNC)
 	repointedKeep []string          // paths passed to UpdateIdentityKeepState
 	marked        []string          // paths passed to MarkInSync
+	stray         []string          // paths whose stray offline bit was cleared
 	inSynced      []string          // paths passed to SetInSync (the in-sync heal)
 	identities    map[string]string // path -> identity stamped by MarkInSync
 	created       []string          // names passed to CreatePlaceholders
@@ -109,6 +110,21 @@ func installFakeCf(t *testing.T) *fakeCf {
 	owf := cfWantsFreeUp
 	t.Cleanup(func() { stopTestWatchers(t); cfWantsFreeUp = owf })
 	cfWantsFreeUp = func(string) bool { return false }
+	ocs := cfClearStrayOffline
+	t.Cleanup(func() { stopTestWatchers(t); cfClearStrayOffline = ocs })
+	// Mirrors the real one: only a PLAIN file reading as dehydrated has a
+	// stray bit to clear; a placeholder's absence is real.
+	cfClearStrayOffline = func(path string) (bool, error) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		k := strings.ToLower(filepath.ToSlash(path))
+		if !f.plain[k] || !f.dehydrated[k] {
+			return false, nil
+		}
+		delete(f.dehydrated, k)
+		f.stray = append(f.stray, path)
+		return true, nil
+	}
 	osi := cfSetInSync
 	odp := cfDirPopulated
 	t.Cleanup(func() {
@@ -375,6 +391,12 @@ func (f *fakeCf) markCorrupt(path string) {
 	f.corrupt[strings.ToLower(path)] = true
 }
 
+func (f *fakeCf) strayCleared() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.stray...)
+}
+
 func (f *fakeCf) markPlain(path string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -530,10 +552,13 @@ func (f *fakeCf) hydrateCallCount(path string) int {
 }
 
 // markHydrateErr makes the hydrate-if-pinned seam fail for path with err.
+// Only a pinned, online-only file is ever downloaded (the real seam checks
+// first, and hydratePinned asks before listing it), so it reads as one.
 func (f *fakeCf) markHydrateErr(path string, err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.hydrateErr[strings.ToLower(path)] = err
+	f.pinned[strings.ToLower(path)] = true
 }
 
 // eventIndex returns the position of the first occurrence of event ("refresh:
@@ -562,6 +587,8 @@ type recorder struct {
 	listCalls map[string]int
 	listing   map[string][]cfapi.PlaceholderInfo
 	listErr   error
+	listErrs  map[string]error // per-directory listing failures (rel -> error)
+	listGate  chan struct{}    // when non-nil, List("") blocks until it closes
 	// checkStrict wires Ops.CheckList, which answers ErrNotFound for any path
 	// the listing does not hold instead of an empty folder, so a guard that
 	// asks for the wrong path cannot pass by accident.
@@ -598,6 +625,12 @@ type recorder struct {
 	uploadSawBase map[string]string   // the baseline each Upload saw at call time
 
 	logs []string // Ops.Log lines (formatted)
+
+	fileidBatches int // Ops.RecordFileIDs calls
+
+	// unholdable records Ops.Unholdable calls as (parent, child) pairs; a
+	// clean listing is recorded as (parent, "").
+	unholdable [][2]string
 }
 
 // logLines returns the log lines the watcher has emitted so far.
@@ -646,7 +679,7 @@ type reportRec struct {
 func newRecorder() *recorder {
 	return &recorder{
 		baselines: map[string]string{}, contents: map[string]string{}, fileids: map[string]string{},
-		listCalls: map[string]int{}, listing: map[string][]cfapi.PlaceholderInfo{},
+		listCalls: map[string]int{}, listing: map[string][]cfapi.PlaceholderInfo{}, listErrs: map[string]error{},
 		uploadSawBase: map[string]string{},
 		uploaded:      make(chan string, 16), deleted: make(chan string, 16), moved: make(chan [2]string, 16),
 	}
@@ -763,14 +796,34 @@ func (r *recorder) ops() Ops {
 			r.moved <- [2]string{src, dst}
 			return nil
 		},
+		Unholdable: func(parent string, items []cfapi.PlaceholderInfo) {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			if len(items) == 0 {
+				r.unholdable = append(r.unholdable, [2]string{parent, ""})
+			}
+			for _, it := range items {
+				r.unholdable = append(r.unholdable, [2]string{parent, it.Name})
+			}
+		},
 		List: func(rel string) ([]cfapi.PlaceholderInfo, error) {
 			r.mu.Lock()
 			defer r.mu.Unlock()
 			r.listCalls[rel]++
+			gate := r.listGate
 			if r.listErr != nil {
 				return nil, r.listErr
 			}
-			return r.listing[rel], nil
+			if err := r.listErrs[rel]; err != nil {
+				return nil, err
+			}
+			out := r.listing[rel]
+			if gate != nil && rel == "" {
+				r.mu.Unlock()
+				<-gate
+				r.mu.Lock()
+			}
+			return out, nil
 		},
 		CheckList: func() func(string) ([]cfapi.PlaceholderInfo, error) {
 			if !r.checkStrict {
@@ -873,6 +926,24 @@ func (r *recorder) ops() Ops {
 			defer r.mu.Unlock()
 			delete(r.fileids, remote)
 		},
+		RecordFileIDs: func(m map[string]string) {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			r.fileidBatches++
+			for k, v := range m {
+				r.fileids[k] = v
+			}
+		},
+		MoveFileIDs: func(pairs [][2]string) {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			for _, p := range pairs {
+				if v, ok := r.fileids[p[0]]; ok {
+					r.fileids[p[1]] = v
+					delete(r.fileids, p[0])
+				}
+			}
+		},
 	}
 }
 
@@ -891,7 +962,8 @@ func bareWatcher(root string, ops Ops) *Watcher {
 		verifying:   map[string]bool{},
 		forced:      map[string]bool{},
 		hydrateWake: make(chan struct{}, 1), hydrating: map[string]bool{},
-		hydrateFails: map[string]int{}, hydrateNext: map[string]time.Time{},
+		hydrateFirstWake: make(chan struct{}, 1),
+		hydrateFails:     map[string]int{}, hydrateNext: map[string]time.Time{},
 	}
 	if w.ops.Log == nil {
 		w.ops.Log = func(string, ...any) {}
@@ -899,6 +971,7 @@ func bareWatcher(root string, ops Ops) *Watcher {
 	for i := 0; i < hydrateWorkers; i++ {
 		w.spawn(w.hydrateLoop) // New starts these too; they exit with w.cancel()
 	}
+	w.spawn(w.hydrateFirstLoop)
 	testWatchers.Lock()
 	testWatchers.ws = append(testWatchers.ws, w)
 	testWatchers.Unlock()
@@ -1000,6 +1073,9 @@ func TestSkipName(t *testing.T) {
 		`.sync_74b7ab355ec5.db`, `.sync_74b7ab355ec5.db-wal`, `.sync_74b7ab355ec5.db-shm`,
 		`.sync_abc.db-journal`, `.nextcloudsync.log`, `.owncloudsync.log`,
 		`sub\.sync_11ff.db`, `.Nextcloudsync.log`,
+		// A downloader's partial file: Nextcloud refuses the name outright, and
+		// live sync's default ignore list has always had it (GitHub #18).
+		`Book.jD5E4ntS.m4b.part`, `sub\dl.PART`,
 	}
 	keep := []string{`doc.txt`, `sub\doc.txt`, `tmp`, `partial.part2`, `lock.txt`, `a~$b`,
 		// Not artifacts: user files that merely resemble them.
@@ -1215,6 +1291,262 @@ func TestParseRenamePair(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("rename pair did not dispatch a Move")
+	}
+}
+
+// A Windows safe-save (ReplaceFile: LibreOffice, Word, PDF tools) renames the
+// document to a temporary name, renames the freshly written copy in under the
+// document's name, then deletes the temporary. Both renames have one end the
+// watcher skips, and when all four events land in one batch the leftover
+// RENAMED_OLD of the first was paired with the RENAMED_NEW of the second: a
+// MOVE of the document onto itself, which the server refuses ("Source and
+// destination uri are identical") and which was retried for 16 minutes while
+// the new content waited behind its in-flight mark (Deck #793).
+func TestParseSafeSaveIsAnEditNotAMove(t *testing.T) {
+	root := t.TempDir()
+	doc := filepath.Join(root, "doc.ods")
+	if err := os.WriteFile(doc, []byte("new content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := newRecorder()
+	w := bareWatcher(root, rec.ops())
+	defer w.cancel()
+
+	w.parse(notifyBuf(t, []struct {
+		action uint32
+		name   string
+	}{
+		{fileActionRenamedOld, "doc.ods"},
+		{fileActionRenamedNew, "doc.ods~RF1f3a56c.TMP"},
+		{fileActionRenamedOld, "lu12345.tmp"},
+		{fileActionRenamedNew, "doc.ods"},
+		{fileActionRemoved, "doc.ods~RF1f3a56c.TMP"},
+	}))
+
+	w.mu.Lock()
+	_, up := w.upload[doc]
+	_, del := w.delete[doc]
+	for _, tm := range w.upload {
+		tm.Stop()
+	}
+	w.mu.Unlock()
+	if !up {
+		t.Error("the saved document was not scheduled for upload")
+	}
+	if del {
+		t.Error("a server delete is pending for the document that was just saved")
+	}
+	select {
+	case mv := <-rec.moved:
+		t.Fatalf("safe-save produced a server MOVE %v", mv)
+	case d := <-rec.deleted:
+		t.Fatalf("safe-save produced a server DELETE of %q", d)
+	case <-time.After(2 * time.Second): // past deleteDebounce
+	}
+}
+
+// The same save, reported by the Cloud Files filter: its rename-completion
+// callback sees the document renamed to the temporary name. Pushing that as a
+// MOVE took the document's server copy (file id, versions, share links) to a
+// name the watcher then ignores, so the temporary's local delete never reached
+// the server and the copy stayed there under the temporary name for good, and
+// the saved content was uploaded as a brand-new file (Deck #793).
+func TestNotifyRenamedIntoAnIgnoredNameIsNotAMove(t *testing.T) {
+	root := t.TempDir()
+	doc := filepath.Join(root, "doc.ods")
+	if err := os.WriteFile(doc, []byte("new content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := newRecorder()
+	w := bareWatcher(root, rec.ops())
+	defer w.cancel()
+
+	w.NotifyRenamed(doc, filepath.Join(root, "doc.ods~RF1f3a56c.TMP"))
+	w.NotifyRenamed(filepath.Join(root, "~WRD0001.tmp"), doc)
+
+	select {
+	case mv := <-rec.moved:
+		t.Fatalf("a rename with an ignored end produced a server MOVE %v", mv)
+	case <-time.After(2 * time.Second):
+	}
+	w.mu.Lock()
+	n := len(w.moved)
+	w.mu.Unlock()
+	if n != 0 {
+		t.Errorf("%d move keys recorded for renames that are not moves", n)
+	}
+}
+
+// Renaming a synced file to an ignored name takes it out of the sync: on the
+// server that is a delete of the old name, not a MOVE to a name nothing will
+// ever look at again.
+func TestParseRenameIntoAnIgnoredNameDeletesTheOldName(t *testing.T) {
+	root := t.TempDir()
+	rec := newRecorder()
+	w := bareWatcher(root, rec.ops())
+	defer w.cancel()
+
+	w.parse(notifyBuf(t, []struct {
+		action uint32
+		name   string
+	}{
+		{fileActionRenamedOld, "notes.txt"},
+		{fileActionRenamedNew, "notes.txt.tmp"},
+	}))
+
+	select {
+	case d := <-rec.deleted:
+		if d != "notes.txt" {
+			t.Errorf("deleted %q, want \"notes.txt\"", d)
+		}
+	case mv := <-rec.moved:
+		t.Fatalf("rename into an ignored name produced a server MOVE %v", mv)
+	case <-time.After(3 * time.Second):
+		t.Fatal("rename into an ignored name never deleted the old name on the server")
+	}
+}
+
+// And the other way round: a file renamed FROM an ignored name is new to the
+// sync, so it uploads. A stale RENAMED_OLD from earlier in the batch must not
+// claim it as the destination of a move.
+func TestParseRenameFromAnIgnoredNameUploads(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "b.txt"), []byte("b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := newRecorder()
+	w := bareWatcher(root, rec.ops())
+	defer w.cancel()
+
+	w.parse(notifyBuf(t, []struct {
+		action uint32
+		name   string
+	}{
+		{fileActionRenamedOld, "a.txt"},
+		{fileActionRenamedNew, "a.txt.tmp"},
+		{fileActionRenamedOld, "b.txt.tmp"},
+		{fileActionRenamedNew, "b.txt"},
+	}))
+
+	w.mu.Lock()
+	_, up := w.upload[filepath.Join(root, "b.txt")]
+	for _, tm := range w.upload {
+		tm.Stop()
+	}
+	w.mu.Unlock()
+	if !up {
+		t.Error("the file renamed from an ignored name was not scheduled for upload")
+	}
+	select {
+	case mv := <-rec.moved:
+		t.Fatalf("stale rename source paired into a server MOVE %v", mv)
+	case <-time.After(2 * time.Second):
+	}
+}
+
+// Libation, and downloaders like it, write a book to "<name>.<random>.m4b.part"
+// and rename that over an empty "<name>.m4b" it made first. The .part was not
+// ignored in on-demand mode, so its upload was refused (".part" is a forbidden
+// extension) and the rename went to the server as a MOVE of a file that was
+// never there, which Nextcloud answers 500 "Failed to rename" rather than 404.
+// That was retried until it gave up, leaving the empty book on the server
+// (GitHub #18). The rename is the finished file arriving: an upload.
+func TestParseDownloaderPartRenamedOverItsFileUploads(t *testing.T) {
+	root := t.TempDir()
+	book := filepath.Join(root, "Book.m4b")
+	if err := os.WriteFile(book, []byte("audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := newRecorder()
+	w := bareWatcher(root, rec.ops())
+	defer w.cancel()
+
+	w.parse(notifyBuf(t, []struct {
+		action uint32
+		name   string
+	}{
+		{fileActionModified, "Book.jD5E4ntS.m4b.part"},
+		{fileActionRemoved, "Book.m4b"},
+		{fileActionRenamedOld, "Book.jD5E4ntS.m4b.part"},
+		{fileActionRenamedNew, "Book.m4b"},
+	}))
+
+	w.mu.Lock()
+	_, up := w.upload[book]
+	_, del := w.delete[book]
+	_, partUp := w.upload[filepath.Join(root, "Book.jD5E4ntS.m4b.part")]
+	for _, tm := range w.upload {
+		tm.Stop()
+	}
+	w.mu.Unlock()
+	if !up {
+		t.Error("the finished book was not scheduled for upload")
+	}
+	if del {
+		t.Error("a server delete is pending for the book that just arrived")
+	}
+	if partUp {
+		t.Error("the .part file was scheduled for upload")
+	}
+	select {
+	case mv := <-rec.moved:
+		t.Fatalf("the .part rename produced a server MOVE %v", mv)
+	case d := <-rec.deleted:
+		t.Fatalf("the .part rename produced a server DELETE of %q", d)
+	case <-time.After(2 * time.Second): // past deleteDebounce
+	}
+}
+
+// The same rename, reported by the Cloud Files filter's rename callback.
+func TestNotifyRenamedFromAPartFileIsNotAMove(t *testing.T) {
+	root := t.TempDir()
+	book := filepath.Join(root, "Book.m4b")
+	if err := os.WriteFile(book, []byte("audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := newRecorder()
+	w := bareWatcher(root, rec.ops())
+	defer w.cancel()
+
+	w.NotifyRenamed(filepath.Join(root, "Book.jD5E4ntS.m4b.part"), book)
+
+	select {
+	case mv := <-rec.moved:
+		t.Fatalf("a rename from a .part file produced a server MOVE %v", mv)
+	case <-time.After(2 * time.Second):
+	}
+}
+
+// Saving over an ONLINE-ONLY file with a safe-save leaves a plain file holding
+// the new bytes but wearing the old stub's FILE_ATTRIBUTE_OFFLINE (ReplaceFile
+// copies the replaced file's attributes). Read as a stub, the edit was never
+// uploaded: measured on the VM, "freed up space" and no PUT (Deck #793). The
+// stray bit is cleared and the file uploads.
+func TestSaveOverAnOnlineOnlyFileUploads(t *testing.T) {
+	f := installFakeCf(t)
+	root := t.TempDir()
+	doc := filepath.Join(root, "doc.ods")
+	if err := os.WriteFile(doc, []byte("version 2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.markPlain(doc)
+	f.markDehydrated(doc) // the inherited OFFLINE bit
+	rec := newRecorder()
+	w := bareWatcher(root, rec.ops())
+	defer w.cancel()
+
+	w.handleChange(doc)
+
+	select {
+	case got := <-rec.uploaded:
+		if got != "doc.ods" {
+			t.Errorf("uploaded %q, want doc.ods", got)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the saved file was never uploaded")
+	}
+	if got := f.strayCleared(); len(got) != 1 || !strings.EqualFold(got[0], doc) {
+		t.Errorf("stray offline bit cleared on %q, want [%s]", got, doc)
 	}
 }
 
@@ -1850,30 +2182,82 @@ func TestReconcileHealsFlattenedFile(t *testing.T) {
 	}
 }
 
-// A plain file that does NOT match the server metadata is someone's pending
-// work (a local edit the watcher never saw, or a newer server version) — it
+// A plain file that does NOT match the server metadata, where nothing shows
+// the local copy is the newer one (the server's is newer, or its time is
+// unknown), may be a newer server version the local copy simply predates. It
 // must not be stamped in-sync, uploaded, or deleted by the heal.
 func TestReconcileLeavesMismatchedPlainFileAlone(t *testing.T) {
-	f, rec, w, doc := healSetup(t, "etag-v2", "etag-v1", false)
+	for _, tc := range []struct {
+		name     string
+		serverAt func(local time.Time) time.Time
+	}{
+		{"server newer", func(local time.Time) time.Time { return local.Add(time.Hour) }},
+		{"server time unknown", func(time.Time) time.Time { return time.Time{} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, rec, w, doc := healSetup(t, "etag-v2", "etag-v1", false)
+			defer w.cancel()
+			fi, _ := os.Stat(doc)
+			rec.listing[""][0].ModTime = tc.serverAt(fi.ModTime())
+
+			w.Reconcile()
+			time.Sleep(uploadDebounce + 500*time.Millisecond)
+
+			f.mu.Lock()
+			marked := len(f.marked)
+			f.mu.Unlock()
+			if marked != 0 {
+				t.Fatal("mismatched plain file was wrongly stamped in-sync")
+			}
+			rec.mu.Lock()
+			ups, dels := len(rec.uploads), len(rec.deletes)
+			rec.mu.Unlock()
+			if ups != 0 || dels != 0 {
+				t.Fatalf("heal performed server ops (uploads=%d deletes=%d)", ups, dels)
+			}
+			if _, err := os.Stat(doc); err != nil {
+				t.Error("plain file deleted")
+			}
+		})
+	}
+}
+
+// A plain file in both places whose local copy was written AFTER the server's
+// is an edit that never reached the server: its live event was missed (a
+// restart, a buffer overflow, or a build that read it as an online-only stub,
+// Deck #793). Left alone it was never uploaded at all. Reconcile hands it to
+// the ordinary upload, whose conflict check sets the server's copy aside if
+// that changed too.
+func TestReconcileUploadsAPlainFileEditedAfterTheServerCopy(t *testing.T) {
+	f, rec, w, doc := healSetup(t, "etag-v1", "etag-v1", false)
 	defer w.cancel()
+	fi, _ := os.Stat(doc)
+	rec.listing[""][0].Size = fi.Size() // same size, as a one-word edit often is
+	rec.listing[""][0].ModTime = fi.ModTime().Add(-time.Hour)
 
 	w.Reconcile()
 
-	f.mu.Lock()
-	marked := len(f.marked)
-	f.mu.Unlock()
-	if marked != 0 {
-		t.Fatal("mismatched plain file was wrongly stamped in-sync")
+	select {
+	case got := <-rec.uploaded:
+		if got != "doc.txt" {
+			t.Errorf("uploaded %q, want doc.txt", got)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("a local edit newer than the server copy was never uploaded")
 	}
-	rec.mu.Lock()
-	ups, dels := len(rec.uploads), len(rec.deletes)
-	rec.mu.Unlock()
-	if ups != 0 || dels != 0 {
-		t.Fatalf("heal performed server ops (uploads=%d deletes=%d)", ups, dels)
+	// The recorder reports the upload as it lands; the mark follows it.
+	var marked []string
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		f.mu.Lock()
+		marked = append([]string(nil), f.marked...)
+		f.mu.Unlock()
+		for _, m := range marked {
+			if m == doc {
+				return
+			}
+		}
 	}
-	if _, err := os.Stat(doc); err != nil {
-		t.Error("plain file deleted")
-	}
+	t.Errorf("uploaded file was not marked in sync (marked=%v)", marked)
 }
 
 // Size and mtime matching is not enough when the recorded baseline says the
@@ -3292,9 +3676,18 @@ func TestDeleteDuringUploadCancelsIt(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("delete never reached the server")
 	}
-	rec.mu.Lock()
-	cancelled := len(rec.cancelled)
-	rec.mu.Unlock()
+	// The cancelled upload records itself on its own goroutine, which can run
+	// after the DELETE lands: wait for it rather than read the count at once
+	// (it failed this way under load).
+	cancelled := 0
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		rec.mu.Lock()
+		cancelled = len(rec.cancelled)
+		rec.mu.Unlock()
+		if cancelled != 0 {
+			break
+		}
+	}
 	if cancelled != 1 {
 		t.Fatalf("in-flight upload not cancelled by the delete (cancelled=%d)", cancelled)
 	}

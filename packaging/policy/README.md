@@ -1,8 +1,8 @@
 # Managed deployment — admin policy
 
-Lock down Nimbo across a fleet. Policies live in the registry under
+Lock down OtherSync (formerly Nimbo) across a fleet. Policies live in the registry under
 **`HKLM\SOFTWARE\Policies\Nimbo`** and **override** the user's own settings. They
-apply only on machines with a **Nimbo business licence** installed (policy is a
+apply only on machines with an **OtherSync business licence** installed (policy is a
 business-tier capability) — see `tools/licensegen/README.md`.
 
 Set them with Group Policy / Intune via the bundled ADMX template, or write the
@@ -27,7 +27,7 @@ locks the affected controls. Any value you don't set stays user-controlled.
    `en-US\Nimbo.adml` to `C:\Windows\PolicyDefinitions\en-US\` — or into your
    domain **Central Store** (`\\<domain>\SYSVOL\<domain>\Policies\PolicyDefinitions`).
 2. In the Group Policy editor: **Computer Configuration → Administrative
-   Templates → Nimbo**. Configure the policies and link the GPO to the target
+   Templates → OtherSync**. Configure the policies and link the GPO to the target
    OU. (Intune: import the ADMX/ADML as a custom administrative template.)
 
 ## Direct registry (scripted deployment)
@@ -44,13 +44,14 @@ Set-ItemProperty $k -Name DownloadKBps  -Value 0 -Type DWord
 Set-ItemProperty $k -Name SyncMode      -Value 'ondemand' -Type String
 ```
 
-Policies are read at launch (and when a licence is activated). Restart Nimbo, or
+Policies are read at launch (and when a licence is activated). Restart OtherSync, or
 re-run Group Policy (`gpupdate /force`) and restart, to apply changes.
 
 ## Notes
 
 - Without a business licence these keys are ignored — the install behaves as a
   normal free personal copy.
-- The ADMX namespace/registry path is the stock-brand `Nimbo`. A white-label
+- The ADMX file names, namespace and registry path stay the stock-brand `Nimbo`
+  after the rename to OtherSync, so policies already deployed keep working. A white-label
   build that needs its own policy path changes `policyKey` in
   `internal/policy/policy_windows.go` and the ADMX `key`/namespace to match.

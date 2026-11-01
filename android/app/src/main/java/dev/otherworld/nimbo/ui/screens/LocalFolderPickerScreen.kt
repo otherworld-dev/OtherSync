@@ -119,7 +119,7 @@ fun LocalFolderPickerScreen(
                             )
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                text = "Nimbo can’t write here — pick or create another folder.",
+                                text = "OtherSync can’t write here — pick or create another folder.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.error,
                                 maxLines = 2,

@@ -349,3 +349,101 @@ func TestASuccessfulChangeSyncLiftsTheBackoff(t *testing.T) {
 		}
 	}
 }
+
+// A sync the user asked for (Sync now, Resume after a paused folder was
+// reviewed) is not one of the retries the backoff spaces out: it lifts the
+// backoff and runs. Sent down External like a server push, it was dropped
+// while a failure was being backed off from, and a folder the damage guard had
+// paused counts as a failed pass, so "Resume syncing" did nothing for anything
+// up to an hour (Deck #589).
+func TestAUserSyncIsNotHeldBackByTheBackoff(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ext := make(chan struct{}, 1)
+	user := make(chan struct{}, 1)
+	var pushes atomic.Int32
+	onPush := func(context.Context) error {
+		if pushes.Add(1) == 1 {
+			return errors.New("sync paused: needs review") // an hour's hold
+		}
+		return nil
+	}
+	go func() {
+		_ = runLoop(ctx, Options{Root: t.TempDir(), Debounce: 10 * time.Millisecond, PollInterval: time.Hour,
+			OnPush: onPush, External: ext, UserSync: user}, func(context.Context, []string) error { return nil }, make(chan string))
+	}()
+	wait := func(n int32, what string) {
+		t.Helper()
+		deadline := time.After(2 * time.Second)
+		for pushes.Load() < n {
+			select {
+			case <-deadline:
+				t.Fatal(what)
+			case <-time.After(5 * time.Millisecond):
+			}
+		}
+	}
+	ext <- struct{}{}
+	wait(1, "the first push never ran")
+
+	// A server push is still held back...
+	ext <- struct{}{}
+	time.Sleep(100 * time.Millisecond)
+	if n := pushes.Load(); n != 1 {
+		t.Fatalf("a push ran during the backoff (%d passes)", n)
+	}
+	// ...the user's request is not, and it ends the hold for what follows.
+	user <- struct{}{}
+	wait(2, "the sync the user asked for was dropped by the backoff")
+	ext <- struct{}{}
+	wait(3, "the backoff was still in force after the user's sync succeeded")
+}
+
+// Explorer's "Sync this first" hands its paths in as nudges (Deck #702). They
+// must sync while a failed pass is being backed off from, the same as a local
+// change does: the backoff spaces out the polls and pushes that walk the
+// server, never a sync of named paths somebody is waiting on.
+func TestNudgedPathsSyncDuringTheBackoff(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ext := make(chan struct{}, 1)
+	nudge := make(chan string, 4)
+	var pushes atomic.Int32
+	onPush := func(context.Context) error {
+		pushes.Add(1)
+		return errors.New("server unreachable") // every push fails: an hour's hold
+	}
+	got := make(chan []string, 4)
+	syncFn := func(_ context.Context, changed []string) error {
+		if changed != nil {
+			got <- changed
+		}
+		return nil
+	}
+	go func() {
+		_ = runLoop(ctx, Options{Root: t.TempDir(), Debounce: 10 * time.Millisecond, PollInterval: time.Hour,
+			OnPush: onPush, External: ext, Nudge: nudge}, syncFn, make(chan string))
+	}()
+	ext <- struct{}{}
+	deadline := time.After(2 * time.Second)
+	for pushes.Load() < 1 {
+		select {
+		case <-deadline:
+			t.Fatal("the first push never ran")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+
+	// A folder's worth, sent one after another, arrives as one batch.
+	nudge <- `C:\Sync\D\a.txt`
+	nudge <- `C:\Sync\D\b.txt`
+	nudge <- `C:\Sync\D\c.txt`
+	select {
+	case changed := <-got:
+		if len(changed) != 3 {
+			t.Fatalf("synced %v, want the three nudged paths in one pass", changed)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the nudged paths were held back by the backoff")
+	}
+}

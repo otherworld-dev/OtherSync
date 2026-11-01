@@ -17,6 +17,9 @@ import (
 // provider leaves hollow files behind for a sync to trip over.
 func IsDehydrated(os.FileInfo) bool { return false }
 
+// ClearStrayOffline has nothing to clear outside Windows.
+func ClearStrayOffline(string) (bool, error) { return false, nil }
+
 // PlaceholderInfo mirrors the Windows type so cross-platform code referencing it
 // (e.g. the vfs stub) compiles.
 type PlaceholderInfo struct {
@@ -44,6 +47,9 @@ func RegisterSyncRoot(string) error { return nil }
 // UnregisterSyncRoot is a no-op on non-Windows platforms.
 func UnregisterSyncRoot(string) error { return nil }
 
+// RenameSyncRoot is a no-op on non-Windows platforms.
+func RenameSyncRoot(string, string, string) error { return nil }
+
 // Purge is a no-op on non-Windows platforms.
 func Purge(string) error { return nil }
 
@@ -67,6 +73,11 @@ func SetRenameHandler(int64, RenameFunc) {}
 
 // Mount is unavailable off Windows (Supported() gates all callers).
 func Mount(string, string, string, HydrateFunc, ListFunc) (int64, error) {
+	return 0, errors.New("on-demand files are Windows-only")
+}
+
+// MountStream is unavailable off Windows (Supported() gates all callers).
+func MountStream(string, string, string, HydrateStreamFunc, ListFunc) (int64, error) {
 	return 0, errors.New("on-demand files are Windows-only")
 }
 

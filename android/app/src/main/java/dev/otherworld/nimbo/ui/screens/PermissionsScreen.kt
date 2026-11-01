@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -71,7 +72,7 @@ fun PermissionsScreen(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "Nimbo needs a few Android permissions before it can " +
+                    text = "OtherSync needs a few Android permissions before it can " +
                         "keep folders in sync in the background.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -82,7 +83,7 @@ fun PermissionsScreen(
                 PermissionRow(
                     icon = Icons.Filled.Folder,
                     title = "All files access",
-                    why = "Lets Nimbo read and write the sync folder in your shared storage.",
+                    why = "Lets OtherSync read and write the sync folder in your shared storage.",
                     requirement = "Required",
                     granted = hasAllFiles,
                     onGrant = onGrantAllFiles,
@@ -100,7 +101,7 @@ fun PermissionsScreen(
                 PermissionRow(
                     icon = Icons.Filled.BatteryFull,
                     title = "Ignore battery optimisation",
-                    why = "Stops Android suspending sync while the screen is off.",
+                    why = "Stops Android suspending sync while the screen is off, and lets sync start by itself after a restart.",
                     requirement = "Recommended",
                     granted = ignoringBattery,
                     onGrant = onGrantBattery,
@@ -114,7 +115,14 @@ fun PermissionsScreen(
                 tonalElevation = 3.dp,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 18.dp)) {
+                // Above the navigation bar, as in AddFolderScreen: with three-button
+                // navigation the system bar otherwise covers Continue (seen on a
+                // Galaxy S24 Ultra, Android 16).
+                Column(
+                    modifier = Modifier
+                        .navigationBarsPadding()
+                        .padding(horizontal = 24.dp, vertical = 18.dp),
+                ) {
                     if (!hasAllFiles) {
                         Text(
                             text = "All files access is required to continue.",

@@ -26,9 +26,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.otherworld.nimbo.LocalNimboHost
 import dev.otherworld.nimbo.core.absoluteUrl
+import dev.otherworld.nimbo.core.isWebLink
+import dev.otherworld.nimbo.supporter.SupportActions
+import dev.otherworld.nimbo.supporter.Supporter
+import dev.otherworld.nimbo.supporter.SupporterViewModel
+import dev.otherworld.nimbo.supporter.shouldShowNudge
 import dev.otherworld.nimbo.ui.screens.AddFolderScreen
 import dev.otherworld.nimbo.ui.screens.AppsScreen
 import dev.otherworld.nimbo.ui.screens.DiagnosticsScreen
@@ -45,11 +51,13 @@ import dev.otherworld.nimbo.ui.screens.ShareSheet
 import dev.otherworld.nimbo.ui.screens.SharedScreen
 import dev.otherworld.nimbo.ui.screens.VersionsSheet
 import dev.otherworld.nimbo.ui.screens.SignInScreen
+import dev.otherworld.nimbo.ui.screens.SupportScreen
 import dev.otherworld.nimbo.ui.screens.TrashScreen
 
 @Composable
-fun NimboNav(vm: NimboViewModel) {
+fun NimboNav(vm: NimboViewModel, supporterVm: SupporterViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val supporter by supporterVm.ui.collectAsStateWithLifecycle()
     val host = LocalNimboHost.current
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -82,15 +90,30 @@ fun NimboNav(vm: NimboViewModel) {
             state.route == Route.SEARCH ||
             state.route == Route.NOTIFICATIONS ||
             state.route == Route.SETTINGS ||
+            state.route == Route.SUPPORT ||
             inFileSubfolder
     ) {
         when {
             state.route == Route.LOCAL_PICKER -> vm.navigate(Route.ADD_FOLDER)
             state.route == Route.ADD_FOLDER -> vm.navigate(Route.FOLDERS)
+            state.route == Route.SUPPORT -> vm.navigate(state.supportReturn)
             // Inside the browser, back walks up the tree rather than leaving.
             inFileSubfolder -> vm.filesUp()
             else -> vm.navigate(Route.HOME)
         }
+    }
+
+    // Refresh whenever the Support screen opens or the app comes back to it:
+    // the user is looking, so ask. Buying, switching and cancelling all
+    // happen in the browser, and coming back from there is a resume, not a
+    // route change.
+    LifecycleResumeEffect(state.route) {
+        if (state.route == Route.SUPPORT) supporterVm.refresh()
+        onPauseOrDispose { }
+    }
+
+    LaunchedEffect(state.route, state.account) {
+        if (state.route == Route.HOME && state.account != null) supporterVm.noteHomeSeen()
     }
 
     Scaffold(
@@ -194,6 +217,20 @@ fun NimboNav(vm: NimboViewModel) {
                             notificationCount = state.notificationCount,
                             onSignOut = { vm.signOut() },
                             onResumeFrozen = { dir -> vm.resumeFrozen(dir) },
+                            showSupportNudge = shouldShowNudge(
+                                now = System.currentTimeMillis(),
+                                firstSeenAt = supporter.firstSeenAt,
+                                lastSyncAt = state.lastSyncAt,
+                                failingCount = state.failing.size,
+                                frozenCount = state.frozen.size,
+                                tier = supporter.tier,
+                                retired = supporter.nudgeRetired,
+                            ),
+                            onSupport = {
+                                supporterVm.retireNudge()
+                                vm.openSupport(Route.HOME)
+                            },
+                            onDismissSupport = { supporterVm.retireNudge() },
                         )
 
                         Tab.APPS -> AppsScreen(
@@ -244,7 +281,17 @@ fun NimboNav(vm: NimboViewModel) {
                     busy = state.busy,
                     focusedId = state.focusedNotificationId,
                     onFocusShown = { vm.clearNotificationFocus() },
-                    onRunAction = { action -> vm.runNotificationAction(action) },
+                    // A WEB action is a link to open, not a request to send
+                    // (GitHub #20): sent as one it went nowhere, with the
+                    // account's login attached for whatever host it named.
+                    onRunAction = { action ->
+                        if (action.type.equals("WEB", ignoreCase = true)) {
+                            val url = absoluteUrl(state.serverUrl, action.link)
+                            if (isWebLink(url)) host.openUrl(url)
+                        } else {
+                            vm.runNotificationAction(action)
+                        }
+                    },
                     // Notification links point into the web UI, so they open
                     // there rather than pretending the app can render them.
                     onOpenLink = { item ->
@@ -309,9 +356,23 @@ fun NimboNav(vm: NimboViewModel) {
                     appearance = state.appearance,
                     serverAppearance = state.serverAppearance,
                     themeColor = state.themeColor,
+                    supporter = supporter,
                     onAppearanceChange = { pref -> vm.setAppearance(pref) },
+                    onIconChange = { icon -> supporterVm.setIcon(icon) },
+                    onAccentChange = { a -> supporterVm.setAccent(a) },
+                    onOpenSupport = { vm.openSupport(Route.SETTINGS) },
                     onBack = { vm.navigate(Route.HOME) },
                 )
+
+                Route.SUPPORT -> SupportScreen(
+                    tier = supporter.tier,
+                    notice = supporter.notice,
+                    onDismissNotice = { supporterVm.clearNotice() },
+                    onOpenBusiness = { host.openUrl("https://www.othersync.com/business.html") },
+                    onBack = { vm.navigate(state.supportReturn) },
+                ) {
+                    SupportActions(Supporter.repository)
+                }
 
                 Route.DIAGNOSTICS -> DiagnosticsScreen(
                     diagnostics = state.diagnostics,

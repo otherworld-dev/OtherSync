@@ -46,6 +46,8 @@ import (
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
+
+	"github.com/otherworld/nimbo/internal/psquote"
 )
 
 // NavGUID identifies the Nimbo navigation-pane node (fixed for the app).
@@ -123,14 +125,17 @@ func desired(name, targetFolder, iconPath string) []regVal {
 }
 
 // Register pins a navigation-pane root named name, pointing at targetFolder and
-// shown with iconPath. Idempotent; updates target/icon on each call.
+// shown with iconPath. Idempotent; updates name/target/icon on each call.
+// brandName names the folder a packaged build keeps the icon in (see
+// stableIconPath); it is the product name, never the entry's label, which
+// carries the account and so changes with it.
 //
 // On a packaged build the write is handed to a scheduled task and this returns
 // once that task has run its script (a second or two), or with an error if it
 // did not run within outOfContainerTimeout.
-func Register(name, targetFolder, iconPath string) error {
+func Register(brandName, name, targetFolder, iconPath string) error {
 	if Packaged() {
-		return registerOutOfContainer(name, targetFolder, iconPath)
+		return registerOutOfContainer(brandName, name, targetFolder, iconPath)
 	}
 	for _, v := range desired(name, targetFolder, iconPath) {
 		if err := write(v); err != nil {
@@ -271,8 +276,8 @@ func stableIconPath(brandDir string) string {
 // the app can read its own copy but the task cannot (the app's path is
 // redirected into the package's LocalCache), and hard-coding that redirected
 // path would tie the icon to the current package family name.
-func registerOutOfContainer(name, targetFolder, iconPath string) error {
-	icon := stableIconPath(name)
+func registerOutOfContainer(brandName, name, targetFolder, iconPath string) error {
+	icon := stableIconPath(brandName)
 	if icon == "" {
 		icon = iconPath
 	}
@@ -394,7 +399,7 @@ func runOutOfContainer(action, body string) error {
 		fmt.Sprintf("Remove-Item -LiteralPath %s -Force -ErrorAction SilentlyContinue\r\n", psQuote(taskXML)) +
 		fmt.Sprintf("Remove-Item -LiteralPath %s -Force -ErrorAction SilentlyContinue\r\n", psQuote(vbs)) +
 		"Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue\r\n"
-	if err := os.WriteFile(ps1, []byte(script), 0o644); err != nil {
+	if err := os.WriteFile(ps1, scriptBytes(script), 0o644); err != nil {
 		return err
 	}
 	// The task cannot run powershell.exe directly: a console process gets its
@@ -488,10 +493,17 @@ func waitGone(path string, timeout time.Duration) error {
 	}
 }
 
-// psQuote renders s as a PowerShell single-quoted literal (no expansion, so a
-// path holding a $ or a backtick stays literal; an embedded quote is doubled).
-func psQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+// psQuote renders s as a PowerShell single-quoted literal. The values quoted
+// here include the account's login, which the server supplies, so this has to
+// be psquote's version, which also doubles the typographic quotes.
+func psQuote(s string) string { return psquote.Quote(s) }
+
+// scriptBytes is a script's file content: UTF-8 with a BOM. Without the BOM
+// Windows PowerShell 5.1 reads the file in the ANSI code page, which garbles
+// any non-ASCII name and can turn a byte of one (0x91-0x92 in cp1252) into a
+// quote that psQuote never saw.
+func scriptBytes(script string) []byte {
+	return append([]byte("\xEF\xBB\xBF"), script...)
 }
 
 // xmlEscape escapes the XML special characters in s for the task definition.

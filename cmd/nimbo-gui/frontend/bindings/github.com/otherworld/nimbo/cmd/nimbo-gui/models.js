@@ -121,6 +121,30 @@ export class AccountEntryDTO {
              */
             this["route"] = "";
         }
+        if (!("sidebarName" in $$source)) {
+            /**
+             * SidebarName is the name the user chose for the account's Explorer
+             * sidebar entry ("" = automatic), SidebarAuto the automatic one (the
+             * field's placeholder) and SidebarLabel the one actually shown.
+             * @member
+             * @type {string}
+             */
+            this["sidebarName"] = "";
+        }
+        if (!("sidebarAuto" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["sidebarAuto"] = "";
+        }
+        if (!("sidebarLabel" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["sidebarLabel"] = "";
+        }
 
         Object.assign(this, $$source);
     }
@@ -395,6 +419,15 @@ export class BlockedItem {
              */
             this["escaping"] = false;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * Remote is set for a SERVER item whose name Windows cannot hold (Deck
+             * #984): it can only be renamed on the server (RenameOnServer).
+             * @member
+             * @type {string | undefined}
+             */
+            this["remote"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -507,6 +540,15 @@ export class BrowseEntry {
              */
             this["isDir"] = false;
         }
+        if (!("size" in $$source)) {
+            /**
+             * Size is the server's size in bytes. For a folder it is everything inside
+             * it, all the way down (oc:size); 0 when the server didn't say.
+             * @member
+             * @type {number}
+             */
+            this["size"] = 0;
+        }
 
         Object.assign(this, $$source);
     }
@@ -519,6 +561,56 @@ export class BrowseEntry {
     static createFrom($$source = {}) {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new BrowseEntry(/** @type {Partial<BrowseEntry>} */($$parsedSource));
+    }
+}
+
+/**
+ * CloneRunDTO is a first sync in progress, for the Status window.
+ */
+export class CloneRunDTO {
+    /**
+     * Creates a new CloneRunDTO instance.
+     * @param {Partial<CloneRunDTO>} [$$source = {}] - The source object to create the CloneRunDTO.
+     */
+    constructor($$source = {}) {
+        if (!("localDir" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["localDir"] = "";
+        }
+        if (!("remoteRoot" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["remoteRoot"] = "";
+        }
+        if (!("first" in $$source)) {
+            /**
+             * pair-relative, in order
+             * @member
+             * @type {string[]}
+             */
+            this["first"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CloneRunDTO instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {CloneRunDTO}
+     */
+    static createFrom($$source = {}) {
+        const $$createField2_0 = $$createType0;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("first" in $$parsedSource) {
+            $$parsedSource["first"] = $$createField2_0($$parsedSource["first"]);
+        }
+        return new CloneRunDTO(/** @type {Partial<CloneRunDTO>} */($$parsedSource));
     }
 }
 
@@ -645,8 +737,8 @@ export class ConflictPreview {
      * @returns {ConflictPreview}
      */
     static createFrom($$source = {}) {
-        const $$createField0_0 = $$createType0;
-        const $$createField1_0 = $$createType0;
+        const $$createField0_0 = $$createType1;
+        const $$createField1_0 = $$createType1;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("local" in $$parsedSource) {
             $$parsedSource["local"] = $$createField0_0($$parsedSource["local"]);
@@ -932,7 +1024,7 @@ export class DiagnosticsDTO {
      * @returns {DiagnosticsDTO}
      */
     static createFrom($$source = {}) {
-        const $$createField13_0 = $$createType1;
+        const $$createField13_0 = $$createType0;
         const $$createField15_0 = $$createType3;
         const $$createField19_0 = $$createType3;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
@@ -1000,7 +1092,7 @@ export class FlyoutAppearanceDTO {
      * @returns {FlyoutAppearanceDTO}
      */
     static createFrom($$source = {}) {
-        const $$createField3_0 = $$createType1;
+        const $$createField3_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("sections" in $$parsedSource) {
             $$parsedSource["sections"] = $$createField3_0($$parsedSource["sections"]);
@@ -1136,6 +1228,101 @@ export class HeaderInfo {
     static createFrom($$source = {}) {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new HeaderInfo(/** @type {Partial<HeaderInfo>} */($$parsedSource));
+    }
+}
+
+/**
+ * LaneEntryDTO is one large transfer for the Status window and the flyout.
+ */
+export class LaneEntryDTO {
+    /**
+     * Creates a new LaneEntryDTO instance.
+     * @param {Partial<LaneEntryDTO>} [$$source = {}] - The source object to create the LaneEntryDTO.
+     */
+    constructor($$source = {}) {
+        if (!("account" in $$source)) {
+            /**
+             * set when several accounts are signed in
+             * @member
+             * @type {string}
+             */
+            this["account"] = "";
+        }
+        if (!("path" in $$source)) {
+            /**
+             * relative to its sync folder, slash-separated
+             * @member
+             * @type {string}
+             */
+            this["path"] = "";
+        }
+        if (!("abs" in $$source)) {
+            /**
+             * local path; what the Lane* methods take
+             * @member
+             * @type {string}
+             */
+            this["abs"] = "";
+        }
+        if (!("dir" in $$source)) {
+            /**
+             * "up" or "down"
+             * @member
+             * @type {string}
+             */
+            this["dir"] = "";
+        }
+        if (!("size" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["size"] = 0;
+        }
+        if (!("doneBytes" in $$source)) {
+            /**
+             * moved by the current attempt
+             * @member
+             * @type {number}
+             */
+            this["doneBytes"] = 0;
+        }
+        if (!("state" in $$source)) {
+            /**
+             * "running", "waiting", "paused" or "setaside"
+             * @member
+             * @type {string}
+             */
+            this["state"] = "";
+        }
+        if (!("position" in $$source)) {
+            /**
+             * 1-based place in the queue, for waiting ones
+             * @member
+             * @type {number}
+             */
+            this["position"] = 0;
+        }
+        if (!("until" in $$source)) {
+            /**
+             * set aside until (RFC 3339); "" = until resumed
+             * @member
+             * @type {string}
+             */
+            this["until"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new LaneEntryDTO instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {LaneEntryDTO}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new LaneEntryDTO(/** @type {Partial<LaneEntryDTO>} */($$parsedSource));
     }
 }
 
@@ -1423,6 +1610,14 @@ export class NotifItem {
              */
             this["actions"] = [];
         }
+        if (!("account" in $$source)) {
+            /**
+             * "login@host" of the account it came to (GitHub #20)
+             * @member
+             * @type {string}
+             */
+            this["account"] = "";
+        }
 
         Object.assign(this, $$source);
     }
@@ -1439,6 +1634,223 @@ export class NotifItem {
             $$parsedSource["actions"] = $$createField5_0($$parsedSource["actions"]);
         }
         return new NotifItem(/** @type {Partial<NotifItem>} */($$parsedSource));
+    }
+}
+
+/**
+ * NowCheckDTO is a folder check (scan or reconcile pass) in progress.
+ */
+export class NowCheckDTO {
+    /**
+     * Creates a new NowCheckDTO instance.
+     * @param {Partial<NowCheckDTO>} [$$source = {}] - The source object to create the NowCheckDTO.
+     */
+    constructor($$source = {}) {
+        if (!("account" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["account"] = "";
+        }
+        if (!("folder" in $$source)) {
+            /**
+             * the folder being listed now, "" when unknown
+             * @member
+             * @type {string}
+             */
+            this["folder"] = "";
+        }
+        if (!("dirs" in $$source)) {
+            /**
+             * folders listed so far
+             * @member
+             * @type {number}
+             */
+            this["dirs"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new NowCheckDTO instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {NowCheckDTO}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new NowCheckDTO(/** @type {Partial<NowCheckDTO>} */($$parsedSource));
+    }
+}
+
+/**
+ * NowJobDTO is one transfer in flight (or queued), for "Right now".
+ */
+export class NowJobDTO {
+    /**
+     * Creates a new NowJobDTO instance.
+     * @param {Partial<NowJobDTO>} [$$source = {}] - The source object to create the NowJobDTO.
+     */
+    constructor($$source = {}) {
+        if (!("account" in $$source)) {
+            /**
+             * login; "" with a single account
+             * @member
+             * @type {string}
+             */
+            this["account"] = "";
+        }
+        if (!("kind" in $$source)) {
+            /**
+             * "upload" | "download"
+             * @member
+             * @type {string}
+             */
+            this["kind"] = "";
+        }
+        if (!("path" in $$source)) {
+            /**
+             * account-relative, slash-separated
+             * @member
+             * @type {string}
+             */
+            this["path"] = "";
+        }
+        if (!("size" in $$source)) {
+            /**
+             * 0 = unknown
+             * @member
+             * @type {number}
+             */
+            this["size"] = 0;
+        }
+        if (!("sent" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["sent"] = 0;
+        }
+        if (!("large" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["large"] = false;
+        }
+        if (!("state" in $$source)) {
+            /**
+             * "running" | "waiting" | "paused" | "setaside"
+             * @member
+             * @type {string}
+             */
+            this["state"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new NowJobDTO instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {NowJobDTO}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new NowJobDTO(/** @type {Partial<NowJobDTO>} */($$parsedSource));
+    }
+}
+
+/**
+ * NowStatusDTO is the composed status line and the detail behind it.
+ */
+export class NowStatusDTO {
+    /**
+     * Creates a new NowStatusDTO instance.
+     * @param {Partial<NowStatusDTO>} [$$source = {}] - The source object to create the NowStatusDTO.
+     */
+    constructor($$source = {}) {
+        if (!("state" in $$source)) {
+            /**
+             * "attention" | "paused" | "offline" | "busy" | "idle"
+             * @member
+             * @type {string}
+             */
+            this["state"] = "";
+        }
+        if (!("main" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["main"] = "";
+        }
+        if (!("sub" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["sub"] = "";
+        }
+        if (!("progress" in $$source)) {
+            /**
+             * 0..1, -1 = none
+             * @member
+             * @type {number}
+             */
+            this["progress"] = 0;
+        }
+        if (!("tab" in $$source)) {
+            /**
+             * Status tab a click opens
+             * @member
+             * @type {string}
+             */
+            this["tab"] = "";
+        }
+        if (!("jobs" in $$source)) {
+            /**
+             * @member
+             * @type {NowJobDTO[]}
+             */
+            this["jobs"] = [];
+        }
+        if (!("checking" in $$source)) {
+            /**
+             * @member
+             * @type {NowCheckDTO[]}
+             */
+            this["checking"] = [];
+        }
+        if (!("lastCheck" in $$source)) {
+            /**
+             * RFC3339, "" = none yet
+             * @member
+             * @type {string}
+             */
+            this["lastCheck"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new NowStatusDTO instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {NowStatusDTO}
+     */
+    static createFrom($$source = {}) {
+        const $$createField5_0 = $$createType7;
+        const $$createField6_0 = $$createType9;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("jobs" in $$parsedSource) {
+            $$parsedSource["jobs"] = $$createField5_0($$parsedSource["jobs"]);
+        }
+        if ("checking" in $$parsedSource) {
+            $$parsedSource["checking"] = $$createField6_0($$parsedSource["checking"]);
+        }
+        return new NowStatusDTO(/** @type {Partial<NowStatusDTO>} */($$parsedSource));
     }
 }
 
@@ -1617,8 +2029,8 @@ export class PairDTO {
      * @returns {PairDTO}
      */
     static createFrom($$source = {}) {
-        const $$createField2_0 = $$createType1;
-        const $$createField5_0 = $$createType1;
+        const $$createField2_0 = $$createType0;
+        const $$createField5_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("excludes" in $$parsedSource) {
             $$parsedSource["excludes"] = $$createField2_0($$parsedSource["excludes"]);
@@ -1813,6 +2225,14 @@ export class ProgressDTO {
              */
             this["enumerating"] = false;
         }
+        if (!("clones" in $$source)) {
+            /**
+             * Clones are the first syncs running (Status → First sync).
+             * @member
+             * @type {CloneRunDTO[]}
+             */
+            this["clones"] = [];
+        }
 
         Object.assign(this, $$source);
     }
@@ -1823,7 +2243,11 @@ export class ProgressDTO {
      * @returns {ProgressDTO}
      */
     static createFrom($$source = {}) {
+        const $$createField9_0 = $$createType11;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("clones" in $$parsedSource) {
+            $$parsedSource["clones"] = $$createField9_0($$parsedSource["clones"]);
+        }
         return new ProgressDTO(/** @type {Partial<ProgressDTO>} */($$parsedSource));
     }
 }
@@ -2128,6 +2552,60 @@ export class SidePreview {
 }
 
 /**
+ * SignInTargetDTO is the account the sign-in window asks to sign in again.
+ * An empty ID means none in particular: the window signs in a new account.
+ */
+export class SignInTargetDTO {
+    /**
+     * Creates a new SignInTargetDTO instance.
+     * @param {Partial<SignInTargetDTO>} [$$source = {}] - The source object to create the SignInTargetDTO.
+     */
+    constructor($$source = {}) {
+        if (!("id" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["id"] = "";
+        }
+        if (!("user" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["user"] = "";
+        }
+        if (!("server" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["server"] = "";
+        }
+        if (!("address" in $$source)) {
+            /**
+             * "login@host"
+             * @member
+             * @type {string}
+             */
+            this["address"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SignInTargetDTO instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {SignInTargetDTO}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new SignInTargetDTO(/** @type {Partial<SignInTargetDTO>} */($$parsedSource));
+    }
+}
+
+/**
  * TrashDTO is a deleted item in the Nextcloud trashbin.
  */
 export class TrashDTO {
@@ -2316,9 +2794,15 @@ export class VersionDTO {
 }
 
 // Private type creation functions
-const $$createType0 = SidePreview.createFrom;
-const $$createType1 = $Create.Array($Create.Any);
+const $$createType0 = $Create.Array($Create.Any);
+const $$createType1 = SidePreview.createFrom;
 const $$createType2 = LockDTO.createFrom;
 const $$createType3 = $Create.Array($$createType2);
 const $$createType4 = NotifAction.createFrom;
 const $$createType5 = $Create.Array($$createType4);
+const $$createType6 = NowJobDTO.createFrom;
+const $$createType7 = $Create.Array($$createType6);
+const $$createType8 = NowCheckDTO.createFrom;
+const $$createType9 = $Create.Array($$createType8);
+const $$createType10 = CloneRunDTO.createFrom;
+const $$createType11 = $Create.Array($$createType10);

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -206,5 +207,36 @@ func TestUpdateKeepsEveryConcurrentChange(t *testing.T) {
 		if name != path {
 			t.Errorf("left behind %s, want only accounts.json", filepath.Base(name))
 		}
+	}
+}
+
+// A development build of the rename to OtherSync wrote a "labelBrand" key on
+// existing accounts (it kept their automatic sidebar name "Nimbo - <login>").
+// The field is gone and nothing ever shipped with it: a file that still has the
+// key loads as normal, and the next save drops it.
+func TestStoreIgnoresRetiredLabelBrand(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "accounts.json")
+	old := `{"accounts":[{"id":"a","serverURL":"https://cloud.example.com","loginName":"alice","label":"Work files","labelBrand":"Nimbo"}],"defaultId":"a"}`
+	if err := os.WriteFile(path, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := LoadStore(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if acc, ok := st.Find("a"); !ok || acc.LoginName != "alice" || acc.Label != "Work files" {
+		t.Fatalf("account not loaded as it was: %+v", acc)
+	}
+	update(t, path, func(st *Store) {
+		acc, _ := st.Find("a")
+		acc.Label = "Home files"
+		st.Upsert(acc)
+	})
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "labelBrand") {
+		t.Errorf("the retired key survived a save: %s", data)
 	}
 }

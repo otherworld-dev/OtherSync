@@ -9,6 +9,8 @@ import "context"
 type RevertPlan struct {
 	Hydrated      []string
 	Dehydrated    []string
+	Ignored       []string
+	Unsynced      []string
 	DownloadBytes int64
 }
 
@@ -19,7 +21,11 @@ type RevertResult struct {
 	Failed   int
 }
 
-func ScanRevert(string) (RevertPlan, error) { return RevertPlan{}, nil }
+func ScanRevert(string, func(string) StubFate) (RevertPlan, error) { return RevertPlan{}, nil }
+
+func (p RevertPlan) Total() int {
+	return len(p.Hydrated) + len(p.Dehydrated) + len(p.Ignored) + len(p.Unsynced)
+}
 
 func (p RevertPlan) Run(context.Context, string, func(int, int)) RevertResult {
 	return RevertResult{}

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gen2brain/beeep"
+	"github.com/otherworld/nimbo/internal/brand"
 	"github.com/otherworld/nimbo/internal/transport"
 )
 
@@ -17,7 +18,7 @@ func Toast(title, message, _ string) {
 		return
 	}
 	if title == "" {
-		title = "Nimbo"
+		title = brand.Current.Name
 	}
 	if err := beeep.Notify(title, message, ""); err != nil {
 		slog.Warn("toast failed", "err", err)
@@ -32,10 +33,11 @@ func RaiseActionable(title, message, _ string, _ []ToastButton) {
 
 // showToast displays a Nextcloud notification as a toast. accountID is unused
 // off-Windows (no clickable activation); the GUI panel provides click-through.
-func showToast(n transport.Notification, _ string) {
+// address ("login@host") goes under the message so the account is named.
+func showToast(n transport.Notification, _, address string) {
 	title := n.Subject
 	if title == "" {
 		title = "Nextcloud"
 	}
-	Toast(title, strings.TrimSpace(n.Message), n.Link)
+	Toast(title, withAttribution(strings.TrimSpace(n.Message), address), n.Link)
 }

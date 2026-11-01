@@ -11,7 +11,11 @@ package agent
 // conflict the rest), so the engine proceeds — but says so out loud instead
 // of hiding it.
 
-import "log/slog"
+import (
+	"log/slog"
+
+	"github.com/otherworld/nimbo/internal/brand"
+)
 
 // markPairSynced records that a pair completed its initial clone. Best-effort:
 // the marker only powers the state-loss warning. The engine-level lock
@@ -60,7 +64,7 @@ func (e *Engine) warnIfStateReset(pk string, p Pair) {
 	slog.Warn("sync state missing for a previously synced pair — recovering via takeover",
 		"local", p.LocalDir, "remote", p.RemoteRoot)
 	e.stateResetToast.Do(func() {
-		e.toast("Nimbo — sync state was reset",
-			"Nimbo's sync database was missing, so it is re-checking your files against the server. Your files are safe; anything that changed on only one side in the meantime will appear as a conflict copy.", "")
+		e.toast(brand.Current.Name+" — sync state was reset",
+			brand.Current.Name+"'s sync database was missing, so it is re-checking your files against the server. Your files are safe; anything that changed on only one side in the meantime will appear as a conflict copy.", "")
 	})
 }

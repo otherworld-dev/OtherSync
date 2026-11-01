@@ -28,6 +28,7 @@ import (
 
 	"github.com/otherworld/nimbo/internal/account"
 	"github.com/otherworld/nimbo/internal/activity"
+	"github.com/otherworld/nimbo/internal/brand"
 	"github.com/otherworld/nimbo/internal/cfapi"
 	"github.com/otherworld/nimbo/internal/config"
 	"github.com/otherworld/nimbo/internal/engine"
@@ -82,6 +83,7 @@ type Engine struct {
 	diagMu     sync.Mutex
 	pushUp     bool      // notify_push WebSocket currently connected
 	pushSince  time.Time // when it last connected (uptime)
+	pushEverUp bool      // it has connected at least once (a later connect is a reconnect)
 	lastStatus string    // most recent status string
 	lastSyncAt time.Time // when the engine last reached "Up to date"
 
@@ -94,9 +96,13 @@ type Engine struct {
 	watchers     map[string]context.CancelFunc
 	triggers     map[string]chan struct{}
 	triggersFull map[string]chan struct{} // key -> force-a-full-local-pass trigger (name-rule changes)
-	nudges       map[string]chan string   // key -> paths to sync as if the watcher saw them (see inuse.go)
-	awaiting     map[string]bool          // absolute paths awaitClosed is watching
-	tl           *lane                    // long transfers (lane.go, lanejobs.go); created on first use
+	triggersUser map[string]chan struct{} // key -> a sync the user asked for (not held back by the failure backoff)
+
+	relistMu     sync.Mutex
+	relistActive string                 // pair key whose one-off re-list is running ("" = none); see relist.go
+	nudges       map[string]chan string // key -> paths to sync as if the watcher saw them (see inuse.go)
+	awaiting     map[string]bool        // absolute paths awaitClosed is watching
+	tl           *lane                  // long transfers (lane.go, lanejobs.go); created on first use
 	busyMu       sync.Mutex
 	busy         map[string]string        // absolute path -> pair-relative: uploads waiting on a program (inuse.go)
 	watchDone    map[string]chan struct{} // key -> closed when the watcher goroutine exits (for a synchronous, drained stop)
@@ -105,6 +111,12 @@ type Engine struct {
 	// Engine — constructed before Run — works without setup.
 	pairHealthOnce  sync.Once
 	pairHealthState *pairHealthState
+
+	// Live snapshots for the flyout's status line (see now.go); lazily created.
+	nowOnce sync.Once
+	now     *nowState
+	// nowPairDirs lists the pair folders for jobStart; nil = read the pairs file (tests set it).
+	nowPairDirs func() []string
 
 	// moveExcl enforces move/sync mutual exclusion. A sync pass holds it for
 	// reading (many may run concurrently); a "Move sync folder" holds it for
@@ -118,6 +130,13 @@ type Engine struct {
 	blockedMu   sync.Mutex
 	blocked     map[string][]engine.Blocked // key = pair LocalDir
 	blockedSubs []chan struct{}
+
+	// unhold is the saved list of server items this PC cannot sync because
+	// Windows cannot hold their names (Deck #984), keyed by server path. It is
+	// shown in "Can't sync" next to blocked; see unholdable.go.
+	unholdMu     sync.Mutex
+	unhold       map[string]config.Unholdable
+	unholdLoaded bool
 
 	lockedMu   sync.Mutex
 	locked     map[string][]LockedFile // key = pair LocalDir — files OTHER users hold locked
@@ -192,6 +211,15 @@ type Engine struct {
 	progStop    chan struct{} // stops the speed sampler
 	progStartAt time.Time     // burst start, for a stable average-rate ETA
 	onProgress  func(SyncProgress)
+	onLane      func() // told when the large-file lane changes (queue view); see SetLaneFunc
+
+	// First syncs in progress, by pair key, so the folders chosen to download
+	// first can be changed while they run (clonefirst.go).
+	cloneMu sync.Mutex
+	clones  map[string]*cloneRunning
+	// cloneTestPools narrows the clone's listing and download pools ({listers,
+	// downloaders}) so a test can see a deterministic order; zero = normal.
+	cloneTestPools [2]int
 
 	onToast      func(title, message, link string) // desktop toasts (GUI sets this)
 	encMu        sync.Mutex
@@ -227,6 +255,9 @@ type SyncProgress struct {
 	DoneBytes   int64  `json:"doneBytes"`   // bytes transferred this burst
 	TotalBytes  int64  `json:"totalBytes"`  // bytes planned this burst (for % and ETA)
 	Enumerating bool   `json:"enumerating"` // still discovering work — total not yet final, so show indeterminate
+	// Clones are the first syncs running, with the folders each downloads
+	// first; the UI offers to change those while they run.
+	Clones []CloneRun `json:"clones,omitempty"`
 }
 
 // ConflictItem is a deferred conflict awaiting a user choice (PolicyAsk).
@@ -338,7 +369,7 @@ func NewEngineFor(ctx context.Context, accountID string) (*Engine, error) {
 		client:    client,
 		secret:    secret,
 		caps:      caps,
-		notifier:  notify.New(client, acc.ID),
+		notifier:  notify.New(client, acc.ID, acc.Address()),
 		recorder:  activity.New(),
 		blocked:   make(map[string][]engine.Blocked),
 		conflicts: make(map[string][]ConflictItem),
@@ -591,8 +622,10 @@ func (e *Engine) Upload(ctx context.Context, localPath, remotePath string) (stri
 	e.progStart(1, size)
 	defer e.progEnd()
 	e.progCurrent(filepath.Base(localPath))
+	jobDone := e.jobStart(localPath, "upload", size)
 	res, err := transfer.UploadProgress(ctx, e.client, localPath, remotePath,
-		func(n int64) { e.progBytes.Add(n) })
+		func(n int64) { e.progBytes.Add(n); e.jobProgress(localPath, n) })
+	jobDone(err)
 	if err == nil {
 		e.progComplete()
 	}
@@ -618,6 +651,18 @@ func (e *Engine) MoveRemote(ctx context.Context, src, dst string) error {
 		}
 	}
 	return e.client.Move(ctx, strings.Trim(src, "/"), dst)
+}
+
+// MoveRemoteNoReplace is MoveRemote that fails with
+// transport.ErrDestinationExists rather than replace what is already at dst.
+func (e *Engine) MoveRemoteNoReplace(ctx context.Context, src, dst string) error {
+	dst = strings.Trim(dst, "/")
+	if i := strings.LastIndex(dst, "/"); i > 0 {
+		if err := e.client.EnsureCollection(ctx, dst[:i]); err != nil {
+			return err
+		}
+	}
+	return e.client.MoveNoReplace(ctx, strings.Trim(src, "/"), dst)
 }
 
 // SearchFiles queries the server's unified search for files matching term.
@@ -711,6 +756,10 @@ type BlockedFile struct {
 	Abs      string // absolute local path
 	Reason   string
 	IsDir    bool
+	// Remote is set for a SERVER item that cannot come down (its name ends
+	// in a space or a dot): the files-root-relative path to rename on the
+	// server. Abs is then only where it would be, never an existing file.
+	Remote string
 }
 
 // BlockedFiles returns all currently-blocked files across pairs.
@@ -729,7 +778,7 @@ func (e *Engine) BlockedFiles() []BlockedFile {
 			})
 		}
 	}
-	return out
+	return append(out, e.unholdableFiles()...)
 }
 
 // LockedFile is a file another user currently holds a files_lock lock on.
@@ -1083,6 +1132,7 @@ func (e *Engine) BlacklistPath(abs string) error {
 		return err
 	}
 	e.removeBlocked(abs)
+	e.stopLaneUnder(abs)
 	return nil
 }
 
@@ -1769,6 +1819,14 @@ var (
 // connections that target different locations. The local directory is created
 // if it doesn't exist.
 func (e *Engine) AddSyncPair(localDir, remoteRoot string) error {
+	return e.AddSyncPairFirst(localDir, remoteRoot, nil)
+}
+
+// AddSyncPairFirst is AddSyncPair with folders (pair-relative, in order) for
+// the pair's first sync to download before everything else. They are saved
+// before the pair is, so the first pass, which starts once the pair is
+// saved, already honours them.
+func (e *Engine) AddSyncPairFirst(localDir, remoteRoot string, first []string) error {
 	remoteRoot = strings.Trim(remoteRoot, "/")
 	localDir = filepath.Clean(strings.TrimSpace(localDir))
 	if localDir == "" || localDir == "." || !filepath.IsAbs(localDir) {
@@ -1784,6 +1842,9 @@ func (e *Engine) AddSyncPair(localDir, remoteRoot string) error {
 		// was lost) replays the setup flow, and "that remote folder is already
 		// synced" dead-ended it (2026-08-21).
 		if strings.Trim(p.RemoteRoot, "/") == remoteRoot && filepath.Clean(p.LocalDir) == localDir {
+			if len(first) > 0 {
+				_ = e.SetCloneFirst(localDir, remoteRoot, first) // refused once its first sync is done
+			}
 			return nil
 		}
 		if strings.Trim(p.RemoteRoot, "/") == remoteRoot {
@@ -1798,6 +1859,12 @@ func (e *Engine) AddSyncPair(localDir, remoteRoot string) error {
 	}
 	if err := e.forgetCloneStatus(localDir, remoteRoot); err != nil {
 		return err
+	}
+	if len(first) > 0 {
+		// After forgetCloneStatus, which clears any left from an older pair.
+		if err := e.SetCloneFirst(localDir, remoteRoot, first); err != nil {
+			slog.Warn("cannot save the folders to download first; using the normal order", "err", err)
+		}
 	}
 	pairs = append(pairs, config.SyncPair{LocalDir: localDir, RemoteRoot: remoteRoot})
 	if err := e.dirs.SavePairs(pairs); err != nil {
@@ -2147,6 +2214,11 @@ func (e *Engine) FileStatus(abs string) string {
 			return "warn"
 		}
 	}
+	// A large file set aside (Deck #702) isn't on the server, or not in this
+	// version: no badge, rather than a synced tick, until it comes back.
+	if l := e.currentLane(); l != nil && l.parkedAt(abs) {
+		return "none"
+	}
 	// A share on this exact remote path marks the item as shared — the share
 	// ROOT only, not everything inside it (OneDrive's model). It outranks the
 	// idle answers ("ok"/mount "none") but never a transfer or a problem, and
@@ -2422,7 +2494,7 @@ func (e *Engine) noteEncrypted(rel string) {
 	}
 	slog.Info("skipping end-to-end encrypted folder (not supported)", "path", rel)
 	e.toast("Encrypted folder skipped",
-		"\""+rel+"\" is end-to-end encrypted — Nimbo can't sync it and is leaving it alone.", "")
+		"\""+rel+"\" is end-to-end encrypted — "+brand.Current.Name+" can't sync it and is leaving it alone.", "")
 }
 
 func (e *Engine) toast(title, message, link string) {
@@ -2486,9 +2558,11 @@ func syncErrKind(err error) string {
 
 // Progress returns the current sync-progress snapshot.
 func (e *Engine) Progress() SyncProgress {
+	clones := e.CloneRuns() // before progMu: it takes the clone locks
 	e.progMu.Lock()
 	defer e.progMu.Unlock()
 	p := e.prog
+	p.Clones = clones
 	if p.Active {
 		p.DoneBytes = e.progBytes.Load()
 		// Retried/resumed transfers can re-report bytes; never show >100%.
@@ -2543,6 +2617,41 @@ func (e *Engine) progAddTotal(files int, bytes int64) {
 	if e.progRuns > 0 {
 		e.prog.Total += files
 		e.prog.TotalBytes += bytes
+	}
+	e.progMu.Unlock()
+	e.emitProgress()
+}
+
+// progRetract takes back files/bytes previously added to the burst's totals
+// (progStart/progAddTotal), and sentBytes previously added to progBytes (the
+// done-so-far counter), for a job leaving the burst without finishing: a
+// large file set aside mid-sync (lanejobs.go) still has an unknown fate —
+// the re-plan that follows may find nothing to do — so its share of the
+// progress bar ends rather than counting toward a total it may never reach.
+// A no-op once the burst itself has ended (progRuns == 0): there is nothing
+// left to retract from. Clamped at 0 so a race between this and another
+// update can never take a total negative.
+func (e *Engine) progRetract(files int, bytes, sentBytes int64) {
+	e.progMu.Lock()
+	if e.progRuns > 0 {
+		e.prog.Total -= files
+		if e.prog.Total < 0 {
+			e.prog.Total = 0
+		}
+		e.prog.TotalBytes -= bytes
+		if e.prog.TotalBytes < 0 {
+			e.prog.TotalBytes = 0
+		}
+		for {
+			cur := e.progBytes.Load()
+			next := cur - sentBytes
+			if next < 0 {
+				next = 0
+			}
+			if e.progBytes.CompareAndSwap(cur, next) {
+				break
+			}
+		}
 	}
 	e.progMu.Unlock()
 	e.emitProgress()
@@ -2694,6 +2803,7 @@ func (e *Engine) DeselectFolder(localDir, rel string, deleteLocal bool) error {
 	if err := e.AddExclude(localDir, rel); err != nil {
 		return err
 	}
+	e.stopLaneUnder(filepath.Join(localDir, filepath.FromSlash(rel)))
 	if !deleteLocal {
 		e.TriggerSync()
 		return nil
@@ -2754,11 +2864,26 @@ func (e *Engine) status(s string) {
 // setPushState records the notify_push connection state for the health panel.
 func (e *Engine) setPushState(up bool) {
 	e.diagMu.Lock()
+	reconnect := up && !e.pushUp && e.pushEverUp
 	if up && !e.pushUp {
 		e.pushSince = time.Now()
 	}
 	e.pushUp = up
+	if up {
+		e.pushEverUp = true
+	}
 	e.diagMu.Unlock()
+	// Push came back after dropping: events may have been missed while it was
+	// down, and an outage may just have ended. Catch up now rather than at the
+	// next poll, up to 5 minutes away (Deck #991; on-demand's reconcile then
+	// also retries uploads that failed during the outage). The first connect
+	// is not a catch-up: startup runs its own full pass.
+	if reconnect {
+		e.TriggerSync()
+		if e.onFilesChanged != nil {
+			e.onFilesChanged()
+		}
+	}
 }
 
 // Diagnostic is a snapshot of Nimbo's connection/sync health for the UI.
@@ -2912,8 +3037,14 @@ func (e *Engine) PauseState() PauseStatus {
 // pauseChanged updates status, resumes work if newly unpaused, and notifies.
 func (e *Engine) pauseChanged() {
 	if e.Paused() {
+		if l := e.currentLane(); l != nil {
+			l.pause() // large transfers stop at once and carry on at resume (Deck #702)
+		}
 		e.status("Paused")
 	} else {
+		if l := e.currentLane(); l != nil {
+			l.resume()
+		}
 		e.status("Up to date")
 		e.TriggerSync()
 	}
@@ -2928,6 +3059,25 @@ func (e *Engine) TriggerSync() {
 	e.watchMu.Lock()
 	chans := make([]chan struct{}, 0, len(e.triggers))
 	for _, ch := range e.triggers {
+		chans = append(chans, ch)
+	}
+	e.watchMu.Unlock()
+	for _, ch := range chans {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// TriggerUserSync is TriggerSync for a sync the user asked for by name: "Sync
+// now", or "Resume syncing" on a paused folder. Unlike TriggerSync it is not
+// held back while a failed pass is being backed off from (see
+// watch.Options.UserSync). No-op until Run has started.
+func (e *Engine) TriggerUserSync() {
+	e.watchMu.Lock()
+	chans := make([]chan struct{}, 0, len(e.triggersUser))
+	for _, ch := range e.triggersUser {
 		chans = append(chans, ch)
 	}
 	e.watchMu.Unlock()
@@ -3022,6 +3172,8 @@ func (e *Engine) computePlan(ctx context.Context, st *state.Store, p Pair) ([]en
 	// Nothing is emitted until the pass outlives scanQuietPeriod, so the warm
 	// 15-second poll stays silent (see scanstatus.go).
 	e.scanBegin()
+	defer e.scanEndFor(pk)
+	e.scanTickCountFor(pk, "server", 0, "") // checking from the first moment, baseline load included
 	e.scanPhase("Reading your file list…")
 	base, err := st.LoadBaseline(pk)
 	if err != nil {
@@ -3036,8 +3188,9 @@ func (e *Engine) computePlan(ctx context.Context, st *state.Store, p Pair) ([]en
 	e.scanPhase("Checking server…")
 	remote, err := engine.RemoteScan(ctx, e.client, p.RemoteRoot, engine.ScanOpts{
 		Base: base, Skip: ig.Match, OnEncrypted: e.noteEncrypted, Esc: e.escaper.Load(),
-		Checkpoint: cp,
+		Checkpoint: cp, OnUnholdable: e.unholdableFor(p),
 		Progress: func(dirs int) {
+			e.scanTickCountFor(pk, "server", dirs, "")
 			e.scanTick("Checking server… " + commas(dirs) + " folders")
 		},
 	})
@@ -3049,7 +3202,9 @@ func (e *Engine) computePlan(ctx context.Context, st *state.Store, p Pair) ([]en
 		return nil, nil, nil, fmt.Errorf("remote scan: %w", err)
 	}
 	e.scanPhase("Checking your files…")
+	e.scanTickCountFor(pk, "local", 0, "")
 	local, err := engine.LocalScanProgress(p.LocalDir, "", func(files int) {
+		e.scanTickCountFor(pk, "local", files, "")
 		e.scanTick("Checking your files… " + commas(files))
 	})
 	if err != nil {
@@ -3059,6 +3214,7 @@ func (e *Engine) computePlan(ctx context.Context, st *state.Store, p Pair) ([]en
 	ig.FilterRemote(remote)
 
 	e.scanPhase("Comparing changes…")
+	e.scanTickCountFor(pk, "compare", 0, "")
 	actions := engine.Diff(base, remote, local)
 	pruneDeadBaselines(st, pk, base, remote, local)
 
@@ -3067,9 +3223,11 @@ func (e *Engine) computePlan(ctx context.Context, st *state.Store, p Pair) ([]en
 	// now completely invisible. CoalesceRenames drives hashLocal from its own
 	// sequential loop, so a plain counter is safe here.
 	e.scanPhase("Matching moved files…")
+	e.scanTickCountFor(pk, "moves", 0, "")
 	hashed := 0
 	hashLocal := func(rel string) (string, error) {
 		hashed++
+		e.scanTickCountFor(pk, "moves", hashed, "")
 		e.scanTick("Matching moved files… " + commas(hashed))
 		return transfer.SHA1File(filepath.Join(p.LocalDir, filepath.FromSlash(rel)))
 	}
@@ -3090,7 +3248,10 @@ func (e *Engine) computePlanScoped(ctx context.Context, st *state.Store, p Pair,
 	if scope == "" {
 		return e.computePlan(ctx, st, p)
 	}
-	base, err := st.LoadBaselineScoped(PairKey(p.LocalDir, p.RemoteRoot), scope)
+	spk := PairKey(p.LocalDir, p.RemoteRoot)
+	e.scanTickCountFor(spk, "server", 0, scope)
+	defer e.scanEndFor(spk)
+	base, err := st.LoadBaselineScoped(spk, scope)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -3101,10 +3262,11 @@ func (e *Engine) computePlanScoped(ctx context.Context, st *state.Store, p Pair,
 	// when consulting the ignore matcher to prune the descent.
 	subRoot := strings.Trim(p.RemoteRoot+"/"+scope, "/")
 	subRemote, err := engine.RemoteScan(ctx, e.client, subRoot, engine.ScanOpts{
-		Base:        stripScopePrefix(base, scope),
-		Skip:        func(rel string) bool { return ig.Match(scope + "/" + rel) },
-		OnEncrypted: e.noteEncrypted,
-		Esc:         e.escaper.Load(),
+		Base:         stripScopePrefix(base, scope),
+		Skip:         func(rel string) bool { return ig.Match(scope + "/" + rel) },
+		OnEncrypted:  e.noteEncrypted,
+		Esc:          e.escaper.Load(),
+		OnUnholdable: e.unholdableFor(p),
 	})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("remote scan: %w", err)
@@ -3264,7 +3426,7 @@ func (e *Engine) Plan(ctx context.Context, p Pair) ([]engine.Action, error) {
 }
 
 // SyncOnce reconciles a pair and applies the plan. It is a no-op while paused.
-func (e *Engine) SyncOnce(ctx context.Context, p Pair) (transfer.Stats, error) {
+func (e *Engine) SyncOnce(ctx context.Context, p Pair) (stats transfer.Stats, err error) {
 	if e.Paused() {
 		return transfer.Stats{}, nil
 	}
@@ -3274,6 +3436,9 @@ func (e *Engine) SyncOnce(ctx context.Context, p Pair) (transfer.Stats, error) {
 		return transfer.Stats{}, nil
 	}
 	defer e.endSyncPass()
+	// Only a pass that really ran counts as a check (a paused or move-skipped
+	// one returned above): it is what "Checked N min ago" is measured from.
+	defer func() { e.noteFullCheck(time.Now(), err == nil && e.otherPairsHealthy(p)) }()
 	if ex, ok := e.excludesFor(p.LocalDir, p.RemoteRoot); ok {
 		p.Excludes = ex // watcher captured p at start; pick up selective-sync toggles now
 	}
@@ -3326,6 +3491,9 @@ func (e *Engine) SyncOnce(ctx context.Context, p Pair) (transfer.Stats, error) {
 		e.markPairSynced(pk) // baseline present = synced before; seed the config-side marker
 	}
 
+	// Before the scan, and so before the baseline it prunes against is read.
+	relisting := e.relistBegin(st, pk, p)
+
 	// A full pass scans both trees before any transfer; on a large sync the
 	// discovery alone takes minutes, so surface it rather than looking idle.
 	e.status("Scanning…")
@@ -3335,19 +3503,22 @@ func (e *Engine) SyncOnce(ctx context.Context, p Pair) (transfer.Stats, error) {
 		return transfer.Stats{}, err
 	}
 	planStats, err := e.applyPlan(ctx, st, p, actions, remote, base, true) // full reconcile
+	e.relistEnd(st, pk, p, relisting, planStats, err)
 	// cloneStats is non-zero only when this pass also ran a clone first, so the
 	// caller sees one set of totals for the whole pass.
 	return cloneStats.Plus(planStats), err
 }
 
 // cloneEnumConcurrency bounds concurrent recursive PROPFINDs while the tree is
-// being counted; cloneDownloadConcurrency bounds how many top-level folders
-// download at once (each via its own Executor worker pool). Enumeration runs
-// ahead of (and independently of) downloading so the progress total is known in
-// minutes instead of being chained to the slow downloads.
+// being counted; cloneDownloadConcurrency x cloneFileWorkers is how many files
+// download at once (32: 64 gave no gain, the path caps ~5 MB/s, not the
+// client). Enumeration runs ahead of (and independently of) downloading so the
+// progress total is known in minutes instead of being chained to the slow
+// downloads.
 const (
 	cloneEnumConcurrency     = 6
 	cloneDownloadConcurrency = 4
+	cloneFileWorkers         = 8
 )
 
 // cloneRemote performs a resumable initial sync. It enumerates the tree in bulk
@@ -3386,6 +3557,10 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 	e.progMu.Lock()
 	e.prog.Enumerating = true // indeterminate until the whole tree is listed
 	e.progMu.Unlock()
+	e.scanTickCountFor(pk, "server", 0, "")
+	endListing := sync.OnceFunc(func() { e.scanEndFor(pk) })
+	defer endListing()
+	var listed atomic.Int64
 	root := strings.Trim(p.RemoteRoot, "/")
 	ig := e.ignoreFor(p)
 
@@ -3405,19 +3580,28 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 		}
 		return rel
 	}
+	// Paths whose action failed, for the dirtying after the downloads (below).
+	var (
+		unfinishedMu sync.Mutex
+		unfinished   []string
+	)
+	// One Executor per call: the download pool runs each file through its own
+	// (Workers 1), so the pool's size alone sets how many are in flight.
 	newExec := func(remote map[string]engine.RemoteState) *transfer.Executor {
 		return &transfer.Executor{
 			Client: e.client, State: st, PairKey: pk,
 			LocalRoot: p.LocalDir, RemoteRoot: p.RemoteRoot, Remote: remote, Escaper: e.escaper.Load(),
-			Workers: 8, Policy: e.policy, // ×cloneDownloadConcurrency = total in-flight (32). 64 gave no gain — the path caps ~5 MB/s, not the client.
+			Workers: 1, Policy: e.policy,
 			OnBegin: func(a engine.Action) {
+				e.jobActionBegin(p, a, remote)
 				e.markInflight(filepath.Join(p.LocalDir, filepath.FromSlash(a.Path)), true)
 				if a.Kind == engine.ActDownload {
 					e.progCurrent(filepath.Base(a.Path))
 				}
 			},
-			OnProgress: func(a engine.Action, d int64) { e.progBytes.Add(d) },
+			OnProgress: func(a engine.Action, d int64) { e.progBytes.Add(d); e.jobActionProgress(p, a, d) },
 			OnEvent: func(a engine.Action, aerr error) {
+				e.jobActionEnd(p, a)
 				e.markInflight(filepath.Join(p.LocalDir, filepath.FromSlash(a.Path)), false)
 				if a.Kind == engine.ActDownload {
 					e.progComplete()
@@ -3425,6 +3609,11 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 				var damaged *transfer.ChecksumMismatchError
 				if a.Kind == engine.ActDownload && errors.As(aerr, &damaged) {
 					e.noteDamaged(pk, a.Path, remote[a.Path].ETag) // see damaged.go
+				}
+				if aerr != nil {
+					unfinishedMu.Lock()
+					unfinished = append(unfinished, a.Path)
+					unfinishedMu.Unlock()
 				}
 				ev := activity.Event{Local: p.LocalDir, Path: a.Path, Kind: a.Kind.String()}
 				ev.Err = e.recordActionResult(a, aerr) // humanised + deduped; "" on success
@@ -3497,104 +3686,155 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 	}
 	rootActions, rootFiles, rootBytes := plan(rootRemote) // filters rootRemote in place
 
-	// Folders that survived the ignore filter get recursed.
-	var dispatch []string
+	// The work queue, ordered by the folders chosen to download first
+	// (clonefirst.go). Kept with the pair so a restart mid-clone keeps them.
+	sched := newCloneSched(root, ig.Match)
+	e.trackClone(pk, p, sched)
+	defer e.untrackClone(pk) // before progEnd's emit (defers run in reverse)
+	defer context.AfterFunc(ctx, sched.stop)()
+
+	// Folders that survived the ignore filter get recursed, each in a listing
+	// of its own.
 	for _, td := range topDirs {
-		if _, kept := rootRemote[relOf(td, true)]; kept {
-			dispatch = append(dispatch, td)
+		if rel := relOf(td, true); rootRemote[rel].IsDir {
+			sched.addListing(rel)
 		}
 	}
-
-	// "Enumerating" stays true until every folder's listing has been counted, so
-	// the bar is indeterminate (not misleadingly near-full) while the total grows.
-	enumPending := int32(1 + len(dispatch)) // root + each folder
-	enumDone := func() {
-		if atomic.AddInt32(&enumPending, -1) == 0 {
-			e.progMu.Lock()
-			e.prog.Enumerating = false
-			e.progMu.Unlock()
-			e.emitProgress()
-		}
+	first, ferr := st.CloneFirst(pk)
+	if ferr != nil {
+		slog.Warn("cannot read the folders to download first; using the normal order", "err", ferr)
 	}
+	sched.setFirst(first) // after the listings, so a chosen folder deeper down is carved out
 
-	// Root contents first (its folders are created here), then count it.
+	// Root contents: its folders are created now, its files queue like any
+	// other folder's (so a chosen folder can overtake them too).
 	e.progAddTotal(rootFiles, rootBytes)
-	enumDone()
-	if len(rootActions) > 0 {
-		s, rerr := newExec(rootRemote).Run(ctx, rootActions)
-		note(s, rerr)
+	cloneMkdirs(ctx, newExec(rootRemote), rootActions, note)
+	sched.queueDownloads(downloadsOf(rootActions), rootRemote)
+
+	// list makes one recursive listing and queues what it finds. A folder
+	// carved out of it is left to its own listing, except the carved folder's
+	// own row: that is planned here, where its parent is known (so its share
+	// flag is right), while its contents are the carve's. A carved folder that
+	// is no longer on the server has nothing to download.
+	list := func(l *cloneListing) {
+		entries, perr := e.client.PropFindRecursive(ctx, l.full)
+		if perr != nil {
+			notFound := errors.Is(perr, transport.ErrNotFound)
+			sched.failedListing(l, notFound)
+			// A carved folder's 404 is only a failure if the listing holding
+			// it saw the folder (lostCarves, after listing): then its contents
+			// were left to this listing and nobody fetched them.
+			if !(l.carved && notFound) {
+				note(transfer.Stats{}, perr)
+			}
+			return
+		}
+		e.scanTickCountFor(pk, "server", int(listed.Add(1)), l.rel)
+		carved := sched.seal(l)
+		sub := make(map[string]engine.RemoteState, len(entries))
+		// Every ancestor of an entry is in the same recursive listing, except
+		// the listed folder's own parent: the pair root, read above, for a
+		// top-level folder; for a carved one its own row is planned elsewhere.
+		onMount := make(map[string]bool, len(entries))
+		for _, en := range entries {
+			onMount[strings.Trim(en.Path, "/")] = en.OnMount()
+		}
+	entry:
+		for _, en := range entries {
+			full := strings.Trim(en.Path, "/")
+			rel := relOf(full, en.IsDir)
+			if rel == "" || (l.carved && rel == l.rel) {
+				continue
+			}
+			for _, c := range carved {
+				if rel == c {
+					sched.sawRow(c)
+				}
+				if strings.HasPrefix(rel, c+"/") {
+					continue entry
+				}
+			}
+			parentOnMount, parentKnown := rootOnMount, rootKnown
+			if parent := dirParent(full); parent != root {
+				parentOnMount, parentKnown = onMount[parent]
+			}
+			sub[rel] = cloneRemoteState(rel, en, parentOnMount, parentKnown)
+		}
+		actions, dlF, dlB := plan(sub)
+		cloneMkdirs(ctx, newExec(sub), actions, note)
+		e.progAddTotal(dlF, dlB)
+		sched.queueDownloads(downloadsOf(actions), sub)
 	}
 
-	// Counting must not wait on the slow downloads, or "enumerating" drags on for
-	// the whole clone (the total isn't known until the last folder is listed). So
-	// list every folder up-front — bounded only by PROPFIND concurrency — and count
-	// it immediately; that clears "enumerating" within minutes. Each listing is
-	// then handed to a separate download pool and freed once its folder completes,
-	// so peak memory falls as the clone progresses.
-	type folderWork struct {
-		sub     map[string]engine.RemoteState
-		actions []engine.Action
+	listers, downloaders := cloneEnumConcurrency, cloneDownloadConcurrency*cloneFileWorkers
+	if e.cloneTestPools[0] > 0 {
+		listers, downloaders = e.cloneTestPools[0], e.cloneTestPools[1]
 	}
-	// Buffered to len(dispatch) so a just-counted folder can always be queued
-	// without blocking enumeration behind a download that's still catching up.
-	works := make(chan folderWork, len(dispatch))
 
+	// Downloads start as soon as anything is queued; listing carries on beside
+	// them, so the total is known in minutes rather than chained to the slow
+	// downloads. Each file goes through the Executor on its own, so the next
+	// one is always the best waiting (a choice made mid-clone counts at once).
 	var dlwg sync.WaitGroup
-	for i := 0; i < cloneDownloadConcurrency; i++ {
+	for i := 0; i < downloaders; i++ {
 		dlwg.Add(1)
 		go func() {
 			defer dlwg.Done()
-			for w := range works {
-				s, rerr := newExec(w.sub).Run(ctx, w.actions)
+			for {
+				a, remote, ok := sched.nextDownload()
+				if !ok {
+					return
+				}
+				s, rerr := newExec(remote).Run(ctx, []engine.Action{a})
 				note(s, rerr)
 			}
 		}()
 	}
 
-	sem := make(chan struct{}, cloneEnumConcurrency)
+	// List every folder up-front — bounded only by PROPFIND concurrency — and
+	// count it at once; "enumerating" (an indeterminate bar, not a misleadingly
+	// near-full one while the total grows) ends when the last listing is in.
 	var enwg sync.WaitGroup
-	for _, td := range dispatch {
+	for i := 0; i < listers; i++ {
 		enwg.Add(1)
-		sem <- struct{}{}
-		go func(dirFull string) {
+		go func() {
 			defer enwg.Done()
-			defer func() { <-sem }()
-			entries, perr := e.client.PropFindRecursive(ctx, dirFull)
-			if perr != nil {
-				note(transfer.Stats{}, perr)
-				enumDone()
-				return
-			}
-			sub := make(map[string]engine.RemoteState, len(entries))
-			// Every ancestor of an entry is in the same recursive listing, except
-			// the top folder's own parent — the pair root, read above.
-			onMount := make(map[string]bool, len(entries))
-			for _, en := range entries {
-				onMount[strings.Trim(en.Path, "/")] = en.OnMount()
-			}
-			for _, en := range entries {
-				full := strings.Trim(en.Path, "/")
-				rel := relOf(full, en.IsDir)
-				if rel == "" {
-					continue
+			for {
+				l := sched.nextListing()
+				if l == nil {
+					return
 				}
-				parentOnMount, parentKnown := rootOnMount, rootKnown
-				if parent := dirParent(full); parent != root {
-					parentOnMount, parentKnown = onMount[parent]
-				}
-				sub[rel] = cloneRemoteState(rel, en, parentOnMount, parentKnown)
+				list(l)
+				sched.listingDone()
 			}
-			actions, dlF, dlB := plan(sub)
-			e.progAddTotal(dlF, dlB)
-			enumDone()
-			if len(actions) > 0 {
-				works <- folderWork{sub: sub, actions: actions}
-			}
-		}(td)
+		}()
 	}
-	enwg.Wait()  // every folder listed + counted → "enumerating" is now false
-	close(works) // no more folders to hand to the download pool
-	dlwg.Wait()  // wait for the download pool to drain
+	enwg.Wait() // every folder listed + counted
+	if lost := sched.lostCarves(); len(lost) > 0 {
+		// Not "done": the next pass resumes the clone and lists them again.
+		note(transfer.Stats{}, fmt.Errorf("could not list %s, which the server had just listed", strings.Join(lost, ", ")))
+	}
+	e.progMu.Lock()
+	e.prog.Enumerating = false
+	e.progMu.Unlock()
+	endListing()
+	e.emitProgress()
+	dlwg.Wait() // wait for the download pool to drain
+
+	// A folder row is written with the etag its listing gave, so a folder whose
+	// download or mkdir failed would look unchanged from now on and the scan
+	// would prune it: the file was never tried again (five files on the test
+	// VM after the server answered 423, with the status "Up to date"). Dirty
+	// the folders above every failed path, as later passes do, so the next
+	// scan lists them again, and ask for that pass now rather than at the poll.
+	unfinishedMu.Lock()
+	retry := append([]string(nil), unfinished...)
+	unfinishedMu.Unlock()
+	if len(retry) > 0 {
+		maintainDirBaselines(st, pk, nil, nil, retry)
+		defer e.TriggerSync()
+	}
 
 	if failed != nil {
 		e.status("Error")
@@ -3604,6 +3844,10 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 		return stats, ctx.Err()
 	}
 	_ = st.SetCloneStatus(pk, "done")
+	_ = st.SetCloneFirst(pk, nil) // nothing left to put first
+	// A first sync finished by this build retries what failed (above), so it
+	// has no holes for the one-off re-list to find.
+	_ = st.SetPairMeta(pk, relistMeta, relistDone)
 	e.markPairSynced(pk)
 	e.status("Up to date")
 	return stats, nil
@@ -3693,12 +3937,21 @@ func deletionWeight(st *state.Store, pk string, actions []engine.Action, kind en
 // which carries the file's path: a timeout uploading IMG_4012.jpg read as a
 // rejected sign-in, and one for Scans/20240409.pdf as a missing parent folder
 // (Deck #691).
+//
+// A 423 has two meanings, told apart by the request it answered. To a write it
+// is files_lock: somebody has the file open. To a download it is the server's
+// own short lock on the file, which nobody is holding: saying "someone else has
+// this file open" for five downloads refused during a first sync was untrue
+// (Deck #950). The download has already been tried a few times by then (see
+// transport.LockedGETWaits) and the next pass tries it again.
 func humanActionErr(a engine.Action, err error) string {
 	s := err.Error()
 	code := transport.StatusCode(err)
 	switch {
 	case strings.HasPrefix(a.Path, ".Collectives") || strings.Contains(s, ".Collectives"):
 		return "can't sync inside “.Collectives” — it's managed by the Collectives app and won't accept items created here; move this out of .Collectives to sync it"
+	case transport.LockedDownload(err) || (a.Kind == engine.ActDownload && transport.IsLocked(err)):
+		return lockedDownloadMsg
 	case transport.IsLocked(err):
 		return "someone else has this file open — it's locked on the server"
 	case errors.As(err, new(*transfer.ChecksumMismatchError)):
@@ -3717,6 +3970,10 @@ func humanActionErr(a engine.Action, err error) string {
 		return s
 	}
 }
+
+// lockedDownloadMsg is the reason shown for a download the server answered 423
+// to on every try (see humanActionErr).
+const lockedDownloadMsg = "the server had this file locked for a moment, so it couldn't be downloaded; it will be tried again"
 
 // recordActionResult logs a failed action ONCE (deduped per path+reason, with a
 // human-readable message) and returns that message for the activity feed; a later
@@ -4093,7 +4350,7 @@ func (e *Engine) applyPlan(ctx context.Context, st *state.Store, p Pair, actions
 				if counts.Deletions, err = deletionWeight(st, pk, actions, engine.ActDeleteLocal); err != nil {
 					return transfer.Stats{}, fmt.Errorf("damage guard: cannot weigh deletions: %w", err)
 				}
-				if reason, trips := syncguard.Trips(counts, known, syncguard.DefaultFloor, syncguard.DefaultPct); trips {
+				if reason, trips := syncguard.Trips(counts, known, syncguard.DefaultFloor, syncguard.DefaultPct, syncguard.DefaultCeiling); trips {
 					return transfer.Stats{}, e.tripGuard(p, reason, counts, known)
 				}
 			}
@@ -4209,9 +4466,17 @@ func (e *Engine) applyPlan(ctx context.Context, st *state.Store, p Pair, actions
 	}
 	actions, bigTransfers := splitForLane(actions, func(a engine.Action) int64 { return transferSize(p, a, remote) })
 	for _, a := range bigTransfers {
-		if e.sendToLane(p, pk, a, transferSize(p, a, remote), remote) {
+		switch {
+		case e.sendToLane(p, pk, a, transferSize(p, a, remote), remote):
 			laneHeld = append(laneHeld, a.Path) // unsent: its folder isn't settled
-		} else {
+		case tl.pairStopped(pk):
+			// The folder stopped syncing (removed, moved, held back) while
+			// this pass was planning it. Its large transfers aren't the
+			// pass's to run either: a download would recreate the folder the
+			// user asked to delete. Unsent, so its folder isn't settled.
+			slog.Info("large transfer dropped: its folder stopped syncing", "path", a.Path)
+			laneHeld = append(laneHeld, a.Path)
+		default:
 			actions = append(actions, a)
 		}
 	}
@@ -4264,9 +4529,10 @@ func (e *Engine) applyPlan(ctx context.Context, st *state.Store, p Pair, actions
 		Escaper:    e.escaper.Load(),
 		Workers:    4,
 		Policy:     e.policy,
-		OnBegin:    func(a engine.Action) { e.beginAction(p, a) },
+		OnBegin:    func(a engine.Action) { e.jobActionBegin(p, a, remote); e.beginAction(p, a) },
 		OnProgress: func(a engine.Action, delta int64) {
 			e.progBytes.Add(delta)
+			e.jobActionProgress(p, a, delta)
 		},
 		OnMovedAside: func(rel, dest string) {
 			probMu.Lock()
@@ -4274,6 +4540,7 @@ func (e *Engine) applyPlan(ctx context.Context, st *state.Store, p Pair, actions
 			probMu.Unlock()
 		},
 		OnEvent: func(a engine.Action, aerr error) {
+			e.jobActionEnd(p, a)
 			probs, busy := e.finishAction(p, pk, remote, a, aerr)
 			if len(probs) == 0 {
 				return
@@ -4596,7 +4863,18 @@ func (e *Engine) syncRemoteDelta(ctx context.Context, p Pair) (transfer.Stats, e
 	if status, _ := st.CloneStatus(pk); status != "done" {
 		return e.SyncOnce(ctx, p)
 	}
+	// Before the baseline the scan prunes against is read.
+	relisting := e.relistBegin(st, pk, p)
 
+	e.scanTickCountFor(pk, "server", 0, "")
+	scanEnded := false
+	endScan := func() {
+		if !scanEnded {
+			scanEnded = true
+			e.scanEndFor(pk)
+		}
+	}
+	defer endScan()
 	tBase := time.Now()
 	base, err := st.LoadBaseline(pk)
 	if err != nil {
@@ -4610,8 +4888,10 @@ func (e *Engine) syncRemoteDelta(ctx context.Context, p Pair) (transfer.Stats, e
 	cp := newScanCheckpoint(st, pk)
 	remote, err := engine.RemoteScan(ctx, e.client, p.RemoteRoot, engine.ScanOpts{
 		Base: base, Skip: ig.Match, OnEncrypted: e.noteEncrypted, Esc: e.escaper.Load(),
-		Checkpoint: cp,
+		Checkpoint: cp, OnUnholdable: e.unholdableFor(p),
+		Progress: func(dirs int) { e.scanTickCountFor(pk, "server", dirs, "") },
 	})
+	endScan()
 	cp.logSummary()
 	if _, _, saves := cp.stats(); saves > 0 {
 		e.markCheckpointDirty(pk)
@@ -4649,6 +4929,7 @@ func (e *Engine) syncRemoteDelta(ctx context.Context, p Pair) (transfer.Stats, e
 			"baseline_rows", len(base))
 		e.clearCheckpoint(st, pk) // a quiet delta is a clean pass
 		e.status("Up to date")
+		e.relistEnd(st, pk, p, relisting, transfer.Stats{}, nil)
 		return transfer.Stats{}, nil
 	}
 
@@ -4676,7 +4957,13 @@ func (e *Engine) syncRemoteDelta(ctx context.Context, p Pair) (transfer.Stats, e
 	ig.FilterLocal(local)
 	ig.FilterRemote(remoteSub)
 
-	actions := engine.Diff(baseSub, remoteSub, local)
+	// Coalesce server-side renames, as the full pass does: a file that moved
+	// keeps its oc:fileid, so DeleteLocal(old) + Download(new) is rewritten to a
+	// local rename. Without it a folder renamed in the web UI was deleted here
+	// and downloaded again in full, and the deletions it was planned as tripped
+	// the damage guard (61 of 91 files on the test VM, Deck #947). Local
+	// renames are the watcher's business (planPaths), so no hashing here.
+	actions := engine.CoalesceRenames(engine.Diff(baseSub, remoteSub, local), baseSub, remoteSub, local, nil)
 	pruneDeadBaselines(st, pk, baseSub, remoteSub, local)
 	deltaCompute := time.Since(tDelta)
 	slog.Info("remote-delta timing",
@@ -4684,7 +4971,9 @@ func (e *Engine) syncRemoteDelta(ctx context.Context, p Pair) (transfer.Stats, e
 		"remote_scan", remoteScan.Round(time.Millisecond),
 		"delta_compute", deltaCompute.Round(time.Millisecond),
 		"baseline_rows", len(base), "changed_paths", len(remoteSub)+len(baseSub), "actions", len(actions))
-	return e.applyPlan(ctx, st, p, actions, remoteSub, base, false) // remote-delta — merge blocks, don't clear
+	stats, err := e.applyPlan(ctx, st, p, actions, remoteSub, base, false) // remote-delta — merge blocks, don't clear
+	e.relistEnd(st, pk, p, relisting, stats, err)
+	return stats, err
 }
 
 // maxScopes caps how many distinct subtrees one change-batch will sync before
@@ -4800,7 +5089,7 @@ func (e *Engine) toastGuardTripped() {
 	if throttled {
 		return
 	}
-	e.toast("Nimbo — syncing paused",
+	e.toast(brand.Current.Name+" — syncing paused",
 		"Your sync folder is missing or empty, so syncing is paused to protect your Nextcloud files. Restore or remount the folder to resume.", "")
 }
 
@@ -4885,6 +5174,7 @@ func (e *Engine) Run(ctx context.Context, pairs []Pair, onSync func(Pair, transf
 	e.watchers = make(map[string]context.CancelFunc)
 	e.triggers = make(map[string]chan struct{})
 	e.triggersFull = make(map[string]chan struct{})
+	e.triggersUser = make(map[string]chan struct{})
 	e.nudges = make(map[string]chan string)
 	e.watchDone = make(map[string]chan struct{})
 	e.watchMu.Unlock()
@@ -5037,14 +5327,24 @@ func (e *Engine) startWatcher(p Pair) {
 	cctx, cancel := context.WithCancel(e.runCtx)
 	ext := make(chan struct{}, 1)
 	fullExt := make(chan struct{}, 1)
+	userExt := make(chan struct{}, 1)
 	nudge := make(chan string, 16)
 	done := make(chan struct{})
 	e.watchers[key] = cancel
 	e.triggers[key] = ext
 	e.triggersFull[key] = fullExt
+	if e.triggersUser == nil {
+		e.triggersUser = make(map[string]chan struct{})
+	}
+	e.triggersUser[key] = userExt
 	e.nudges[key] = nudge
 	e.watchDone[key] = done
 	e.watchMu.Unlock()
+	// The folder syncs (again): if stopWatcher took it out of the lane, let
+	// its large transfers back in (see stopLanePair).
+	if l := e.currentLane(); l != nil {
+		l.allowPair(key)
+	}
 
 	go func() {
 		defer close(done) // let stopWatcherSync wait for an in-flight sync to drain
@@ -5097,6 +5397,7 @@ func (e *Engine) startWatcher(p Pair) {
 			Debounce:      500 * time.Millisecond, // snappy local→server; still coalesces a burst
 			External:      ext,
 			FullSync:      fullExt,
+			UserSync:      userExt,
 			Nudge:         nudge,
 			OnPush:        pushFn,
 			FullSyncEvery: time.Hour, // most polls are fast remote-deltas; full walk hourly
@@ -5106,6 +5407,7 @@ func (e *Engine) startWatcher(p Pair) {
 		delete(e.watchers, key)
 		delete(e.triggers, key)
 		delete(e.triggersFull, key)
+		delete(e.triggersUser, key)
 		delete(e.nudges, key)
 		delete(e.watchDone, key)
 		e.watchMu.Unlock()
@@ -5123,6 +5425,7 @@ func (e *Engine) stopWatcher(key string) {
 	if cancel != nil {
 		cancel()
 	}
+	e.stopLanePair(key) // its large transfers too, before the folder goes
 }
 
 // stopWatcherSync cancels a pair's watcher AND waits for its goroutine — hence
@@ -5148,6 +5451,7 @@ func (e *Engine) stopWatcherSync(key string) {
 			slog.Warn("watcher did not stop within 30s; proceeding", "key", key)
 		}
 	}
+	e.stopLanePair(key) // a move must not overlap a large transfer either
 }
 
 // runPush connects to notify_push and fans events out to all active watchers.

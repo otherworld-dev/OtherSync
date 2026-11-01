@@ -1,0 +1,37 @@
+<!doctype html>
+<!-- Google Play feature graphic, 1024x500. The mark is the Other family brand
+     sheet's othersync.svg (the same geometry shell/windows/appicon draws for the
+     launcher icon). Render with headless Chrome:
+     chrome --headless --hide-scrollbars --window-size=1024,500 --screenshot=feature-graphic.png src/feature-graphic.html -->
+<html lang="en-GB"><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=block" rel="stylesheet">
+<style>
+  html, body { margin: 0; width: 1024px; height: 500px; overflow: hidden; }
+  body { background: radial-gradient(circle at 30% 42%, #12202B 0%, #0A0F16 70%); font-family: Roboto, sans-serif;
+         display: flex; align-items: center; color: #F2EFE6; }
+  svg { width: 340px; height: 340px; margin-left: 70px; flex: none; }
+  .text { margin-left: 56px; }
+  h1 { font-size: 100px; font-weight: 300; margin: 0; letter-spacing: -2px; line-height: 1; }
+  h1 b { font-weight: 700; color: #22D3C4; }
+  p { font-size: 33px; font-weight: 400; margin: 22px 0 0; line-height: 1.25; color: #C9D3D8; }
+  p b { color: #5EEAD4; font-weight: 500; }
+</style></head>
+<body>
+  <svg viewBox="40 40 432 432" aria-hidden="true">
+    <circle cx="256" cy="256" r="178" fill="none" stroke="#22D3C4" stroke-width="44" opacity="0.14"/>
+    <circle cx="256" cy="256" r="178" fill="none" stroke="#22D3C4" stroke-width="20"/>
+    <g stroke="#F2EFE6" stroke-width="26" stroke-linecap="round" fill="none">
+      <path d="M169.5 224.5 A92 92 0 0 1 342.5 224.5"/>
+      <path d="M342.5 287.5 A92 92 0 0 1 169.5 287.5"/>
+    </g>
+    <g fill="#F2EFE6" stroke="#F2EFE6" stroke-width="6" stroke-linejoin="round">
+      <polygon points="351.4,248.9 363.5,206.2 314.7,224.0"/>
+      <polygon points="160.6,263.1 197.3,288.0 148.5,305.8"/>
+    </g>
+    <circle cx="256" cy="256" r="15" fill="#5EEAD4"/>
+  </svg>
+  <div class="text">
+    <h1>Other<b>Sync</b></h1>
+    <p>Two-way folder sync<br>for <b>your own</b> Nextcloud</p>
+  </div>
+</body></html>

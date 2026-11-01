@@ -1,10 +1,25 @@
-// Command appicon generates the Nimbo application icon used for the
-// Explorer navigation-pane entry (and available for packaging). Run:
+// Command appicon generates the application icon: the .ico embedded in the
+// exe (also used for the Explorer navigation-pane entry, app-window shortcuts
+// and the Setup.exe) and the MSIX logo set. The stock brand draws the
+// OtherSync family mark (mark.go); any other accent draws the white-label
+// nimbus in a palette derived from that accent. Run:
 //
 //	go run .                # writes ../../../cmd/nimbo-gui/assets/nimbo.ico
 //	go run . logos <dir>    # MSIX PNG logo set into <dir>
-//	go run . android [dir]  # Android adaptive-icon layers; defaults to
-//	                        # ../../../android/app/src/main/res
+//	go run . [-accent #hex] [-name ic_launcher_x | -variant v] android [dir]
+//	                        # Android adaptive-icon layers; defaults to
+//	                        # ../../../android/app/src/main/res; the stock
+//	                        # brand also writes the notification icon
+//	go run . play <file>    # the 512 px Google Play icon
+//	                        # (../../../android/store/icon-512.png)
+//
+//	The Android supporter icon variants, the OtherSync mark in the palettes
+//	of markVariants (android_mark.go), written as ic_launcher_<variant>
+//	(run from this directory):
+//
+//	  go run . -variant forest android
+//	  go run . -variant ember android
+//	  go run . -variant slate android
 //
 // Committed; re-run only to change the artwork.
 package main
@@ -16,22 +31,25 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	stdraw "image/draw"
 	"image/png"
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/otherworld/nimbo/internal/brand"
+	"github.com/otherworld/nimbo/internal/brandmark"
 )
 
-// Nimbo's own palette: a GOLDEN nimbus cloud (think Dragon Ball's Kinto'un)
-// on an indigo night-sky tile — deliberately nothing like the white-on-blue
-// clouds of Nextcloud (#0082C9), OneDrive and Dropbox.
+// The white-label nimbus palette: a GOLDEN nimbus cloud (think Dragon Ball's
+// Kinto'un) on an indigo night-sky tile — Nimbo's own icon before the rename,
+// and still what any non-stock accent gets, recoloured.
 //
 // These four slots are filled in main() from the active brand's accent: the
-// stock Nimbo accent reproduces the exact hand-tuned values; any other
+// legacy Nimbo accent reproduces the exact hand-tuned values; any other
 // (white-label) accent derives a matching two-tone palette (see newPalette).
 var (
 	indigoTop color.RGBA // tile gradient top
@@ -45,18 +63,24 @@ func main() {
 	// optional -accent flag overrides it to preview or generate a reseller's
 	// icon without editing brand.json.
 	accent := flag.String("accent", "", "brand accent hex (#RRGGBB) to use instead of brand.json")
+	name := flag.String("name", "ic_launcher", "android: base name of the icon resources (variants: ic_launcher_<x>)")
+	variant := flag.String("variant", "", "android: write the supporter icon variant ic_launcher_<variant> (forest, ember, slate)")
 	flag.Parse()
 	hex := brand.Current.AccentHex
 	if *accent != "" {
 		hex = *accent
 	}
-	p := newPalette(hex)
-	indigoTop, indigoBot, goldLight, goldDeep = p.tileTop, p.tileBot, p.cloudLight, p.cloudDeep
+	setAccent(hex)
 
 	// `go run . logos <dir>` writes the MSIX PNG logo set; default writes the ICO.
 	args := flag.Args()
 	if len(args) >= 2 && args[0] == "logos" {
 		writeLogos(args[1])
+		return
+	}
+	// `go run . play <file>` writes the 512 px Google Play listing icon.
+	if len(args) >= 2 && args[0] == "play" {
+		writePlayIcon(args[1])
 		return
 	}
 	// Android adaptive-icon layers, as vectors: go run . android [res-dir].
@@ -67,19 +91,50 @@ func main() {
 		if len(args) >= 2 {
 			res = args[1]
 		}
-		writeAndroid(res)
+		if *variant != "" {
+			if _, ok := markVariants[*variant]; !ok {
+				fmt.Fprintln(os.Stderr, "-variant must be forest, ember or slate")
+				os.Exit(2)
+			}
+			writeAndroidVariant(res, *variant)
+			return
+		}
+		if !regexp.MustCompile(`^[a-z][a-z0-9_]*$`).MatchString(*name) {
+			fmt.Fprintln(os.Stderr, "-name must be a lowercase Android resource name")
+			os.Exit(2)
+		}
+		writeAndroid(res, *name)
 		return
 	}
 	out := filepath.Join("..", "..", "..", "cmd", "nimbo-gui", "assets")
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		panic(err)
 	}
-	writeICO(filepath.Join(out, "nimbo.ico"), []int{16, 24, 32, 48, 64, 256})
+	writeICO(filepath.Join(out, "nimbo.ico"), icoSizes)
 }
 
-// stockAccent is Nimbo's own brand accent; a build using it keeps the exact
-// hand-tuned icon, while any other accent derives its palette from that colour.
-const stockAccent = "#5856E0"
+// icoSizes are the frames of the app .ico. 20 and 40 serve 125% and 250%
+// scaling (the tray and title bar use the small-icon size) without a resample.
+var icoSizes = []int{16, 20, 24, 32, 40, 48, 64, 256}
+
+// stockAccent is OtherSync's own brand accent: a build using it draws the
+// family mark. Any other accent is a white-label partner and gets the nimbus.
+const stockAccent = "#22D3C4"
+
+// legacyNimboAccent is Nimbo's old indigo, which still maps to the exact
+// hand-tuned gold-on-indigo nimbus (so -accent "#5856E0" reproduces it).
+const legacyNimboAccent = "#5856E0"
+
+// stockMark is set when the active accent is the stock one: draw renders the
+// family mark instead of the nimbus.
+var stockMark bool
+
+// setAccent points the generator at a brand accent.
+func setAccent(hex string) {
+	stockMark = normalizeHex(hex) == normalizeHex(stockAccent)
+	p := newPalette(hex)
+	indigoTop, indigoBot, goldLight, goldDeep = p.tileTop, p.tileBot, p.cloudLight, p.cloudDeep
+}
 
 // palette holds the icon's four working colours: the tile gradient (top/bottom)
 // and the nimbus body/underside drawn over it.
@@ -87,13 +142,13 @@ type palette struct {
 	tileTop, tileBot, cloudLight, cloudDeep color.RGBA
 }
 
-// newPalette returns the icon palette for a brand accent. The stock accent maps
-// to the canonical gold-on-indigo. Any other accent becomes the tile (brightened
-// at the top, deepened at the bottom) with a near-complementary, warm-biased
-// cloud over it — the same light-body / dark-underside contrast that reads as
+// newPalette returns the nimbus palette for a brand accent. The legacy Nimbo
+// accent maps to the canonical gold-on-indigo. Any other accent becomes the
+// tile (brightened at the top, deepened at the bottom) with a
+// near-complementary, warm-biased cloud over it — the same light-body / dark-underside contrast that reads as
 // the flying nimbus, in the reseller's colour.
 func newPalette(accentHex string) palette {
-	if normalizeHex(accentHex) == normalizeHex(stockAccent) {
+	if normalizeHex(accentHex) == normalizeHex(legacyNimboAccent) {
 		return palette{
 			tileTop:    color.RGBA{0x6F, 0x6A, 0xF2, 0xff},
 			tileBot:    color.RGBA{0x4A, 0x3E, 0xD2, 0xff},
@@ -206,6 +261,20 @@ func writeLogos(dir string) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		panic(err)
 	}
+	for name, size := range logoSizes() {
+		f, err := os.Create(filepath.Join(dir, name))
+		if err != nil {
+			panic(err)
+		}
+		if err := png.Encode(f, draw(size)); err != nil {
+			panic(err)
+		}
+		f.Close()
+	}
+}
+
+// logoSizes maps each MSIX logo file to its pixel size.
+func logoSizes() map[string]int {
 	logos := map[string]int{
 		"Square44x44Logo.png":   44,
 		"Square150x150Logo.png": 150,
@@ -222,16 +291,46 @@ func writeLogos(dir string) {
 		logos[fmt.Sprintf("Square44x44Logo.targetsize-%d.png", s)] = s
 		logos[fmt.Sprintf("Square44x44Logo.targetsize-%d_altform-unplated.png", s)] = s
 	}
-	for name, size := range logos {
-		f, err := os.Create(filepath.Join(dir, name))
-		if err != nil {
-			panic(err)
-		}
-		if err := png.Encode(f, draw(size)); err != nil {
-			panic(err)
-		}
-		f.Close()
+	return logos
+}
+
+// writePlayIcon writes the Google Play listing icon: 512 px and square, with
+// the tile running full-bleed, as Play rounds the corners itself and asks for
+// artwork without its own corners or shadow.
+func writePlayIcon(path string) {
+	const size = 512
+	img := image.NewRGBA(image.Rect(0, 0, size, size))
+	if stockMark {
+		// The mark's tile filling the square, at the master's proportions.
+		stdraw.Draw(img, img.Bounds(), brandmark.DrawWith(size, brandmark.Options{Square: true}), image.Point{}, stdraw.Src)
+	} else {
+		paintPlayNimbus(img, size)
 	}
+	// Play's spec asks for a 32-bit PNG, and Go's encoder writes plain RGB when
+	// every pixel is opaque. One corner pixel a shade off opaque keeps the alpha
+	// channel, and Play's rounded mask hides that corner anyway.
+	c := img.RGBAAt(0, 0)
+	img.SetRGBA(0, 0, color.RGBA{c.R, c.G, c.B, 0xfe})
+	f, err := os.Create(path)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		panic(err)
+	}
+}
+
+// paintPlayNimbus paints the white-label Play icon: the tile gradient
+// full-bleed under the nimbus.
+func paintPlayNimbus(img *image.RGBA, size int) {
+	for y := 0; y < size; y++ {
+		row := lerpColor(indigoTop, indigoBot, float64(y)/float64(size-1))
+		for x := 0; x < size; x++ {
+			img.Set(x, y, row)
+		}
+	}
+	drawCloud(img, float64(size))
 }
 
 func writeICO(path string, sizes []int) {
@@ -271,10 +370,19 @@ func writeICO(path string, sizes []int) {
 	}
 }
 
-// draw renders Nimbo's tile: an indigo-violet gradient rounded square carrying
-// the golden NIMBUS — a billowy cumulus, lumpy top and bottom with a cel-shaded
-// underside and a trailing puff, like the flying nimbus it's named for.
+// draw renders the icon at one size: the family mark for the stock brand,
+// otherwise the white-label nimbus.
 func draw(size int) image.Image {
+	if stockMark {
+		return brandmark.Draw(size)
+	}
+	return drawNimbus(size)
+}
+
+// drawNimbus renders the white-label tile: an accent gradient rounded square
+// carrying the NIMBUS — a billowy cumulus, lumpy top and bottom with a
+// cel-shaded underside and a trailing puff.
+func drawNimbus(size int) image.Image {
 	img := image.NewRGBA(image.Rect(0, 0, size, size))
 	f := float64(size)
 	m := f * 0.08   // margin

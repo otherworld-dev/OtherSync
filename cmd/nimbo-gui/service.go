@@ -34,25 +34,47 @@ import (
 	"github.com/otherworld/nimbo/internal/brand"
 	"github.com/otherworld/nimbo/internal/cfapi"
 	"github.com/otherworld/nimbo/internal/config"
+	"github.com/otherworld/nimbo/internal/engine"
 	"github.com/otherworld/nimbo/internal/license"
 	"github.com/otherworld/nimbo/internal/notify"
 	"github.com/otherworld/nimbo/internal/overlay"
 	"github.com/otherworld/nimbo/internal/policy"
+	"github.com/otherworld/nimbo/internal/psquote"
 	"github.com/otherworld/nimbo/internal/shellmenu"
 	"github.com/otherworld/nimbo/internal/shellns"
 	"github.com/otherworld/nimbo/internal/transfer"
 	"github.com/otherworld/nimbo/internal/transport"
 	"github.com/otherworld/nimbo/internal/update"
 	"github.com/otherworld/nimbo/internal/vfs"
+	"github.com/otherworld/nimbo/internal/winname"
 )
 
 // App is the Wails-bound service: its exported methods are callable from the
 // frontend, and it forwards engine changes to the UI as events.
 type App struct {
+	// trayNowAt/trayNowDTO cache the tray's composed status (trayNow); only
+	// animateTray's goroutine touches them.
+	trayNowAt  time.Time
+	trayNowDTO NowStatusDTO
+	// attn caches Attention for NowStatus and the tray (cachedAttention);
+	// attnAt zero = refresh on the next read.
+	attnMu  sync.Mutex
+	attn    AttentionInfo
+	attnAt  time.Time
+	attnGen uint64 // bumped by attentionChanged
+
+	// The "what's happening now" status (now.go): on-demand downloads
+	// streamed through the filter, and the throttle for the "now" event.
+	hjobs     hydrateJobs
+	nowEmOnce sync.Once
+	nowEm     *nowEmitter
+	revealMu  sync.Mutex // guards revealAt
+	revealAt  time.Time  // when the pending nudgeAfter fires (past = none)
+
 	app             *application.App
 	ctx             context.Context
 	eng             *agent.Engine
-	status          string
+	status          statusLine // the shown engine's status text; only via setStatus/Status/status.get
 	statusWin       *application.WebviewWindow
 	statusTab       string // tab the status window should open on ("" = default)
 	settingsWin     *application.WebviewWindow
@@ -82,15 +104,22 @@ type App struct {
 	appsCacheMu     sync.Mutex
 	appsCache       []transport.App // last-fetched navigation apps (flyout refreshes keep it warm)
 	appsCacheAt     time.Time
-	onDemandMounts  map[string]*odMount // local dir -> active mount
+	onDemandMounts  map[string]*odMount // local dir -> active mount; only via mounts()/addMount/… (mapsMu)
+	mapsMu          sync.RWMutex        // guards onDemandMounts, secondaries and odMount.watcher
 	pendingKeep     string              // on-demand path to pin once mounts are ready
 	pendingFree     string              // on-demand path to free up once mounts are ready
+	// "Sync this first" from the Explorer menu (syncfirst.go): the paths asked
+	// for before the engine was ready, and when each kind of toast was last
+	// shown. All three guarded by syncFirstMu.
+	syncFirstMu      sync.Mutex
+	pendingSyncFirst []string
+	syncFirstSaid    map[string]time.Time
 	// pendingAdopt holds the plan from the last "ondemand-scan" so the confirmed
 	// "ondemand-adopt" acts on exactly what the user was shown. preMountAdopt is
 	// the confirmed plan staged for mountOnDemandWith, which runs its Apply
 	// between registering the sync root and starting the write-back watcher —
 	// the watcher must never see adopt's local mutations as user actions.
-	pendingAdopt  *adoptPending
+	pendingAdopt *adoptPending
 	// mountRefused is why the last account-folder mount was refused (it overlaps
 	// another account's folder), so a mode switch can say so; "" otherwise.
 	mountRefused string
@@ -99,7 +128,7 @@ type App struct {
 	setupPrev map[string]setupFolder
 	// leftoversSwept: the once-per-launch clean-up of leftover roots has run.
 	leftoversSwept atomic.Bool
-	preMountAdopt *adoptPending
+	preMountAdopt  *adoptPending
 	// adoptScanDirs is the live directory count of an in-flight adopt scan
 	// (0 = none), surfaced via Diagnostics so the scanning overlay has a moving
 	// number. adoptScanCancel aborts that scan; guarded by adoptScanMu because
@@ -125,9 +154,23 @@ type App struct {
 	// shows; every other configured account runs a secondary engine that syncs
 	// its own pairs concurrently in the background (toasts surface its
 	// conflicts/errors; the Settings account list shows its status).
-	secondaries map[string]*secondaryEngine // account ID -> background engine
+	secondaries map[string]*secondaryEngine // account ID -> background engine; only via secs()/addSecondary/… (mapsMu)
 	acctMu      sync.Mutex
 	acctStatus  map[string]string // account ID -> latest engine status line
+	// acctStatusAt is when recordAcctStatus last changed an account's line
+	// (for the quiet period on "Scanning…"/"Syncing…"); guarded by acctMu.
+	acctStatusAt map[string]time.Time
+	// Signing in again (signinagain.go), all under acctMu. authLostIDs holds
+	// the accounts whose credentials the server turned down; they are not
+	// started again until they sign in. signInFor is the account the sign-in
+	// window is asking to sign in again ("" = whichever needs it, else a new
+	// account), and showOnSignIn the account to show once it has signed in
+	// again: the shown one that lost its sign-in while another carried on, or
+	// one picked in the account switcher that had to sign in first.
+	authLostIDs  map[string]bool
+	signInFor    string
+	signInOther  bool // the window's "Sign in to a different account instead" was chosen
+	showOnSignIn string
 
 	licMu sync.Mutex
 	lic   license.Info  // current business-licence state (gates business-tier features)
@@ -154,6 +197,106 @@ type odMount struct {
 	healCancel context.CancelFunc
 }
 
+// The mount and secondary-engine maps are read from the tray's goroutine
+// (NowStatus, twice a second) as well as Wails calls, so every access goes
+// through these helpers under mapsMu. Readers range over a copy, and nobody
+// holds the lock while calling into an engine or a watcher. setWatcher guards
+// an odMount's watcher field for the same reader.
+
+// mounts returns a copy of the on-demand mounts (local dir -> mount).
+func (a *App) mounts() map[string]*odMount {
+	a.mapsMu.RLock()
+	defer a.mapsMu.RUnlock()
+	out := make(map[string]*odMount, len(a.onDemandMounts))
+	for k, v := range a.onDemandMounts {
+		out[k] = v
+	}
+	return out
+}
+
+// mount returns the mount at dir, or nil.
+func (a *App) mount(dir string) *odMount {
+	a.mapsMu.RLock()
+	defer a.mapsMu.RUnlock()
+	return a.onDemandMounts[dir]
+}
+
+// mountsReady reports whether any mount has ever been registered (the
+// "mounts not ready yet" test of the Explorer verbs).
+func (a *App) mountsReady() bool {
+	a.mapsMu.RLock()
+	defer a.mapsMu.RUnlock()
+	return a.onDemandMounts != nil
+}
+
+func (a *App) addMount(dir string, m *odMount) {
+	a.mapsMu.Lock()
+	defer a.mapsMu.Unlock()
+	if a.onDemandMounts == nil {
+		a.onDemandMounts = map[string]*odMount{}
+	}
+	a.onDemandMounts[dir] = m
+}
+
+func (a *App) dropMount(dir string) {
+	a.mapsMu.Lock()
+	defer a.mapsMu.Unlock()
+	delete(a.onDemandMounts, dir)
+}
+
+// setWatcher sets (or clears, w nil) a mount's write-back watcher.
+func (a *App) setWatcher(m *odMount, w *vfs.Watcher) {
+	a.mapsMu.Lock()
+	defer a.mapsMu.Unlock()
+	m.watcher = w
+}
+
+// watcherOf reads a mount's watcher under the lock setWatcher takes.
+func (a *App) watcherOf(m *odMount) *vfs.Watcher {
+	a.mapsMu.RLock()
+	defer a.mapsMu.RUnlock()
+	return m.watcher
+}
+
+// secs returns a copy of the background engines (account ID -> engine).
+func (a *App) secs() map[string]*secondaryEngine {
+	a.mapsMu.RLock()
+	defer a.mapsMu.RUnlock()
+	out := make(map[string]*secondaryEngine, len(a.secondaries))
+	for k, v := range a.secondaries {
+		out[k] = v
+	}
+	return out
+}
+
+// secondary returns the background engine for an account, or nil.
+func (a *App) secondary(id string) *secondaryEngine {
+	a.mapsMu.RLock()
+	defer a.mapsMu.RUnlock()
+	return a.secondaries[id]
+}
+
+func (a *App) secondaryCount() int {
+	a.mapsMu.RLock()
+	defer a.mapsMu.RUnlock()
+	return len(a.secondaries)
+}
+
+func (a *App) addSecondary(id string, se *secondaryEngine) {
+	a.mapsMu.Lock()
+	defer a.mapsMu.Unlock()
+	if a.secondaries == nil {
+		a.secondaries = map[string]*secondaryEngine{}
+	}
+	a.secondaries[id] = se
+}
+
+func (a *App) dropSecondary(id string) {
+	a.mapsMu.Lock()
+	defer a.mapsMu.Unlock()
+	delete(a.secondaries, id)
+}
+
 // start brings up the sync engine (if an account is configured) and wires its
 // status updates to frontend events. Login UI for the no-account case lands in a
 // later stage.
@@ -174,7 +317,7 @@ func (a *App) start(ctx context.Context) {
 		// the VM, and the rejected one sent the server a failed login every 15 s
 		// (GitHub #12 testing). It is the auth-lost case: ask for a sign-in.
 		if a.hasConfiguredAccount() {
-			if errors.Is(err, account.ErrNoSecret) || errors.Is(err, transport.ErrUnauthorized) {
+			if isSignInRejected(err) {
 				a.afterStart(a.onAuthLost)
 				return
 			}
@@ -191,6 +334,7 @@ func (a *App) start(ctx context.Context) {
 	}
 	a.eng = eng
 	a.authLost.Store(false)
+	a.clearAuthLost(eng.Account.ID)
 	a.appsCacheMu.Lock()
 	a.appsCache, a.appsCacheAt = nil, time.Time{} // stale across engine/account changes
 	a.appsCacheMu.Unlock()
@@ -200,6 +344,11 @@ func (a *App) start(ctx context.Context) {
 	if a.app != nil {
 		a.app.Event.Emit("accent", eng.ThemeColor())
 	}
+	// The startup sweep in main runs before any engine exists, and an icon at
+	// a new path (an icon-style rev bump) can only be generated with one, so
+	// that sweep leaves every shortcut on the old icon. Sweep again now; it is
+	// a no-op when nothing needs fixing (#996: pins kept the Nimbo badge).
+	go a.repairAppShortcutIcons()
 	runCtx, cancel := context.WithCancel(ctx)
 	a.engCancel = cancel
 	eng.SetStatusFunc(func(s string) {
@@ -233,7 +382,10 @@ func (a *App) start(ctx context.Context) {
 		if a.app != nil {
 			a.app.Event.Emit("progress", toProgressDTO(p))
 		}
+		a.nudgeNow()
 	})
+	// The large-file queue changed (Status → Large files, the flyout's line).
+	eng.SetLaneFunc(func() { a.emit("lane"); a.nudgeNow() })
 	// Desktop toasts for conflicts, can't-sync files and sync errors (subject to
 	// the user's notifications preference).
 	eng.SetToastFunc(notify.Toast)
@@ -247,7 +399,7 @@ func (a *App) start(ctx context.Context) {
 			eng.SetPauseSchedule(agent.PauseSchedule{Enabled: s.PauseScheduleEnabled, FromMin: s.PauseFromMin, ToMin: s.PauseToMin})
 		}
 	}
-	eng.SetPauseChangeFunc(func() { a.emit("activity"); a.rebuildTrayMenu(); a.pauseChangedOnDemand() })
+	eng.SetPauseChangeFunc(func() { a.emit("activity"); a.rebuildTrayMenu(); a.pauseChangedOnDemand(); a.nudgeNow() })
 	// notify_push file changes → reconcile on-demand placeholders immediately.
 	eng.SetFilesChangedFunc(a.pokeOnDemand)
 
@@ -265,10 +417,10 @@ func (a *App) start(ctx context.Context) {
 	// when the engine is stopped (sign-out), so they don't leak across sessions.
 	forwardEvents(runCtx, eng.Recorder().Subscribe(), func() { a.emit("activity") })
 	forwardEvents(runCtx, eng.Notifier().Subscribe(), func() { a.emit("notifications") })
-	forwardEvents(runCtx, eng.SubscribeConflicts(), func() { a.emit("conflicts") })
-	forwardEvents(runCtx, eng.SubscribeBlocked(), func() { a.emit("blocked") })
-	forwardEvents(runCtx, eng.SubscribeLocked(), func() { a.emit("locks") })
-	forwardEvents(runCtx, eng.SubscribeDetached(), func() { a.emit("detached") })
+	forwardEvents(runCtx, eng.SubscribeConflicts(), func() { a.emit("conflicts"); a.attentionChanged() })
+	forwardEvents(runCtx, eng.SubscribeBlocked(), func() { a.emit("blocked"); a.attentionChanged() })
+	forwardEvents(runCtx, eng.SubscribeLocked(), func() { a.emit("locks"); a.attentionChanged() })
+	forwardEvents(runCtx, eng.SubscribeDetached(), func() { a.emit("detached"); a.attentionChanged() })
 
 	var pairs []config.SyncPair
 	if a.GetSyncMode() == "ondemand" {
@@ -315,6 +467,9 @@ func (a *App) start(ctx context.Context) {
 		a.pendingFree = ""
 		application.InvokeAsync(func() { a.freeLocalPath(p) })
 	}
+	for _, p := range a.takePendingSyncFirst() {
+		application.InvokeAsync(func() { a.syncFirstLocalPath(p) })
+	}
 	if a.pendingApp != "" {
 		id := a.pendingApp
 		a.pendingApp = ""
@@ -329,7 +484,7 @@ func (a *App) start(ctx context.Context) {
 	// entries older versions left behind (GitHub #10).
 	if a.leftoversSwept.CompareAndSwap(false, true) {
 		mounted := map[string]bool{}
-		for dir := range a.onDemandMounts {
+		for dir := range a.mounts() {
 			mounted[filepath.Clean(dir)] = true
 		}
 		go a.sweepLeftovers(mounted)
@@ -342,6 +497,12 @@ func (a *App) recordAcctStatus(accountID, s string) {
 	a.acctMu.Lock()
 	if a.acctStatus == nil {
 		a.acctStatus = map[string]string{}
+	}
+	if a.acctStatus[accountID] != s || a.acctStatusAt[accountID].IsZero() {
+		if a.acctStatusAt == nil {
+			a.acctStatusAt = map[string]time.Time{}
+		}
+		a.acctStatusAt[accountID] = time.Now()
 	}
 	a.acctStatus[accountID] = s
 	a.acctMu.Unlock()
@@ -364,32 +525,45 @@ func (a *App) startSecondaries(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	if a.secondaries == nil {
-		a.secondaries = map[string]*secondaryEngine{}
-	}
 	primary := a.eng.Account.ID
 	for _, ac := range st.Accounts {
 		if ac.ID == primary {
 			continue
 		}
-		if _, running := a.secondaries[ac.ID]; running {
+		if a.secondary(ac.ID) != nil {
+			continue
+		}
+		// Turned down already: starting it would only send the server another
+		// failed login. It starts again once it signs in (completeSignIn).
+		if a.isAuthLost(ac.ID) {
 			continue
 		}
 		eng, err := agent.NewEngineFor(ctx, ac.ID)
 		if err != nil {
 			slog.Warn("secondary account engine not started", "account", ac.LoginName, "err", err)
+			if isSignInRejected(err) {
+				a.markAuthLost(ac.ID)
+				notify.RaiseActionable("Sign in required", ac.Address()+" needs signing in again.",
+					signInArgs(ac.ID), []notify.ToastButton{{Label: "Sign in", Args: signInArgs(ac.ID)}})
+				continue
+			}
 			a.recordAcctStatus(ac.ID, "Not running: "+err.Error())
 			continue
 		}
 		runCtx, cancel := context.WithCancel(ctx)
 		id := ac.ID
-		eng.SetStatusFunc(func(s string) { a.recordAcctStatus(id, s); a.emit("account") })
+		eng.SetStatusFunc(func(s string) { a.recordAcctStatus(id, s); a.emit("account"); a.nudgeNow() })
+		eng.SetLaneFunc(func() { a.emit("lane"); a.nudgeNow() })
+		// Its transfers show in "Right now" and in the line's other-account
+		// mention, so their progress refreshes them (the "progress" event
+		// stays the shown account's).
+		eng.SetProgressFunc(func(agent.SyncProgress) { a.nudgeNow() })
 		eng.SetToastFunc(notify.Toast)
 		eng.SetAuthLostFunc(func() {
 			// Only this account's sync stops — don't sign the whole app out.
-			a.recordAcctStatus(id, "Sign in again")
-			notify.RaiseActionable("Sign in required", eng.Account.LoginName+" couldn't authenticate — switch to that account and sign in again.", "action=login",
-				[]notify.ToastButton{{Label: "Sign in", Args: "action=login"}})
+			a.markAuthLost(id)
+			notify.RaiseActionable("Sign in required", eng.Account.Address()+" needs signing in again.",
+				signInArgs(id), []notify.ToastButton{{Label: "Sign in", Args: signInArgs(id)}})
 			a.stopSecondary(id)
 		})
 		eng.SetConflictPolicy(conflictPolicy(""))
@@ -410,7 +584,15 @@ func (a *App) startSecondaries(ctx context.Context) {
 		} else {
 			pairs = a.prepareLivePairs(eng)
 		}
-		a.secondaries[id] = &secondaryEngine{eng: eng, cancel: cancel}
+		a.addSecondary(id, &secondaryEngine{eng: eng, cancel: cancel})
+		// Its conflicts, can't-sync files and locks count toward "N items
+		// need you": drop the cached counts when they change. Only the
+		// counts: the windows' "conflicts"/"blocked"/... events reload the
+		// shown account's lists.
+		forwardEvents(runCtx, eng.SubscribeConflicts(), a.attentionChanged)
+		forwardEvents(runCtx, eng.SubscribeBlocked(), a.attentionChanged)
+		forwardEvents(runCtx, eng.SubscribeLocked(), a.attentionChanged)
+		forwardEvents(runCtx, eng.SubscribeDetached(), a.attentionChanged)
 		slog.Info("secondary account syncing", "account", ac.LoginName, "server", ac.ServerURL, "pairs", len(pairs))
 		go func() {
 			_ = eng.Run(runCtx, toAgentPairs(pairs), func(agent.Pair, transfer.Stats) {})
@@ -472,12 +654,12 @@ func (a *App) mountSecondaryOnDemand(eng *agent.Engine) {
 // unmountAccount disconnects one account's on-demand mounts (used when only
 // that account stops, e.g. auth loss or removal).
 func (a *App) unmountAccount(accountID string) {
-	for dir, m := range a.onDemandMounts {
+	for dir, m := range a.mounts() {
 		if m.accountID != accountID {
 			continue
 		}
-		if m.watcher != nil {
-			m.watcher.Close()
+		if w := a.watcherOf(m); w != nil {
+			w.Close()
 		}
 		if m.healCancel != nil {
 			m.healCancel()
@@ -487,7 +669,7 @@ func (a *App) unmountAccount(accountID string) {
 		// the whole tree (the #580 flattener). The registration stays; a
 		// re-auth remounts over it (UPDATE flag).
 		cfapi.Disconnect(dir, m.connKey)
-		delete(a.onDemandMounts, dir)
+		a.dropMount(dir)
 		slog.Info("on-demand mount disconnected", "dir", dir, "account", accountID)
 	}
 	a.refreshOverlayRoots()
@@ -507,8 +689,8 @@ func (a *App) refreshOverlayRoots() {
 	if a.eng == nil {
 		return
 	}
-	dirs := make([]string, 0, len(a.onDemandMounts))
-	for dir := range a.onDemandMounts {
+	dirs := make([]string, 0, len(a.mounts()))
+	for dir := range a.mounts() {
 		dirs = append(dirs, dir)
 	}
 	a.eng.SetOverlayRoots(dirs)
@@ -516,16 +698,16 @@ func (a *App) refreshOverlayRoots() {
 
 // stopSecondary stops one background account engine and its on-demand mounts.
 func (a *App) stopSecondary(id string) {
-	if se, ok := a.secondaries[id]; ok {
+	if se := a.secondary(id); se != nil {
 		a.unmountAccount(id)
 		se.cancel()
-		delete(a.secondaries, id)
+		a.dropSecondary(id)
 	}
 }
 
 // stopSecondaries stops all background account engines.
 func (a *App) stopSecondaries() {
-	for id := range a.secondaries {
+	for id := range a.secs() {
 		a.stopSecondary(id)
 	}
 }
@@ -552,10 +734,11 @@ func (a *App) emit(event string) {
 }
 
 func (a *App) setStatus(s string) {
-	a.status = s
+	a.status.set(s, time.Now())
 	if a.app != nil {
 		a.app.Event.Emit("status", s)
 	}
+	a.nudgeNow()
 }
 
 // --- Methods bound to the frontend ---
@@ -875,6 +1058,10 @@ func (a *App) SetSyncMode(mode string) string {
 	switch {
 	case strings.HasPrefix(mode, "guard-resume:"):
 		return a.resumeFrozen(strings.TrimPrefix(mode, "guard-resume:"))
+	case strings.HasPrefix(mode, cloneFirstPrefix):
+		// The order a running first sync downloads in: not a file-availability
+		// mode either, so the policy below has no say over it.
+		return a.setCloneFirst(strings.TrimPrefix(mode, cloneFirstPrefix))
 	}
 	if a.policyNow().SyncMode != "" {
 		return "File availability is managed by your organisation."
@@ -901,7 +1088,7 @@ func (a *App) SetSyncMode(mode string) string {
 	case "live-revert":
 		return a.revertAndSwitch()
 	case "revert-cancel":
-		for _, m := range a.onDemandMounts {
+		for _, m := range a.mounts() {
 			if m.convertCancel != nil {
 				m.convertCancel()
 			}
@@ -1124,7 +1311,9 @@ func (a *App) resumeFrozen(localDir string) string {
 	if err := a.eng.ClearFreeze(localDir); err != nil {
 		return err.Error()
 	}
-	a.eng.TriggerSync() // run the pass the user just approved, rather than waiting for the poll
+	// Run the pass the user just approved. The pause itself counted as a failed
+	// pass, so a plain trigger would be dropped by the backoff that started.
+	a.eng.TriggerUserSync()
 	return ""
 }
 
@@ -1143,7 +1332,7 @@ func (a *App) mountAccountOnDemand() {
 	}
 	a.mountRefused = ""
 	dir := onDemandRootOrder(wholeAccountPair(a.eng), a.eng.OnDemandRoot(), a.eng.StoredBaseDir())
-	if _, already := a.onDemandMounts[dir]; dir != "" && already {
+	if dir != "" && a.mount(dir) != nil {
 		return
 	}
 	if dir == "" {
@@ -1216,7 +1405,7 @@ func (a *App) mountOnDemand(localDir, remoteRoot string) error {
 	return a.mountOnDemandWith(a.eng, a.etags, a.fileids, a.mountroots, localDir, remoteRoot)
 }
 
-// hydrateReadCloser wraps a hydration reader (the SetHydrateStream closure in
+// hydrateReadCloser wraps a hydration reader (the hydrate stream closure in
 // mountOnDemandWith, below) so a failure that only shows up partway through
 // the transfer still reaches the activity feed and toast. That closure's own
 // report call fires at open — once OpenRange has returned response headers —
@@ -1239,11 +1428,17 @@ type hydrateReadCloser struct {
 	got        int64
 	report     func(kind, remotePath string, err error)
 	reported   bool
+	job        *hjob  // this request's place in "Right now" (nil = not listed)
+	changed    func() // told as bytes arrive and when the job ends (nil = nobody)
 }
 
 func (r *hydrateReadCloser) Read(p []byte) (int, error) {
 	n, err := r.ReadCloser.Read(p)
 	r.got += int64(n)
+	r.job.add(int64(n))
+	if n > 0 && r.changed != nil {
+		r.changed() // bytes moving: the "now" emitter throttles this to 2 Hz
+	}
 	switch {
 	case err == nil, errors.Is(err, context.Canceled):
 		// Still going, or withdrawn — neither is a failure.
@@ -1259,6 +1454,15 @@ func (r *hydrateReadCloser) Read(p []byte) (int, error) {
 		}
 	}
 	return n, err
+}
+
+// Close ends the request's job in "Right now", then closes the stream.
+func (r *hydrateReadCloser) Close() error {
+	r.job.end()
+	if r.changed != nil {
+		r.changed()
+	}
+	return r.ReadCloser.Close()
 }
 
 // mountOnDemandWith connects localDir as a cloud sync root mirroring remoteRoot
@@ -1296,12 +1500,42 @@ func (a *App) mountOnDemandWith(eng *agent.Engine, etags, fileids, mountroots *e
 			a.vfsErrorToast(kind, shown, err)
 		}
 	}
-	hydrate := func(identity []byte, offset, length int64) ([]byte, error) {
-		data, err := eng.DownloadRange(a.ctx, string(identity), offset, length)
-		if offset == 0 { // record once per file-open, not per chunk
+	// hydrate streams a placeholder's bytes: one reader for the whole of one
+	// FETCH_DATA request rather than a separate HTTP GET per piece the filter
+	// asks for (Task 1/2). ctx is that request's own context, cancelled by the
+	// filter on CANCEL_FETCH_DATA or by cfapi's stall watchdog; app shutdown is
+	// covered one layer down, not by this closure — app.Run() returning calls
+	// disconnectAllOnDemand (below), which calls cfapi.Disconnect, which calls
+	// the provider's cancelFetches and so cancels every in-flight request
+	// context the same way a live cancel does.
+	hydrate := func(ctx context.Context, identity []byte, offset, length int64) (io.ReadCloser, error) {
+		rc, err := eng.OpenRange(ctx, string(identity), offset, length)
+		// One activity entry per file-open, as today — but never for a
+		// withdrawn request. OpenRange can outlast the filter's 60s cancel (a
+		// silently dropping network gives each attempt up to 30s to dial), and
+		// the cancel then surfaces here as context.Canceled: an error entry
+		// plus a toast, repeated per re-request, for something that is not a
+		// failure. The wrapper below has always skipped cancellation; this
+		// agrees with it.
+		if offset == 0 && !errors.Is(err, context.Canceled) {
 			report("download", string(identity), err)
 		}
-		return data, err
+		if err != nil {
+			return nil, err
+		}
+		// The report above only covers the open; wrap so a body failure — or a
+		// clean end short of length — reports too (see hydrateReadCloser's doc
+		// comment, above mountOnDemandWith).
+		// Listed in "Right now" until the filter closes the stream; ranges of
+		// one file merge into one job, sized by the furthest range.
+		reach := int64(0)
+		if length > 0 {
+			reach = offset + length
+		}
+		job := a.hjobs.begin(eng.Account.ID, string(identity), reach)
+		a.nudgeNow()
+		return &hydrateReadCloser{ReadCloser: rc, remotePath: string(identity), length: length, report: report,
+			job: job, changed: a.nudgeNow}, nil
 	}
 	// listRemote returns a directory's children as placeholders (rel is
 	// sync-root-relative, "" = root). Each entry's identity is its remote path so
@@ -1370,21 +1604,40 @@ func (a *App) mountOnDemandWith(eng *agent.Engine, etags, fileids, mountroots *e
 	// instead would strand the folder empty forever.
 	// It also records the conflict baseline (server ETag) for each placeholder.
 	list := func(rel string) []cfapi.PlaceholderInfo {
+		// A folder under a name Windows cannot hold (a leftover from an older
+		// version, Deck #984) is never filled in: answer empty without asking
+		// the server, so opening or clearing it can't pull anything into it.
+		if winname.PathCannotHold(rel) {
+			return []cfapi.PlaceholderInfo{}
+		}
 		items, err := listRemote(rel)
 		if err != nil {
 			slog.Warn("on-demand list failed", "rel", rel, "err", err)
 			return nil
 		}
+		// A trailing space or dot: every Win32 path through such a name
+		// reaches the trimmed one instead, which can be another item (Deck
+		// #984), so the shell is never handed one. Reconcile gets the full
+		// listing and drops them itself, which is where the user is told.
+		shown := items[:0]
+		for _, it := range items {
+			if !winname.CannotHold(it.Name) {
+				shown = append(shown, it)
+			}
+		}
+		items = shown
 		base := make(map[string]string, len(items))
 		fids := make(map[string]string, len(items))
 		keys := make(map[string]string, len(items))
 		for _, it := range items {
+			// Folders' fileids too, so a server rename of one is recognised
+			// later rather than read as a delete (Deck #986).
+			if it.FileID != "" {
+				fids[string(it.Identity)] = it.FileID
+			}
 			if !it.IsDir {
 				base[string(it.Identity)] = it.ETag
 				keys[string(it.Identity)] = transport.ContentKey(it.Size, it.ModTime, it.UploadTime)
-				if it.FileID != "" {
-					fids[string(it.Identity)] = it.FileID
-				}
 			}
 		}
 		etags.setMany(base)
@@ -1397,39 +1650,17 @@ func (a *App) mountOnDemandWith(eng *agent.Engine, etags, fileids, mountroots *e
 	// COM) and connects the provider — the exact window a live-install mode
 	// switch once hung in, silently. Run verbose for per-step cfapi detail.
 	slog.Info("registering cloud sync root", "dir", localDir)
-	connKey, err := cfapi.Mount(localDir, brand.Current.Name, exe, hydrate, list)
+	// The display name is the sidebar entry's label, one per account (#726).
+	// The stream goes in WITH the mount, not after it: Mount seeds the root
+	// from list (a network round trip) once the provider is connected, and a
+	// placeholder opened in that window used to be served by a byte-slice
+	// fallback on the app's context instead, with no stall watchdog and no
+	// way to cancel it (Deck #701).
+	connKey, err := cfapi.MountStream(localDir, sidebarLabelFor(eng.Account), exe, hydrate, list)
 	if err != nil {
 		return err
 	}
 	slog.Info("cloud sync root connected", "dir", localDir)
-	// Stream the fetch instead of the byte-slice hydrate above: one reader for
-	// the whole request rather than a separate HTTP GET per 1 MB piece the
-	// filter asks for (Task 1/2). ctx here is the individual request's own
-	// context, cancelled by the filter on CANCEL_FETCH_DATA; app shutdown is
-	// already covered one layer down, not by this closure — app.Run() returning
-	// calls disconnectAllOnDemand (below), which calls cfapi.Disconnect, which
-	// calls the provider's cancelFetches and so cancels every in-flight request
-	// context the same way a live cancel does.
-	cfapi.SetHydrateStream(connKey, func(ctx context.Context, identity []byte, offset, length int64) (io.ReadCloser, error) {
-		rc, err := eng.OpenRange(ctx, string(identity), offset, length)
-		// One activity entry per file-open, as today — but never for a
-		// withdrawn request. OpenRange can outlast the filter's 60s cancel (a
-		// silently dropping network gives each attempt up to 30s to dial), and
-		// the cancel then surfaces here as context.Canceled: an error entry
-		// plus a toast, repeated per re-request, for something that is not a
-		// failure. The wrapper below has always skipped cancellation; this
-		// agrees with it.
-		if offset == 0 && !errors.Is(err, context.Canceled) {
-			report("download", string(identity), err)
-		}
-		if err != nil {
-			return nil, err
-		}
-		// The report above only covers the open; wrap so a body failure — or a
-		// clean end short of length — reports too (see hydrateReadCloser's doc
-		// comment, above mountOnDemandWith).
-		return &hydrateReadCloser{ReadCloser: rc, remotePath: string(identity), length: length, report: report}, nil
-	})
 	// Write-back + down-sync: watch the mount for user changes (upload/mkdir/
 	// delete/move) and pull changes made elsewhere (List). When notify_push is
 	// available the reconcile is driven by push (Poke), so the poll is a long
@@ -1492,7 +1723,15 @@ func (a *App) mountOnDemandWith(eng *agent.Engine, etags, fileids, mountroots *e
 				_, ok, err := eng.StatRemote(sctx, remote)
 				return ok, err
 			},
-			Report:         report,
+			Report: report,
+			// Server items Windows cannot hold go to "Can't sync" (Deck #984).
+			Unholdable: func(parent string, items []cfapi.PlaceholderInfo) {
+				conv := make([]engine.Unholdable, 0, len(items))
+				for _, it := range items {
+					conv = append(conv, engine.Unholdable{Remote: string(it.Identity), IsDir: it.IsDir})
+				}
+				eng.SetUnholdable(localDir, root, parent, conv)
+			},
 			RecordBaseline: func(remote, etag string) { etags.set(remote, etag) },
 			Baseline:       func(remote string) (string, bool) { e := etags.get(remote); return e, e != "" },
 			ForgetBaseline: func(remote string) { etags.del(remote) },
@@ -1513,6 +1752,8 @@ func (a *App) mountOnDemandWith(eng *agent.Engine, etags, fileids, mountroots *e
 			RecordFileID:    func(remote, fid string) { fileids.set(remote, fid) },
 			FileID:          func(remote string) (string, bool) { f := fileids.get(remote); return f, f != "" },
 			DropFileID:      func(remote string) { fileids.del(remote) },
+			RecordFileIDs:   func(m map[string]string) { fileids.setMany(m) },
+			MoveFileIDs:     func(pairs [][2]string) { fileids.moveMany(pairs) },
 			MountRoot:       func(remote string) bool { return mountroots.get(remote) != "" },
 			// A vanished share's salvaged copy (Deck #557): park it beside the
 			// sync folder and tell the user. The watcher then calls Forget; the
@@ -1546,7 +1787,10 @@ func (a *App) mountOnDemandWith(eng *agent.Engine, etags, fileids, mountroots *e
 			// tray's Pause stops every account's mount, not just this one's
 			// (Deck #723). pauseChangedOnDemand tells the watcher when it flips.
 			Paused: a.Paused,
-			Log:    func(f string, args ...any) { slog.Info("vfs", "msg", fmt.Sprintf(f, args...)) },
+			// Uploads, hydrations and passes starting or ending: refresh the
+			// status line. nudgeNow never blocks (called on transfer goroutines).
+			Changed: a.nudgeNow,
+			Log:     func(f string, args ...any) { slog.Info("vfs", "msg", fmt.Sprintf(f, args...)) },
 		})
 		if werr != nil {
 			slog.Warn("vfs write-back watcher not started", "dir", localDir, "err", werr)
@@ -1559,11 +1803,8 @@ func (a *App) mountOnDemandWith(eng *agent.Engine, etags, fileids, mountroots *e
 		}
 		return w
 	}
-	if a.onDemandMounts == nil {
-		a.onDemandMounts = map[string]*odMount{}
-	}
 	m := &odMount{connKey: connKey, remoteRoot: root, accountID: eng.Account.ID}
-	a.onDemandMounts[localDir] = m
+	a.addMount(localDir, m)
 	if strings.Trim(remoteRoot, "/") == "" {
 		// The account's whole-account root: remember it, so the account
 		// reconnects to this folder next time, primary or background.
@@ -1616,7 +1857,7 @@ func (a *App) mountOnDemandWith(eng *agent.Engine, etags, fileids, mountroots *e
 		go a.runAdoptConvert(cctx, m, plan, localDir, root, up, startWatcher, true)
 		return nil
 	}
-	m.watcher = startWatcher()
+	a.setWatcher(m, startWatcher())
 	slog.Info("on-demand mount connected", "dir", localDir, "remoteRoot", root)
 	return nil
 }
@@ -1751,8 +1992,10 @@ func (a *App) uploadWithConflictFor(eng *agent.Engine, etags *etagStore) func(ct
 // parkServerCopy moves the server's version of remotePath aside as a
 // "conflicted copy" sibling, surfacing the conflict to the user.
 func parkServerCopy(eng *agent.Engine, ctx context.Context, remotePath string) error {
-	conflict := conflictName(remotePath)
-	if err := eng.MoveRemote(ctx, remotePath, conflict); err != nil {
+	conflict, err := parkName(remotePath, time.Now(), func(dst string) error {
+		return eng.MoveRemoteNoReplace(ctx, remotePath, dst)
+	})
+	if err != nil {
 		slog.Warn("vfs conflict: could not park server copy", "remote", remotePath, "err", err)
 		return err
 	}
@@ -1762,10 +2005,49 @@ func parkServerCopy(eng *agent.Engine, ctx context.Context, remotePath string) e
 	return nil
 }
 
+// parkMu serialises parkName.
+var parkMu sync.Mutex
+
+// parkName moves a file aside under a conflicted-copy name that is free on the
+// server and returns the name it got. move must refuse a destination that
+// exists (transport.ErrDestinationExists); the next name, a second on, is then
+// tried. The name alone is not unique: a file and an older conflicted copy of
+// it, both parked within one second, map to the same one, and a MOVE that
+// replaces its destination destroyed the copy parked first (Deck #924).
+//
+// Parks run one at a time (parkMu). Uploads run in parallel, so two files that
+// map to the same name sent their MOVEs in the same instant, before either
+// could find the name taken: Nextcloud's file locking then refused BOTH with a
+// 500 (LockedException on the destination) and both retried together, for
+// ever. Measured on the test VM against a real server, 2026-10-12.
+func parkName(remotePath string, now time.Time, move func(dst string) error) (string, error) {
+	parkMu.Lock()
+	defer parkMu.Unlock()
+	src := strings.Trim(remotePath, "/")
+	for i := 0; i < transfer.ConflictNameTries; i++ {
+		dst := conflictNameAt(remotePath, now.Add(time.Duration(i)*time.Second))
+		if dst == src {
+			continue // a copy parked this very second: its new name is its own
+		}
+		err := move(dst)
+		if errors.Is(err, transport.ErrDestinationExists) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		return dst, nil
+	}
+	return "", fmt.Errorf("no free conflicted-copy name for %s", remotePath)
+}
+
 // conflictName builds a "<name> (conflicted copy <date>)<ext>" sibling path.
 // A marker already in the name is replaced, never stacked (transfer.conflictName
 // has the same rule): stacking grew one field filename past MAX_PATH.
-func conflictName(remote string) string {
+func conflictName(remote string) string { return conflictNameAt(remote, time.Now()) }
+
+// conflictNameAt is conflictName with the marker's timestamp given.
+func conflictNameAt(remote string, t time.Time) string {
 	dir, file := "", strings.Trim(remote, "/")
 	if i := strings.LastIndex(file, "/"); i >= 0 {
 		dir, file = file[:i+1], file[i+1:]
@@ -1775,7 +2057,7 @@ func conflictName(remote string) string {
 	if j := strings.LastIndex(file, "."); j > 0 {
 		stem, ext = file[:j], file[j:]
 	}
-	return dir + stem + " (conflicted copy " + time.Now().Format("2006-01-02 150405") + ")" + ext
+	return dir + stem + " (conflicted copy " + t.Format("2006-01-02 150405") + ")" + ext
 }
 
 // OfflineEntry is one folder in the "available offline" browser.
@@ -1836,9 +2118,9 @@ func (a *App) SetOfflinePin(rel string, pinned bool) string {
 
 // pokeOnDemand asks every active on-demand mount to reconcile (push-driven).
 func (a *App) pokeOnDemand() {
-	for _, m := range a.onDemandMounts {
-		if m.watcher != nil {
-			m.watcher.Poke()
+	for _, m := range a.mounts() {
+		if w := a.watcherOf(m); w != nil {
+			w.Poke()
 		}
 	}
 }
@@ -1847,9 +2129,9 @@ func (a *App) pokeOnDemand() {
 // have flipped: a pause stops their uploads and pinned downloads, a resume
 // starts them again (Deck #723).
 func (a *App) pauseChangedOnDemand() {
-	for _, m := range a.onDemandMounts {
-		if m.watcher != nil {
-			m.watcher.PauseChanged()
+	for _, m := range a.mounts() {
+		if w := a.watcherOf(m); w != nil {
+			w.PauseChanged()
 		}
 	}
 }
@@ -1860,18 +2142,18 @@ func (a *App) pauseChangedOnDemand() {
 // (below) unregisters, and Windows then strips the cloud state from the whole
 // tree - correct only when leaving virtual-files mode or signing out.
 func (a *App) disconnectAllOnDemand() {
-	for dir, m := range a.onDemandMounts {
+	for dir, m := range a.mounts() {
 		if m.convertCancel != nil {
 			m.convertCancel()
 		}
-		if m.watcher != nil {
-			m.watcher.Close()
+		if w := a.watcherOf(m); w != nil {
+			w.Close()
 		}
 		if m.healCancel != nil {
 			m.healCancel()
 		}
 		cfapi.Disconnect(dir, m.connKey)
-		delete(a.onDemandMounts, dir)
+		a.dropMount(dir)
 		slog.Info("on-demand mount disconnected (registration kept)", "dir", dir)
 	}
 	a.refreshOverlayRoots()
@@ -1881,12 +2163,12 @@ func (a *App) disconnectAllOnDemand() {
 // sign-out). The registration is removed and Windows strips placeholder state
 // from the tree - by design here; use disconnectAllOnDemand everywhere else.
 func (a *App) unmountAllOnDemand() {
-	for dir, m := range a.onDemandMounts {
+	for dir, m := range a.mounts() {
 		if m.convertCancel != nil {
 			m.convertCancel() // stop a background adopt conversion first
 		}
-		if m.watcher != nil {
-			m.watcher.Close()
+		if w := a.watcherOf(m); w != nil {
+			w.Close()
 		}
 		if m.healCancel != nil {
 			m.healCancel()
@@ -1899,7 +2181,7 @@ func (a *App) unmountAllOnDemand() {
 		// Nor is the folder a virtual-files root any more: a switch back must
 		// not prefer it over a folder chosen since.
 		forgetOnDemandRoot(m.accountID)
-		delete(a.onDemandMounts, dir)
+		a.dropMount(dir)
 	}
 	a.refreshOverlayRoots()
 }
@@ -2171,10 +2453,11 @@ func (a *App) SetNotifications(on bool) {
 
 // Status returns the current sync status text.
 func (a *App) Status() string {
-	if a.status == "" {
+	s, _ := a.status.get()
+	if s == "" {
 		return "Starting…"
 	}
-	return a.status
+	return s
 }
 
 // ProgressDTO is a live sync-progress snapshot for the flyout.
@@ -2188,6 +2471,8 @@ type ProgressDTO struct {
 	DoneBytes   int64  `json:"doneBytes"`
 	TotalBytes  int64  `json:"totalBytes"`
 	Enumerating bool   `json:"enumerating"`
+	// Clones are the first syncs running (Status → First sync).
+	Clones []CloneRunDTO `json:"clones"`
 }
 
 func toProgressDTO(p agent.SyncProgress) ProgressDTO {
@@ -2201,6 +2486,7 @@ func toProgressDTO(p agent.SyncProgress) ProgressDTO {
 		DoneBytes:   p.DoneBytes,
 		TotalBytes:  p.TotalBytes,
 		Enumerating: p.Enumerating,
+		Clones:      toCloneRunDTOs(p.Clones),
 	}
 }
 
@@ -2226,9 +2512,11 @@ func (a *App) animateTray() {
 		case <-a.ctx.Done():
 			return
 		case <-t.C:
-			state := a.trayState()
+			// The tray follows the flyout's status line (Deck #988).
+			now := a.trayNow()
+			state := trayStateFor(now.State)
 			badge := a.trayBadge()
-			tip := trayTooltip(brand.Current.Name, a.status, a.eng != nil && a.eng.Paused())
+			tip := trayTooltip(brand.Current.Name, now.Main)
 			key := state
 			if badge {
 				key += "+badge"
@@ -2250,13 +2538,11 @@ func (a *App) animateTray() {
 }
 
 // trayTooltip is the tray icon's hover text: the app's name, and on a second
-// line what it is doing, as OneDrive's does. The name alone said nothing about
-// whether it was syncing (GitHub #9 follow-up).
-func trayTooltip(name, status string, paused bool) string {
-	if paused {
-		return name + "\nPaused"
-	}
-	if s := strings.TrimSpace(status); s != "" {
+// line what it is doing (the status line's main text), as OneDrive's does.
+// The name alone said nothing about whether it was syncing (GitHub #9
+// follow-up).
+func trayTooltip(name, line string) string {
+	if s := strings.TrimSpace(line); s != "" {
 		return name + "\n" + s
 	}
 	return name
@@ -2293,16 +2579,19 @@ func isBusyStatus(status string) bool {
 	return false
 }
 
-func (a *App) trayState() string {
-	if a.eng != nil && a.eng.Paused() {
-		return "paused"
-	}
-	s := strings.ToLower(a.status)
-	switch {
-	case isBusyStatus(s):
+// trayStateFor maps the composed status (NowStatusDTO.State) to the tray
+// icon: anything that needs the user shows the amber warning so it can't go
+// unnoticed with the flyout closed (Deck #984).
+func trayStateFor(state string) string {
+	switch state {
+	case "busy":
 		return "sync"
-	case strings.Contains(s, "error"):
+	case "attention":
+		return "warning"
+	case "offline":
 		return "error"
+	case "paused":
+		return "paused"
 	default:
 		return "idle"
 	}
@@ -2379,7 +2668,7 @@ func (a *App) Attention() AttentionInfo {
 	// Background accounts' conflicts/blocked count toward the badge so they
 	// can't go unnoticed; their lists live behind a "Show" switch (the resolve
 	// actions operate on the shown account).
-	for _, se := range a.secondaries {
+	for _, se := range a.secs() {
 		info.Conflicts += len(se.eng.PendingConflicts())
 		info.Blocked += len(se.eng.BlockedFiles())
 		info.Locked += len(se.eng.LockedFiles())
@@ -2399,7 +2688,7 @@ type OtherAttention struct {
 // OtherAccountAttention lists background accounts that need attention.
 func (a *App) OtherAccountAttention() []OtherAttention {
 	out := []OtherAttention{}
-	for id, se := range a.secondaries {
+	for id, se := range a.secs() {
 		c, b := len(se.eng.PendingConflicts()), len(se.eng.BlockedFiles())
 		if c+b > 0 {
 			out = append(out, OtherAttention{ID: id, User: se.eng.Account.LoginName, Conflicts: c, Blocked: b})
@@ -2433,7 +2722,7 @@ func (a *App) ClearStatusMessage() {
 // SyncNow triggers an immediate sync of all folders.
 func (a *App) SyncNow() {
 	if a.eng != nil {
-		a.eng.TriggerSync()
+		a.eng.TriggerUserSync() // asked for by name: not held back by a failure backoff
 	}
 }
 
@@ -2448,7 +2737,7 @@ func (a *App) eachEngine(f func(*agent.Engine)) {
 	if a.eng != nil {
 		f(a.eng)
 	}
-	for _, se := range a.secondaries {
+	for _, se := range a.secs() {
 		if se.eng != nil {
 			f(se.eng)
 		}
@@ -2485,10 +2774,7 @@ func (a *App) PauseUntilTomorrow() {
 		return
 	}
 	now := time.Now()
-	t := time.Date(now.Year(), now.Month(), now.Day(), 8, 0, 0, 0, now.Location())
-	if !t.After(now) {
-		t = t.Add(24 * time.Hour)
-	}
+	t := tomorrowMorning(now)
 	a.eachEngine(func(e *agent.Engine) { e.PauseFor(t.Sub(now)) })
 	a.rebuildTrayMenu()
 }
@@ -2566,8 +2852,8 @@ func (a *App) Folders() []FolderInfo {
 	for _, p := range pairs {
 		out = append(out, FolderInfo{Name: filepath.Base(p.LocalDir), LocalDir: p.LocalDir})
 	}
-	mounts := make([]string, 0, len(a.onDemandMounts))
-	for dir := range a.onDemandMounts {
+	mounts := make([]string, 0, len(a.mounts()))
+	for dir := range a.mounts() {
 		mounts = append(mounts, dir)
 	}
 	sort.Strings(mounts) // stable order (map iteration is random)
@@ -2715,6 +3001,13 @@ func (a *App) absURL(href string) string {
 	return resolveServerHref(a.eng.Account.ServerURL, href)
 }
 
+// isWebLink reports whether href is an absolute http(s) URL, the only kind a
+// server-supplied link is allowed to hand the shell to open.
+func isWebLink(href string) bool {
+	u, err := url.Parse(href)
+	return err == nil && u.Host != "" && (strings.EqualFold(u.Scheme, "https") || strings.EqualFold(u.Scheme, "http"))
+}
+
 // resolveServerHref joins a Nextcloud href onto the server URL. Hrefs come in
 // two shapes: our own paths are relative to the webroot ("/index.php/..."),
 // but the server's navigation API returns paths that already carry it
@@ -2756,7 +3049,7 @@ func (a *App) releaseLocksOnExit(timeout time.Duration) {
 	if a.eng != nil {
 		engs = append(engs, a.eng)
 	}
-	for _, se := range a.secondaries {
+	for _, se := range a.secs() {
 		if se != nil && se.eng != nil {
 			engs = append(engs, se.eng)
 		}
@@ -2883,7 +3176,7 @@ func (a *App) RecentActivity() []ActivityItem {
 	if a.eng == nil {
 		return nil
 	}
-	multi := len(a.secondaries) > 0
+	multi := a.secondaryCount() > 0
 	type timed struct {
 		item ActivityItem
 		at   time.Time
@@ -2911,7 +3204,7 @@ func (a *App) RecentActivity() []ActivityItem {
 			// remoteFor()), so the mount's remote root must come off before the
 			// path can be joined to its local dir; live events are pair-relative.
 			mountRoot := ""
-			if m := a.onDemandMounts[e.Local]; m != nil {
+			if m := a.mount(e.Local); m != nil {
 				mountRoot = m.remoteRoot
 			}
 			all = append(all, timed{
@@ -2924,7 +3217,7 @@ func (a *App) RecentActivity() []ActivityItem {
 		}
 	}
 	collect(a.eng)
-	for _, se := range a.secondaries {
+	for _, se := range a.secs() {
 		collect(se.eng)
 	}
 	sort.SliceStable(all, func(i, j int) bool { return all[i].at.After(all[j].at) })
@@ -2945,7 +3238,7 @@ func (a *App) ClearActivity() {
 	if a.eng != nil {
 		a.eng.Recorder().Clear()
 	}
-	for _, se := range a.secondaries {
+	for _, se := range a.secs() {
 		if se.eng != nil {
 			se.eng.Recorder().Clear()
 		}
@@ -3281,7 +3574,7 @@ func (a *App) releaseAllLocks() string {
 		}
 	}
 	rel(a.eng)
-	for _, se := range a.secondaries {
+	for _, se := range a.secs() {
 		rel(se.eng)
 	}
 	if firstErr != nil {
@@ -3323,7 +3616,7 @@ func (a *App) engineForLogin(login string) *agent.Engine {
 	if a.eng != nil && a.eng.Account.LoginName == login {
 		return a.eng
 	}
-	for _, se := range a.secondaries {
+	for _, se := range a.secs() {
 		if se.eng != nil && se.eng.Account.LoginName == login {
 			return se.eng
 		}
@@ -3383,7 +3676,7 @@ func (a *App) Diagnostics() DiagnosticsDTO {
 	}
 	collectLocks(a.eng)
 	// Background accounts too, or a lock held under one is invisible.
-	for _, se := range a.secondaries {
+	for _, se := range a.secs() {
 		collectLocks(se.eng)
 	}
 	sort.Slice(dto.ObservedLocks, func(i, j int) bool {
@@ -3406,7 +3699,7 @@ func (a *App) Diagnostics() DiagnosticsDTO {
 		}
 	}
 	collectHeld(a.eng)
-	for _, se := range a.secondaries {
+	for _, se := range a.secs() {
 		collectHeld(se.eng)
 	}
 	sort.Slice(dto.HeldLocks, func(i, j int) bool { return dto.HeldLocks[i].Path < dto.HeldLocks[j].Path })
@@ -3526,6 +3819,7 @@ type NotifItem struct {
 	Message string        `json:"message"`
 	Link    string        `json:"link"`
 	Actions []NotifAction `json:"actions"`
+	Account string        `json:"account"` // "login@host" of the account it came to (GitHub #20)
 }
 
 // NotificationList returns the current notifications.
@@ -3534,12 +3828,14 @@ func (a *App) NotificationList() []NotifItem {
 		return nil
 	}
 	var out []NotifItem
+	acct := a.eng.Account.Address()
 	for _, n := range a.eng.Notifier().List() {
 		acts := make([]NotifAction, 0, len(n.Actions))
 		for _, ac := range n.Actions {
 			acts = append(acts, NotifAction{Label: ac.Label})
 		}
-		out = append(out, NotifItem{ID: n.ID, App: n.App, Subject: n.Subject, Message: n.Message, Link: n.Link, Actions: acts})
+		out = append(out, NotifItem{ID: n.ID, App: n.App, Subject: n.Subject, Message: n.Message, Link: n.Link,
+			Actions: acts, Account: acct})
 	}
 	return out
 }
@@ -3571,7 +3867,7 @@ func (a *App) engineFor(acct string) *agent.Engine {
 	if a.eng != nil && (acct == "" || a.eng.Account.ID == acct) {
 		return a.eng
 	}
-	if se, ok := a.secondaries[acct]; ok {
+	if se := a.secondary(acct); se != nil {
 		return se.eng
 	}
 	return a.eng
@@ -3591,7 +3887,16 @@ func (a *App) doNotificationActionFor(acct string, id int, label string) {
 		}
 		for _, ac := range n.Actions {
 			if ac.Label == label {
-				_ = eng.DoNotificationAction(context.Background(), ac)
+				if ac.IsWeb() {
+					// A link to open, not a request to send (GitHub #20).
+					if href := resolveServerHref(eng.Account.ServerURL, ac.Link); isWebLink(href) {
+						openURL(href)
+					}
+					return
+				}
+				if err := eng.DoNotificationAction(context.Background(), ac); err != nil {
+					slog.Warn("notification action failed", "label", label, "err", err)
+				}
 				a.emit("notifications")
 				return
 			}
@@ -3609,6 +3914,9 @@ type BlockedItem struct {
 	Ext       string `json:"ext"`       // file extension (for the escape opt-in label)
 	Escapable bool   `json:"escapable"` // opting Ext in would let this file sync
 	Escaping  bool   `json:"escaping"`  // synthetic row: this Ext is currently escaped
+	// Remote is set for a SERVER item whose name Windows cannot hold (Deck
+	// #984): it can only be renamed on the server (RenameOnServer).
+	Remote string `json:"remote,omitempty"`
 }
 
 // BlockedList returns files that can't sync, plus a synthetic row per
@@ -3643,6 +3951,27 @@ const (
 	escapeOptIn  = "//escape"    // opt in the blocked file's extension
 	escapeOptOut = "//unescape:" // + <ext>: stop escaping that extension
 )
+
+// RenameOnServer renames a "Can't sync" server item (a row with Remote set,
+// identified by its Abs) to newName in the same server folder, never replacing
+// anything there. It returns "" on success, else a message for the user.
+func (a *App) RenameOnServer(abs, newName string) string {
+	if a.eng == nil {
+		return "Not signed in."
+	}
+	for _, b := range a.eng.BlockedFiles() {
+		if b.Remote == "" || b.Abs != abs {
+			continue
+		}
+		if err := a.eng.RenameOnServer(b.Remote, strings.TrimSpace(newName)); err != nil {
+			return "Couldn't rename it: " + err.Error()
+		}
+		a.pokeOnDemand() // on-demand: list the folder now so it appears
+		a.emit("blocked")
+		return ""
+	}
+	return "It is no longer in the list."
+}
 
 // RenameBlocked renames a blocked file so it can sync — or, when newName is an
 // escape-control sentinel, opts the file's extension into (or out of) escaping.
@@ -4019,7 +4348,8 @@ func (a *App) dispatchToastActivation(args string) {
 		// restart by clicking. Off the UI thread — it waits on processes.
 		go restartExplorer()
 	case "login":
-		application.InvokeAsync(func() { a.showLogin() })
+		acct := v.Get("acct") // the account to sign in again; "" = whichever needs it
+		application.InvokeAsync(func() { a.showLoginFor(acct) })
 	case "update":
 		application.InvokeAsync(func() {
 			// On success the app restarts; a non-empty return is an error or
@@ -4076,6 +4406,10 @@ func (a *App) onSecondInstance(args []string) {
 	}
 	if p := argValue(args, "--free"); p != "" {
 		application.InvokeAsync(func() { a.freeLocalPath(p) })
+		return
+	}
+	if p := argValue(args, "--sync-first"); p != "" {
+		application.InvokeAsync(func() { a.syncFirstLocalPath(p) })
 	}
 }
 
@@ -4084,7 +4418,7 @@ func (a *App) onSecondInstance(args []string) {
 // then live sync pairs. Used by Share / Version history.
 func (a *App) remotePathForLocal(localAbs string) (string, bool) {
 	c := filepath.Clean(localAbs)
-	for dir, m := range a.onDemandMounts {
+	for dir, m := range a.mounts() {
 		rel, err := filepath.Rel(filepath.Clean(dir), c)
 		if err != nil {
 			continue
@@ -4112,7 +4446,7 @@ func (a *App) remotePathForLocal(localAbs string) (string, bool) {
 // onDemandMountFor returns the mount root containing localAbs, if any.
 func (a *App) onDemandMountFor(localAbs string) (string, bool) {
 	c := filepath.Clean(localAbs)
-	for dir := range a.onDemandMounts {
+	for dir := range a.mounts() {
 		rel, err := filepath.Rel(filepath.Clean(dir), c)
 		if err != nil {
 			continue
@@ -4141,7 +4475,7 @@ func (a *App) keepLocalPath(localAbs string) {
 		return
 	}
 	if _, ok := a.onDemandMountFor(localAbs); !ok {
-		if a.onDemandMounts == nil { // mounts not ready yet — queue it
+		if !a.mountsReady() { // mounts not ready yet — queue it
 			a.pendingKeep = localAbs
 			return
 		}
@@ -4164,7 +4498,7 @@ func (a *App) freeLocalPath(localAbs string) {
 		return
 	}
 	if _, ok := a.onDemandMountFor(localAbs); !ok {
-		if a.onDemandMounts == nil {
+		if !a.mountsReady() {
 			a.pendingFree = localAbs
 			return
 		}
@@ -4209,7 +4543,7 @@ func (a *App) versionsLocalPath(localAbs string) {
 		if a.app != nil {
 			a.app.Dialog.Warning().
 				SetTitle("No version history").
-				SetMessage(filepath.Base(localAbs) + " isn't inside a folder synced by Nimbo.").
+				SetMessage(filepath.Base(localAbs) + " isn't inside a folder synced by " + brand.Current.Name + ".").
 				Show()
 		}
 		return
@@ -4232,7 +4566,7 @@ func (a *App) shareLocalPath(localAbs string) {
 		if a.app != nil {
 			a.app.Dialog.Warning().
 				SetTitle("Can't share").
-				SetMessage(filepath.Base(localAbs) + " isn't inside a folder synced by Nimbo.").
+				SetMessage(filepath.Base(localAbs) + " isn't inside a folder synced by " + brand.Current.Name + ".").
 				Show()
 		}
 		return
@@ -4283,7 +4617,7 @@ func (a *App) SidebarSupported() bool { return shellns.Supported() }
 func (a *App) SidebarEnabled() bool { return a.sidebarWanted() }
 
 func (a *App) sidebarWanted() bool {
-	recorded, _ := sidebarChoice()
+	recorded, _, _ := sidebarChoice()
 	cloudRoot := a.GetSyncMode() == "ondemand" || cfapi.ShellSyncRootRegistered(a.GetBaseDir())
 	return sidebarWantedFrom(recorded, cloudRoot, shellns.Enabled())
 }
@@ -4298,15 +4632,15 @@ func sidebarWantedFrom(recorded *bool, cloudRoot, legacyEntry bool) bool {
 	return cloudRoot || legacyEntry
 }
 
-// sidebarChoice returns the recorded preference (nil when never chosen) and
-// the folder it was applied for.
-func sidebarChoice() (*bool, string) {
+// sidebarChoice returns the recorded preference (nil when never chosen), the
+// folder it was applied for and the label our own entry was written with.
+func sidebarChoice() (*bool, string, string) {
 	if d, err := config.Resolve(); err == nil {
 		if s, e := d.LoadSettings(); e == nil {
-			return s.SidebarEnabled, s.SidebarTarget
+			return s.SidebarEnabled, s.SidebarTarget, s.SidebarName
 		}
 	}
-	return nil, ""
+	return nil, "", ""
 }
 
 // sidebarSyncRoot is recorded as the sidebar's target when we deliberately have
@@ -4324,6 +4658,19 @@ func rememberSidebar(on bool, target string) {
 	}
 	_ = d.UpdateSettings(func(s *config.Settings) {
 		s.SidebarEnabled, s.SidebarTarget = &on, target
+	})
+}
+
+// rememberSidebarEntry records that our own entry is on, pointing at target and
+// shown as name.
+func rememberSidebarEntry(target, name string) {
+	d, err := config.Resolve()
+	if err != nil {
+		return
+	}
+	on := true
+	_ = d.UpdateSettings(func(s *config.Settings) {
+		s.SidebarEnabled, s.SidebarTarget, s.SidebarName = &on, target, name
 	})
 }
 
@@ -4377,10 +4724,11 @@ func (a *App) SetSidebar(on bool) string {
 	if err != nil {
 		return err.Error()
 	}
-	if err := shellns.Register(brand.Current.Name, target, icon); err != nil {
+	name := a.ownSidebarLabel()
+	if err := shellns.Register(sidebarIconFolder(), name, target, icon); err != nil {
 		return err.Error()
 	}
-	rememberSidebar(true, target)
+	rememberSidebarEntry(target, name)
 	return ""
 }
 
@@ -4435,7 +4783,7 @@ func (a *App) syncSidebar() {
 			return // leave the record alone so the next launch retries
 		}
 		slog.Info("removed the duplicate navigation-pane entry; the cloud sync root provides it", "dir", target)
-		recorded, _ := sidebarChoice()
+		recorded, _, _ := sidebarChoice()
 		if recorded == nil {
 			// Never chosen: Windows shows the node, and SidebarEnabled says so.
 			rememberSidebar(true, sidebarSyncRoot)
@@ -4447,19 +4795,20 @@ func (a *App) syncSidebar() {
 	if !a.sidebarWanted() {
 		return
 	}
-	if recorded, applied := sidebarChoice(); recorded != nil && applied == target {
-		return // already applied for this folder
+	name := a.ownSidebarLabel()
+	if recorded, applied, appliedName := sidebarChoice(); recorded != nil && applied == target && appliedName == name {
+		return // already applied for this folder, under this label
 	}
 	icon, err := navIconPath()
 	if err != nil {
 		slog.Warn("sidebar icon unavailable", "err", err)
 		return
 	}
-	if err := shellns.Register(brand.Current.Name, target, icon); err != nil {
+	if err := shellns.Register(sidebarIconFolder(), name, target, icon); err != nil {
 		slog.Warn("sidebar registration failed", "err", err)
 		return
 	}
-	rememberSidebar(true, target)
+	rememberSidebarEntry(target, name)
 }
 
 // applyCloudRootChoice hides or shows the node Windows supplies for target's
@@ -4649,7 +4998,7 @@ func (a *App) ReportProblem() string {
 		return err.Error()
 	}
 	revealPath(out)
-	openURL("https://github.com/otherworld-dev/Nimbo/issues/new?template=bug_report.yml")
+	openURL("https://github.com/otherworld-dev/OtherSync/issues/new?template=bug_report.yml")
 	return ""
 }
 
@@ -4726,6 +5075,12 @@ type AccountEntryDTO struct {
 	Active bool   `json:"active"`
 	Status string `json:"status"` // latest engine status line ("" if not running)
 	Route  string `json:"route"`  // "local" while syncing over the local network, else "public"
+	// SidebarName is the name the user chose for the account's Explorer
+	// sidebar entry ("" = automatic), SidebarAuto the automatic one (the
+	// field's placeholder) and SidebarLabel the one actually shown.
+	SidebarName  string `json:"sidebarName"`
+	SidebarAuto  string `json:"sidebarAuto"`
+	SidebarLabel string `json:"sidebarLabel"`
 }
 
 // ListAccounts returns every configured account. All of them sync
@@ -4751,7 +5106,9 @@ func (a *App) ListAccounts() []AccountEntryDTO {
 		out = append(out, AccountEntryDTO{
 			ID: ac.ID, User: ac.LoginName, Server: ac.ServerURL,
 			Active: ac.ID == def.ID, Status: a.acctStatus[ac.ID],
-			Route: route,
+			Route:       route,
+			SidebarName: ac.Label, SidebarAuto: autoSidebarLabel(ac, st.Accounts),
+			SidebarLabel: sidebarLabel(ac, st.Accounts),
 		})
 	}
 	return out
@@ -4773,18 +5130,27 @@ func (a *App) SwitchAccount(id string) string {
 	if cur, ok := st.Default(); ok && cur.ID == id {
 		return "" // already active
 	}
+	// Turned down by its server: showing it would fail the same way, so ask it
+	// to sign in again instead (that shows it once it has).
+	if a.isAuthLost(id) {
+		a.setShowOnSignIn(id)
+		application.InvokeAsync(func() { a.showLoginFor(id) })
+		return ""
+	}
 	// An account whose app password is gone from the keychain can't be shown
 	// until it signs in again, so ask for that and change nothing yet: the
 	// sign-in makes it the active account itself (account.Complete, then
 	// BeginLogin restarts the engine), and cancelling it must leave the
 	// current account shown and syncing.
 	if _, err := account.LoadSecret(id); err != nil {
-		application.InvokeAsync(a.showLogin)
+		a.setShowOnSignIn(id)
+		application.InvokeAsync(func() { a.showLoginFor(id) })
 		return ""
 	}
 	if err := account.Update(d.AccountsFile(), func(s *account.Store) error { return s.SetDefault(id) }); err != nil {
 		return err.Error()
 	}
+	a.setShowOnSignIn("") // chosen now: an earlier wish to show another account is gone
 	a.disconnectAllOnDemand()
 	a.stopEngine()
 	a.start(a.ctx)
@@ -4798,7 +5164,7 @@ func (a *App) SwitchAccount(id string) string {
 
 // AddAccount opens the sign-in window to connect another Nextcloud account.
 // The completed login becomes the active account (see account.Complete).
-func (a *App) AddAccount() { a.showLogin() }
+func (a *App) AddAccount() { a.showLoginFor("") }
 
 // RemoveAccount disconnects a NON-active account: its keychain secret, account
 // entry, sync-folder setup and local sync state are removed (local files are
@@ -4861,6 +5227,7 @@ func (a *App) SignOut(clearData bool) string {
 	}
 	a.disconnectAllOnDemand()
 	a.stopEngine()
+	a.setShowOnSignIn("")
 	moreAccounts := false
 	if d, err := config.Resolve(); err == nil {
 		var accID string
@@ -4960,7 +5327,7 @@ func (a *App) testLocalAddress(ctx context.Context, addr, pin string) (LocalTest
 	switch {
 	case p.PlainHTTP:
 		dto.Result = "not-https"
-		dto.Message = "This address doesn't use HTTPS. Nimbo needs HTTPS here too; a self-signed certificate is fine. If Nextcloud sits behind a reverse proxy, use the proxy's address, not the Nextcloud machine's."
+		dto.Message = "This address doesn't use HTTPS. " + brand.Current.Name + " needs HTTPS here too; a self-signed certificate is fine. If Nextcloud sits behind a reverse proxy, use the proxy's address, not the Nextcloud machine's."
 		return dto, nil
 	case !p.Verified && !p.Pinned:
 		// Before anyone is asked to trust this certificate, check that a
@@ -5115,16 +5482,30 @@ func (a *App) clearSyncData(d config.Dirs, accountID string) {
 // onAuthLost is invoked by the engine when the server rejects our credentials:
 // stop the failing engine and prompt re-authentication (the account is kept so
 // the user just signs in again to the same server).
+//
+// The shown account is the one that failed. When another account can still
+// sign in, it becomes the shown one and everything else keeps syncing, the way
+// a background account losing its sign-in only ever stopped itself. Before
+// GitHub #20 this stopped every account and the app read as signed out until
+// the one account signed in again.
 func (a *App) onAuthLost() {
 	application.InvokeAsync(func() {
+		lost, _ := defaultAccount()
 		a.disconnectAllOnDemand()
 		a.stopEngine()
+		if lost.ID != "" {
+			a.markAuthLost(lost.ID)
+			if next, ok := a.fallbackAccount(); ok {
+				a.carryOnWith(lost, next)
+				return
+			}
+		}
 		a.authLost.Store(true) // before the status event: the flyout re-checks NeedsLogin on it
 		a.setStatus("Sign in again")
 		a.rebuildTrayMenu()
 		notify.RaiseActionable("Sign in required", brand.Current.Name+" couldn't authenticate — please sign in again.", "action=login",
 			[]notify.ToastButton{{Label: "Sign in", Args: "action=login"}})
-		a.showLogin()
+		a.showLoginFor(lost.ID)
 	})
 }
 
@@ -5145,18 +5526,28 @@ func (a *App) stopEngine() {
 // showLogin opens (or focuses) the sign-in window.
 func (a *App) showLogin() {
 	if a.loginWin != nil {
-		a.loginWin.Show()
-		a.loginWin.Focus()
+		a.raiseLogin()
 		return
 	}
-	a.loginWin = a.app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Name: "login", Title: brand.Current.Name + " — Sign in", Width: 440, Height: 300, URL: "/#login",
+	// Created on top: opened by a password the server turned down, Nimbo is
+	// rarely the foreground app, and Windows then puts a new window behind the
+	// one in use rather than let it take focus (GitHub #20 testing). It drops
+	// back to an ordinary window a moment later, staying in front.
+	w := a.app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name: "login", Title: brand.Current.Name + " — Sign in", Width: 440, Height: 400, URL: "/#login",
+		AlwaysOnTop: true,
 	})
+	a.loginWin = w
+	go func() {
+		time.Sleep(2 * time.Second)
+		w.SetAlwaysOnTop(false)
+	}()
 	// Closing the window abandons any in-flight browser login — stop polling so
 	// the goroutine doesn't leak (an unapproved flow polls 404 forever).
 	a.loginWin.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {
 		a.cancelLoginPoll()
 		a.loginWin = nil
+		a.setSignInFor("")
 		a.setupClosed()
 	})
 }
@@ -5220,12 +5611,17 @@ func (a *App) BeginLogin(server string) string {
 	// window would wait forever — hence the timeout backstop plus cancel-on-close
 	// and the frontend Cancel button.
 	a.cancelLoginPoll()
-	lctx, lcancel := context.WithTimeout(a.ctx, 10*time.Minute)
+	// 20 minutes: as long as Nextcloud keeps a login flow open. Ten cut off a
+	// slow sign-in on the VM (GitHub #20 testing).
+	lctx, lcancel := context.WithTimeout(a.ctx, 20*time.Minute)
 	a.loginMu.Lock()
 	a.loginCancel = lcancel
 	a.loginMu.Unlock()
 
+	// The account the window asked for, fixed now: the grant must be for it.
+	want := a.SignInTarget()
 	openURL(flow.LoginURL)
+	a.loginStepAside()
 	go func() {
 		defer lcancel()
 		creds, perr := flow.Poll(lctx)
@@ -5234,33 +5630,20 @@ func (a *App) BeginLogin(server string) string {
 			case errors.Is(lctx.Err(), context.Canceled):
 				return // superseded by a newer attempt or the window closed — stay silent
 			case errors.Is(lctx.Err(), context.DeadlineExceeded):
-				a.app.Event.Emit("login:error", "timed out waiting for browser sign-in — please try again")
+				a.loginFailed("timed out waiting for browser sign-in — please try again")
 			default:
-				a.app.Event.Emit("login:error", perr.Error())
+				a.loginFailed(perr.Error())
 			}
 			return
 		}
-		d, cerr := config.Resolve()
-		var acct account.Account
-		if cerr == nil {
-			acct, cerr = account.Complete(d.AccountsFile(), creds)
-		}
+		again, cerr := a.completeSignIn(creds, want)
 		if cerr != nil {
-			a.app.Event.Emit("login:error", cerr.Error())
+			a.loginFailed(cerr.Error())
 			return
 		}
-		// The setup screen comes next and chooses the account's folder, so the
-		// start below must not mount a default one ahead of it (GitHub #11).
-		a.beginSetup(acct.ID)
-		// Adding an account while one is already syncing: tear the old engine
-		// down first — the fresh login is now the default account (Complete
-		// sets it) and start() binds to the default.
-		if a.eng != nil {
-			a.disconnectAllOnDemand()
-			a.stopEngine()
-		}
-		a.start(a.ctx)
-		a.app.Event.Emit("login:done", nil)
+		// true = an account signing in again: the window closes instead of
+		// going on to setup.
+		a.app.Event.Emit("login:done", again)
 		a.emit("account")
 	}()
 	return flow.LoginURL
@@ -5330,6 +5713,7 @@ func (a *App) FreeSpace(dir string) int64 { return int64(diskFree(dir)) }
 
 // EnterSetup resizes the sign-in window to fit the configuration screen.
 func (a *App) EnterSetup() {
+	a.raiseLogin() // it stepped aside for the browser; setup needs it back
 	if a.loginWin != nil {
 		a.loginWin.SetSize(560, 640)
 		a.loginWin.Center()
@@ -5339,7 +5723,8 @@ func (a *App) EnterSetup() {
 // CompleteSetup applies the chosen initial-sync option for the whole account
 // into localDir, then finishes onboarding. mode is one of:
 //
-//	"everything" — classic two-way sync of the entire account
+//	"everything" — classic two-way sync of the entire account; may be
+//	               "everything:" + a JSON array of folders to download first
 //	"choose"     — set the base dir only; the caller opens Sync settings to pick
 //	"ondemand"   — virtual files (Cloud Files placeholders, download on open)
 //
@@ -5364,13 +5749,14 @@ func (a *App) completeSetup(localDir, mode string) string {
 	if msg := a.folderClashFor(localDir); msg != "" {
 		return msg
 	}
+	mode, first := parseSetupMode(mode)
 	switch mode {
 	case "everything":
 		if msg := a.SetSyncMode("live"); msg != "" {
 			return msg
 		}
 		_ = a.eng.SetBaseDir(localDir)
-		return a.AddSyncPair(localDir, "")
+		return a.addSyncPair(localDir, "", first)
 	case "choose":
 		_ = a.eng.SetBaseDir(localDir)
 		return a.SetSyncMode("live")
@@ -5526,9 +5912,13 @@ type BrowseEntry struct {
 	Name  string `json:"name"`
 	Path  string `json:"path"`
 	IsDir bool   `json:"isDir"`
+	// Size is the server's size in bytes. For a folder it is everything inside
+	// it, all the way down (oc:size); 0 when the server didn't say.
+	Size int64 `json:"size"`
 }
 
-// BrowseRemote lists a remote directory (one level), excluding the dir itself.
+// BrowseRemote lists a remote directory (one level), excluding the dir itself
+// and anything the account's ignore rules exclude; folders first, then A-Z.
 func (a *App) BrowseRemote(path string) []BrowseEntry {
 	if a.eng == nil {
 		return nil
@@ -5538,15 +5928,8 @@ func (a *App) BrowseRemote(path string) []BrowseEntry {
 		slog.Warn("browse failed", "path", path, "err", err)
 		return nil
 	}
-	trimmed := strings.Trim(path, "/")
-	out := make([]BrowseEntry, 0, len(entries))
-	for _, e := range entries {
-		if strings.Trim(e.Path, "/") == trimmed {
-			continue
-		}
-		out = append(out, BrowseEntry{Name: filepath.Base(e.Path), Path: strings.Trim(e.Path, "/"), IsDir: e.IsDir})
-	}
-	return out
+	pairs, _ := a.eng.Pairs()
+	return browseEntries(path, entries, pairRelFunc(pairs), a.eng.GlobalIgnoreMatcher())
 }
 
 // PairDTO describes a configured sync pair.
@@ -5622,13 +6005,19 @@ func (a *App) AddSyncFolder(remotePath string) {
 // AddSyncPair sets up a sync connection from a remote folder to an explicit
 // local directory. Returns "" on success or an error message for the UI.
 func (a *App) AddSyncPair(localDir, remotePath string) string {
+	return a.addSyncPair(localDir, remotePath, nil)
+}
+
+// addSyncPair is AddSyncPair with folders for the first sync to download
+// first (setup's "Download these first").
+func (a *App) addSyncPair(localDir, remotePath string, first []string) string {
 	if a.eng == nil {
 		return "not signed in"
 	}
 	if msg := a.folderClashFor(localDir); msg != "" {
 		return msg
 	}
-	if err := a.eng.AddSyncPair(localDir, remotePath); err != nil {
+	if err := a.eng.AddSyncPairFirst(localDir, remotePath, first); err != nil {
 		return err.Error()
 	}
 	// A whole-account pair (empty remote root) defines the account root; keep the
@@ -5695,7 +6084,7 @@ func pickFolderFallback(start string) string {
 	script := "Add-Type -AssemblyName System.Windows.Forms | Out-Null; " +
 		"$d = New-Object System.Windows.Forms.FolderBrowserDialog; "
 	if start != "" {
-		script += "try { $d.SelectedPath = '" + strings.ReplaceAll(start, "'", "''") + "' } catch {}; "
+		script += "try { $d.SelectedPath = " + psquote.Quote(start) + " } catch {}; "
 	}
 	script += "if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.SelectedPath) }"
 	cmd := exec.Command("powershell", "-NoProfile", "-STA", "-Command", script)

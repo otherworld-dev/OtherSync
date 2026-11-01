@@ -303,8 +303,8 @@ func (e *Executor) runTransfers(ctx context.Context, transfers []engine.Action, 
 // re-downloads the whole file twice per lock cycle.
 //
 // Deliberately conservative: no server checksum, a size mismatch, or any error
-// means "download it".
-func (e *Executor) redundantDownload(rel string) (string, bool) {
+// means "download it", and so does ctx being done (the hash stops then).
+func (e *Executor) redundantDownload(ctx context.Context, rel string) (string, bool) {
 	r, ok := e.Remote[rel]
 	if !ok || r.IsDir || r.SHA1 == "" {
 		return "", false
@@ -313,7 +313,7 @@ func (e *Executor) redundantDownload(rel string) (string, bool) {
 	if err != nil || fi.IsDir() || fi.Size() != r.Size {
 		return "", false
 	}
-	localSHA, err := sha1File(e.localPath(rel))
+	localSHA, err := sha1FileCtx(ctx, e.localPath(rel))
 	if err != nil || localSHA == "" {
 		return "", false
 	}
@@ -350,9 +350,12 @@ func (e *Executor) applyTransfer(ctx context.Context, a engine.Action) error {
 
 	// A download whose bytes we already hold is pure waste — see redundantDownload.
 	if a.Kind == engine.ActDownload {
-		if localSHA, redundant := e.redundantDownload(a.Path); redundant {
+		if localSHA, redundant := e.redundantDownload(ctx, a.Path); redundant {
 			slog.Info("download skipped (metadata-only change, content identical)", "path", a.Path)
 			return e.rebaselineUnchanged(a.Path, localSHA)
+		}
+		if err := ctx.Err(); err != nil {
+			return err // stopped while hashing: don't go on to fetch it
 		}
 	}
 
@@ -379,6 +382,8 @@ func (e *Executor) applyTransfer(ctx context.Context, a engine.Action) error {
 		}
 		// A lock is not a transient failure — somebody else has the file and will
 		// have it for as long as they have it. Retrying just delays the message.
+		// (A download's 423 is the server's own short lock instead, and the
+		// transport has tried that again already: transport.LockedGETWaits.)
 		// The same goes for every other deliberate refusal (quota, forbidden,
 		// auth): re-hashing a huge file two more times won't change the answer.
 		// And for a file another program is writing: Outlook keeps an attached
@@ -560,19 +565,33 @@ func RemoveToBin(path string) error {
 
 // clearReadOnlyTree strips the read-only attribute from a path and everything
 // under it, so a RemoveAll of a mirrored read-only subtree succeeds on Windows.
+// It only adds owner bits: setting a flat 0644 took the search bit off every
+// folder on Unix, so the delete it prepares failed with permission denied and
+// left folders nobody could open. Folders get the owner's rwx back, which also
+// frees one an older build left like that.
 func clearReadOnlyTree(root string) {
-	if fi, err := os.Stat(root); err != nil || (!fi.IsDir() && fi.Mode()&0o200 != 0) {
+	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
 		if err == nil {
-			_ = os.Chmod(root, 0o644)
+			makeWritable(root, fi)
 		}
 		return
 	}
-	_ = filepath.Walk(root, func(p string, _ os.FileInfo, err error) error {
+	_ = filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
 		if err == nil {
-			_ = os.Chmod(p, 0o644)
+			makeWritable(p, fi)
 		}
 		return nil
 	})
+}
+
+func makeWritable(p string, fi os.FileInfo) {
+	want := fi.Mode().Perm() | 0o200
+	if fi.IsDir() {
+		want |= 0o700
+	}
+	if want != fi.Mode().Perm() {
+		_ = os.Chmod(p, want)
+	}
 }
 
 func (e *Executor) makeLocalDir(rel string) error {

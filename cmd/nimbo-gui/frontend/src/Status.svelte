@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { kindIcon, kindLabel } from "./kinds";
   import { Events } from "@wailsio/runtime";
   import { App } from "../bindings/github.com/otherworld/nimbo/cmd/nimbo-gui";
+  import { brand } from "./brand.svelte";
   import { ask, tell, askText } from "./dialogs.svelte";
 
   type Activity = { time: string; kind: string; path: string; err: string; account: string };
@@ -10,16 +12,24 @@
     localExists: boolean; remoteExists: boolean;
     localSize: number; localMTime: string; remoteSize: number; remoteMTime: string;
   };
-  type Notif = { id: number; app: string; subject: string; message: string; link: string; actions: { label: string }[] };
-  type Blocked = { abs: string; path: string; reason: string; ext: string; escapable: boolean; escaping: boolean };
+  type Notif = { id: number; app: string; subject: string; message: string; link: string; actions: { label: string }[];
+                 account: string };
+  // remote: a SERVER item whose name Windows can't hold (Deck #984); it can
+  // only be renamed on the server.
+  type Blocked = { abs: string; path: string; reason: string; ext: string; escapable: boolean; escaping: boolean; remote?: string };
   type Lock = { path: string; owner: string; summary: string; ownerType: number; since: string; account: string;
                 localDir: string; canUnlock: boolean };
   type Trash = { href: string; name: string; originalLocation: string; deletedAt: string; size: number; isDir: boolean };
   // A folder that stopped being shared with the user (or whose storage was
   // unmounted): the local copy was kept and parked, and awaits a decision.
   type Detached = { localDir: string; rel: string; name: string; localPath: string; movedOut: boolean; at: string };
+  // A large file (64 MB or more) in its account's lane (Deck #702). They sync
+  // two at a time next to the normal sync; the user can move one to the front
+  // or set one aside for a while.
+  type LaneEntry = { account: string; path: string; abs: string; dir: "up" | "down"; size: number; doneBytes: number;
+                     state: "running" | "waiting" | "paused" | "setaside"; position: number; until: string };
 
-  let tab = $state<"activity" | "conflicts" | "notifications" | "blocked" | "inuse" | "detached" | "trash">("activity");
+  let tab = $state<"activity" | "conflicts" | "notifications" | "blocked" | "inuse" | "large" | "first" | "detached" | "trash">("activity");
   let activity = $state<Activity[]>([]);
   let conflicts = $state<Conflict[]>([]);
   let notifs = $state<Notif[]>([]);
@@ -31,6 +41,103 @@
   let otherAttn = $state<OtherAttention[]>([]);
   let detached = $state<Detached[]>([]);
   let detachedBusy = $state("");
+
+  let lane = $state<LaneEntry[]>([]);
+  let asideMenu = $state(""); // abs of the card whose Set aside menu is open
+  async function loadLane() { lane = ((await App.LaneList()) ?? []) as unknown as LaneEntry[]; }
+  // "lane" fires on every change, hundreds at once when a pass hands over many
+  // large files: fetch at most every 250 ms.
+  let lanePending = false;
+  function loadLaneSoon() {
+    if (lanePending) return;
+    lanePending = true;
+    setTimeout(() => { lanePending = false; loadLane(); }, 250);
+  }
+  // Byte counts move without a lane event, so poll while the tab shows a transfer.
+  $effect(() => {
+    if (tab !== "large" || !lane.some(l => l.state === "running")) return;
+    const t = setInterval(loadLane, 1000);
+    return () => clearInterval(t);
+  });
+  const laneName = (l: LaneEntry) => l.path.slice(l.path.lastIndexOf("/") + 1);
+  const laneFolder = (l: LaneEntry) => { const i = l.path.lastIndexOf("/"); return i < 0 ? "" : l.path.slice(0, i); };
+  const lanePct = (l: LaneEntry) => l.size > 0 ? Math.min(100, Math.floor(l.doneBytes * 100 / l.size)) : 0;
+  function ordinal(n: number): string {
+    const teen = n % 100 >= 11 && n % 100 <= 13;
+    const suf = teen ? "th" : ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[n % 10] ?? "th";
+    return n + suf;
+  }
+  function untilText(iso: string): string {
+    if (!iso) return "until you resume it";
+    const d = new Date(iso), now = new Date();
+    const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    if (d.toDateString() === now.toDateString()) return `until ${time}`;
+    const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1);
+    if (d.toDateString() === tomorrow.toDateString()) return `until tomorrow, ${time}`;
+    return `until ${d.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`;
+  }
+  function laneLine(l: LaneEntry): string {
+    switch (l.state) {
+      case "running":
+        return `${l.dir === "up" ? "Uploading" : "Downloading"} · ${humanBytes(l.doneBytes)} of ${humanBytes(l.size)} (${lanePct(l)}%)`;
+      case "waiting": return l.position === 1 ? "Waiting · next" : `Waiting · ${ordinal(l.position)} in line`;
+      case "paused": return "Paused";
+      default: return "Set aside " + untilText(l.until);
+    }
+  }
+  // First sync (Deck #766): while a sync folder downloads for the first time,
+  // the user can pick folders for it to download before everything else.
+  // The running first syncs ride the progress snapshot; a choice goes back
+  // through SetSyncMode's "clone-first:" sub-command (no bindings regen).
+  type CloneRun = { localDir: string; remoteRoot: string; first: string[] };
+  type Entry = { name: string; path: string; isDir: boolean };
+  let clones = $state<CloneRun[]>([]);
+  let clonesKey = "";
+  function takeClones(p: any) {
+    const next = ((p?.active && p?.clones) || []) as CloneRun[];
+    const key = JSON.stringify(next);
+    if (key !== clonesKey) { clonesKey = key; clones = next; }
+  }
+  (async () => takeClones(await App.Progress()))();
+  Events.On("progress", (e: any) => takeClones(e.data));
+
+  const trimSlash = (s: string) => s.replace(/^\/+|\/+$/g, "");
+  const folderName = (d: string) => d.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || d;
+  // Browse paths are account paths; a choice is relative to the sync folder's remote root.
+  const relTo = (p: string, root: string) => (trimSlash(root) === "" ? trimSlash(p) : trimSlash(p).slice(trimSlash(root).length + 1));
+
+  let pickFor = $state(""); // localDir of the run whose folder picker is open
+  let pickCur = $state("");
+  let pickEntries = $state<Entry[]>([]);
+  let pickLoading = $state(false);
+  async function pickGo(path: string) {
+    pickCur = trimSlash(path);
+    pickLoading = true;
+    pickEntries = (((await App.BrowseRemote(pickCur)) ?? []) as Entry[]).filter(e => e.isDir);
+    pickLoading = false;
+  }
+  function openPick(c: CloneRun) {
+    if (pickFor === c.localDir) { pickFor = ""; return; }
+    pickFor = c.localDir;
+    pickGo(c.remoteRoot);
+  }
+  function pickUp(c: CloneRun) {
+    if (trimSlash(pickCur) !== trimSlash(c.remoteRoot)) pickGo(pickCur.split("/").slice(0, -1).join("/"));
+  }
+  async function setFirst(c: CloneRun, paths: string[]) {
+    const err = await App.SetSyncMode("clone-first:" + JSON.stringify({ localDir: c.localDir, paths }));
+    if (err) { await tell({ title: "Couldn't change the order", message: err }); return; }
+    // Replace rather than mutate: a run from App.Progress() is a generated
+    // class instance, which Svelte does not make reactive.
+    clones = clones.map(x => (x.localDir === c.localDir ? { ...x, first: paths } : x));
+    clonesKey = JSON.stringify(clones); // the progress event confirms it a moment later
+  }
+  const addFirst = (c: CloneRun, e: Entry) => setFirst(c, [...c.first, relTo(e.path, c.remoteRoot)]);
+  const removeFirst = (c: CloneRun, f: string) => setFirst(c, c.first.filter(x => x !== f));
+
+  async function syncFirst(l: LaneEntry) { await App.LaneSyncFirst(l.abs); loadLane(); }
+  async function setAside(l: LaneEntry, minutes: number) { asideMenu = ""; await App.LaneSetAside(l.abs, minutes); loadLane(); }
+  async function resumeLane(l: LaneEntry) { await App.LaneResume(l.abs); loadLane(); }
 
   async function loadActivity() { activity = (await App.RecentActivity()) ?? []; }
   async function loadConflicts() {
@@ -72,7 +179,7 @@
   }
   async function loadTrash() { trashBusy = true; trash = (await App.TrashList()) ?? []; trashBusy = false; }
   async function loadDetached() { detached = (await App.DetachedFolders()) ?? []; }
-  function loadAll() { loadActivity(); loadConflicts(); loadNotifs(); loadBlocked(); loadLocks(); loadDetached(); }
+  function loadAll() { loadActivity(); loadConflicts(); loadNotifs(); loadBlocked(); loadLocks(); loadDetached(); loadLane(); }
   loadAll();
 
   // The user's decision for a kept copy. "move" first asks where; the folder
@@ -99,7 +206,7 @@
   // bare "<tab>" or "<tab>" + newline + "<highlight-key>": the flyout newline-
   // joins the target row's key into OpenStatusTab's one string arg (so no extra
   // Go binding is needed), and we flash + scroll to the matching row.
-  type Tab = "activity" | "conflicts" | "notifications" | "blocked" | "inuse" | "detached" | "trash";
+  type Tab = "activity" | "conflicts" | "notifications" | "blocked" | "inuse" | "large" | "first" | "detached" | "trash";
   const NL = String.fromCharCode(10); // newline — never occurs in a tab name or file path
   let highlight = $state("");
   let hlTimer: ReturnType<typeof setTimeout>;
@@ -133,6 +240,70 @@
   Events.On("blocked", loadBlocked);
   Events.On("locks", loadLocks);
   Events.On("detached", loadDetached);
+  Events.On("lane", loadLaneSoon);
+
+  // "Right now": every job in progress, in full (Deck #988).
+  type NowJob = { account: string; kind: string; path: string; size: number; sent: number; large: boolean; state: string };
+  type NowCheck = { account: string; folder: string; dirs: number };
+  type Now = { jobs: NowJob[]; checking: NowCheck[] };
+  let now = $state<Now>({ jobs: [], checking: [] });
+  // Speed comes from two samples of the same job at least 2 s apart; between
+  // samples the last figure is kept so it doesn't flicker.
+  const samples = new Map<string, { t: number; sent: number; rate: number }>();
+  let rates = $state<Record<string, number>>({});
+  const jobKey = (j: NowJob) => j.account + NL + j.kind + NL + j.path;
+  // Calls can overlap (a "now" event during a slow one): only the latest
+  // answer is drawn or sampled for speed, and a failed call changes nothing.
+  let nowSeq = 0;
+  async function loadNow() {
+    const seq = ++nowSeq;
+    let n: Now;
+    try {
+      n = ((await App.NowStatus()) as unknown as Now | null) ?? { jobs: [], checking: [] };
+    } catch { return; }
+    if (seq !== nowSeq) return;
+    const t = Date.now(), live = new Set<string>(), next: Record<string, number> = {};
+    for (const j of n.jobs ?? []) {
+      const k = jobKey(j); live.add(k);
+      const s = samples.get(k);
+      if (j.state !== "running" || j.size <= 0) { samples.delete(k); continue; }
+      if (!s || j.sent < s.sent) { samples.set(k, { t, sent: j.sent, rate: 0 }); continue; }
+      if (t - s.t >= 2000) {
+        s.rate = (j.sent - s.sent) * 1000 / (t - s.t);
+        s.t = t; s.sent = j.sent;
+      }
+      if (s.rate > 0) next[k] = s.rate;
+    }
+    for (const k of [...samples.keys()]) if (!live.has(k)) samples.delete(k);
+    rates = next;
+    now = { jobs: n.jobs ?? [], checking: n.checking ?? [] };
+  }
+  const nowAccounts = $derived(new Set([...now.jobs.map(j => j.account), ...now.checking.map(c => c.account)].filter(Boolean)));
+  const nowMulti = $derived(nowAccounts.size > 1);
+  const nowVerb = (k: string) => k === "upload" ? "Uploading" : k === "download" ? "Downloading" : kindLabel(k);
+  const nowState = (s: string) =>
+    s === "waiting" ? "Waiting" : s === "paused" ? "Paused" : s === "setaside" ? "Set aside" : "";
+  const jobPct = (j: NowJob) => j.size > 0 ? Math.max(0, Math.min(100, Math.floor(j.sent * 100 / j.size))) : 0;
+  function jobDetail(j: NowJob): string {
+    const parts: string[] = [];
+    const st = nowState(j.state);
+    parts.push(st || nowVerb(j.kind));
+    if (j.size > 0) {
+      parts.push(`${humanBytes(j.sent) === "—" ? "0 B" : humanBytes(j.sent)} of ${humanBytes(j.size)} (${jobPct(j)}%)`);
+      const r = rates[jobKey(j)];
+      if (r && !st) parts.push(`${humanBytes(r)}/s`);
+    }
+    return parts.join(" · ");
+  }
+  const fmtNum = (n: number) => n.toLocaleString("en-US");
+  function checkText(c: NowCheck): string {
+    let s = "Checking folders for changes";
+    if (c.dirs > 0) s += ` · ${fmtNum(c.dirs)}`;
+    if (c.folder) s += ` · now in ${c.folder}`;
+    return s;
+  }
+  loadNow();
+  Events.On("now", loadNow);
 
   const conflictDesc = (k: string) =>
     k === "deleted-locally" ? "You deleted this; it changed on the server."
@@ -186,6 +357,20 @@
     const name = await askText({ title: "Rename file", message: "Pick a name the server allows.", value: base, ok: "Rename" });
     if (name && name !== base) App.RenameBlocked(b.abs, name);
   }
+  // A server item ending in a space or a full stop: rename it ON THE SERVER
+  // (the fix for every device), suggesting the name without the trailing part.
+  async function renameOnServer(b: Blocked) {
+    const base = (b.remote ?? b.path).split("/").pop() ?? b.path;
+    const name = await askText({
+      title: "Rename on server",
+      message: "Windows can't use a name that ends in a space or a full stop. Pick a new name; it changes on the server for everyone, and nothing is replaced.",
+      value: base.replace(/[ .]+$/, ""), ok: "Rename",
+    });
+    if (!name) return;
+    const err = await App.RenameOnServer(b.abs, name);
+    if (err) { await tell({ title: "Couldn't rename", message: err }); return; }
+    loadBlocked();
+  }
   async function deleteBlocked(b: Blocked) {
     if (await ask({
       title: "Delete file?",
@@ -196,7 +381,7 @@
     }
   }
   async function deleteAllBlocked() {
-    const n = realBlocked.length;
+    const n = localBlocked.length;
     if (await ask({
       title: `Delete ${n} file${n === 1 ? "" : "s"}?`,
       message: `This deletes all ${n} can't-sync file${n === 1 ? "" : "s"} from this device. They can't sync because of their names and aren't on the server, so this only removes them locally.`,
@@ -208,6 +393,8 @@
   }
   // Real blocked files (excludes the synthetic "currently escaping" rows).
   const realBlocked = $derived(blocked.filter((b) => !b.escaping));
+  // Only these are local files "Delete all" can remove; a server item can't be.
+  const localBlocked = $derived(realBlocked.filter((b) => !b.remote));
   // Opt this file's type into escaping: it'll sync stored under a renamed copy.
   function syncEscape(b: Blocked) {
     App.RenameBlocked(b.abs, "//escape");
@@ -236,6 +423,14 @@
     <button class:active={tab==="notifications"} onclick={() => tab="notifications"}>Notifications{notifs.length ? ` (${notifs.length})` : ""}</button>
     <button class:active={tab==="blocked"} onclick={() => tab="blocked"}>Can't sync{realBlocked.length ? ` (${realBlocked.length})` : ""}</button>
     <button class:active={tab==="inuse"} onclick={() => tab="inuse"}>In use{locks.length ? ` (${locks.length})` : ""}</button>
+    <!-- Only while there are large files, like "No longer shared". -->
+    {#if lane.length || tab === "large"}
+      <button class:active={tab==="large"} onclick={() => tab="large"}>Large files{lane.length ? ` (${lane.length})` : ""}</button>
+    {/if}
+    <!-- Only while a sync folder is downloading for the first time. -->
+    {#if clones.length || tab === "first"}
+      <button class:active={tab==="first"} onclick={() => tab="first"}>First sync</button>
+    {/if}
     <!-- Rare, so the tab only appears while there is something to decide. -->
     {#if detached.length || tab === "detached"}
       <button class:active={tab==="detached"} onclick={() => tab="detached"}>No longer shared{detached.length ? ` (${detached.length})` : ""}</button>
@@ -245,9 +440,30 @@
 
   <div class="body">
     {#if tab === "activity"}
+      <div class="nowhead">Right now</div>
+      {#if now.jobs.length === 0 && now.checking.length === 0}<p class="empty">Nothing in progress</p>{/if}
+      {#each now.checking as c}
+        <div class="nowrow">
+          <span class="ni">⟳</span>
+          <div class="nb">
+            <div class="np">{#if nowMulti && c.account}<span class="nacct">{c.account} · </span>{/if}{checkText(c)}</div>
+          </div>
+        </div>
+      {/each}
+      {#each now.jobs as j (jobKey(j))}
+        <div class="nowrow">
+          <span class="ni">{kindIcon(j.kind)}</span>
+          <div class="nb">
+            <div class="np">{#if nowMulti && j.account}<span class="nacct">{j.account} · </span>{/if}{j.path}</div>
+            <div class="ns">{jobDetail(j)}</div>
+            {#if j.size > 0}<div class="nbar"><div style:width="{jobPct(j)}%"></div></div>{/if}
+          </div>
+        </div>
+      {/each}
+      <div class="nowhead earlier">Earlier</div>
       {#if activity.length === 0}<p class="empty">Nothing yet.</p>{/if}
       {#each activity as e}
-        <div class="line" class:hl={(e.path + NL + e.kind) === highlight}><span class="t">{e.time}</span>{#if e.account}<span class="acct">{e.account}</span>{/if}<span class="k">{e.kind}</span><span class="p">{e.path}</span>{#if e.err}<span class="err">⚠ {e.err}</span>{/if}</div>
+        <div class="line" class:hl={(e.path + NL + e.kind) === highlight}><span class="t">{e.time}</span>{#if e.account}<span class="acct">{e.account}</span>{/if}<span class="k">{kindLabel(e.kind)}</span><span class="p">{e.path}</span>{#if e.err}<span class="err">⚠ {e.err}</span>{/if}</div>
       {/each}
 
     {:else if tab === "conflicts"}
@@ -339,8 +555,11 @@
       {/if}
       {#each notifs as n}
         <div class="card" class:hl={("notif" + NL + n.id) === highlight}>
-          <div class="title">{n.subject || n.app}</div>
-          {#if n.message}<div class="desc">{n.message}</div>{/if}
+          <div class="notiftext">
+            <div class="title">{n.subject || n.app}</div>
+            {#if n.account}<div class="notifacct">{n.account}</div>{/if}
+            {#if n.message}<div class="desc">{n.message}</div>{/if}
+          </div>
           <div class="btns">
             {#each n.actions as ac}<button onclick={() => App.DoNotificationAction(n.id, ac.label)}>{ac.label}</button>{/each}
             {#if n.link}<button onclick={() => App.OpenURL(n.link)}>Open</button>{/if}
@@ -351,9 +570,9 @@
 
     {:else if tab === "blocked"}
       {#if blocked.length === 0}<p class="empty">Nothing blocked.</p>{/if}
-      {#if realBlocked.length > 1}
+      {#if localBlocked.length > 1}
         <div class="bulkrow">
-          <span class="bulkcount">{realBlocked.length} files can't sync</span>
+          <span class="bulkcount">{localBlocked.length} files can't sync</span>
           <button class="danger" onclick={deleteAllBlocked}>Delete all</button>
         </div>
       {/if}
@@ -364,6 +583,14 @@
             <div class="desc">{b.reason}. Stored on the server under a “{b.ext}{'…'}” copy and shown here with their real name.</div>
             <div class="btns">
               <button onclick={() => stopEscape(b)}>Stop</button>
+            </div>
+          </div>
+        {:else if b.remote}
+          <div class="card" class:hl={b.abs === highlight}>
+            <div class="title">“{b.path}”</div>
+            <div class="desc">{b.reason}</div>
+            <div class="btns">
+              <button class="primary" onclick={() => renameOnServer(b)}>Rename on server…</button>
             </div>
           </div>
         {:else}
@@ -384,7 +611,7 @@
 
     {:else if tab === "inuse"}
       {#if !lockingAvailable}
-        <p class="empty">Your server doesn't have the Files Lock app, so Nimbo can't tell
+        <p class="empty">Your server doesn't have the Files Lock app, so {brand.name} can't tell
           when someone else has a file open.</p>
       {:else if locks.length === 0}
         <p class="empty">Nobody else has any of your files open.</p>
@@ -408,6 +635,85 @@
           </div>
         {/each}
       {/if}
+
+    {:else if tab === "first"}
+      <p class="laneintro">Your files are downloading for the first time. Pick the folders you need now and they download before everything else.</p>
+      {#if clones.length === 0}<p class="empty">The first sync has finished.</p>{/if}
+      {#each clones as c (c.localDir)}
+        <div class="card">
+          <div class="title">📁 {folderName(c.localDir)}</div>
+          <div class="lanesub" title={c.localDir}>{c.localDir}</div>
+          {#if c.first.length}
+            <div class="desc">Downloading first, in this order:</div>
+            {#each c.first as f, i (f)}
+              <div class="frow">
+                <span class="fname">{i + 1}. {f}</span>
+                <button class="flink" onclick={() => removeFirst(c, f)}>Remove</button>
+              </div>
+            {/each}
+          {:else}
+            <div class="desc">Nothing chosen, so files download in the usual order.</div>
+          {/if}
+          <div class="btns fbtns">
+            <button class:primary={pickFor !== c.localDir} onclick={() => openPick(c)}>{pickFor === c.localDir ? "Done" : "Choose folders…"}</button>
+            {#if c.first.length}<button onclick={() => setFirst(c, [])}>Clear</button>{/if}
+          </div>
+          {#if pickFor === c.localDir}
+            <div class="picker">
+              <div class="crumb">
+                <button class="flink" onclick={() => pickUp(c)} disabled={trimSlash(pickCur) === trimSlash(c.remoteRoot)}>⬆ Up</button>
+                <span>/{pickCur}</span>
+              </div>
+              {#if pickLoading}<p class="empty">Loading…</p>
+              {:else if pickEntries.length === 0}<p class="empty">No folders here.</p>{/if}
+              {#each pickEntries as e (e.path)}
+                {@const rel = relTo(e.path, c.remoteRoot)}
+                <div class="frow">
+                  <button class="fname nav" onclick={() => pickGo(e.path)} title="Open">📁 {e.name}</button>
+                  {#if c.first.includes(rel)}
+                    <span class="ftag">✓ First</span>
+                    <button class="flink" onclick={() => removeFirst(c, rel)}>Remove</button>
+                  {:else}
+                    <button class="flink" onclick={() => addFirst(c, e)}>Download first</button>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      {/each}
+
+    {:else if tab === "large"}
+      <p class="laneintro">Files of 64 MB or more sync here, two at a time, next to the normal sync, so smaller changes never wait behind them.</p>
+      {#if lane.length === 0}<p class="empty">No large files syncing.</p>{/if}
+      {#each lane as l (l.abs)}
+        <div class="card" class:hl={l.abs === highlight}>
+          <div class="title">{l.dir === "up" ? "↑" : "↓"} {laneName(l)}</div>
+          <div class="lanesub">{#if l.account}<span class="acct">{l.account}</span> {/if}{laneFolder(l) || "Top folder"} · {humanBytes(l.size)}</div>
+          <div class="desc">{laneLine(l)}</div>
+          {#if l.state === "running"}
+            <div class="lanebar"><div style="width: {lanePct(l)}%"></div></div>
+          {/if}
+          <div class="btns">
+            {#if l.state === "setaside"}
+              <button class="primary" onclick={() => resumeLane(l)}>Resume</button>
+            {:else}
+              {#if (l.state === "waiting" || l.state === "paused") && l.position > 1}
+                <button onclick={() => syncFirst(l)}>Sync first</button>
+              {/if}
+              <button onclick={() => asideMenu = asideMenu === l.abs ? "" : l.abs}>Set aside ▾</button>
+            {/if}
+          </div>
+          {#if asideMenu === l.abs && l.state !== "setaside"}
+            <div class="btns asidemenu">
+              <button onclick={() => setAside(l, 60)}>For 1 hour</button>
+              <button onclick={() => setAside(l, 240)}>For 4 hours</button>
+              <button onclick={() => setAside(l, -1)}>Until tomorrow</button>
+              <button onclick={() => setAside(l, 0)}>Until I resume it</button>
+            </div>
+          {/if}
+        </div>
+      {/each}
 
     {:else}
       {#if trashBusy && trash.length === 0}<p class="empty">Loading…</p>
@@ -456,8 +762,40 @@
   .card { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
   .card .title { font-weight: 600; font-size: 13px; }
   .card .desc { color: var(--fg2); font-size: 12px; margin: 4px 0 10px; }
+  /* A notification's text can be copied (an IP address, a share name); the
+     app turns selection off everywhere else (GitHub #20). */
+  .notiftext { user-select: text; -webkit-user-select: text; cursor: text; }
+  .notifacct { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
   .locksub { font-size: 11.5px; color: var(--muted); }
   .lockbtns { margin-top: 8px; }
+  .laneintro { font-size: 12px; color: var(--muted); margin: 0 0 10px; }
+  .lanesub { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .lanesub .acct { color: var(--accent); border: 1px solid var(--border); border-radius: 8px; padding: 0 6px; }
+  .lanebar { height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; margin: -4px 0 10px; }
+  .nowhead { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin: 0 0 6px; }
+  .nowhead.earlier { margin-top: 16px; }
+  .nowrow { display: flex; gap: 10px; padding: 6px 0; font-size: 13px; border-bottom: 1px solid var(--border-soft); }
+  .nowrow .ni { color: var(--accent); width: 16px; text-align: center; flex: none; }
+  .nowrow .nb { flex: 1; min-width: 0; }
+  .nowrow .np { overflow-wrap: anywhere; word-break: break-word; }
+  .nowrow .np .nacct { color: var(--muted); }
+  .nowrow .ns { font-size: 11.5px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .nbar { height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; margin-top: 4px; }
+  .nbar div { height: 100%; background: var(--accent); }
+  .lanebar div { height: 100%; background: var(--accent); }
+  .asidemenu { margin-top: 8px; }
+  .frow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0;
+          border-bottom: 1px solid var(--border-soft); font-size: 13px; }
+  .frow .fname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .frow .nav { background: none; border: none; padding: 0; text-align: left; color: var(--fg); cursor: pointer; font-size: 13px; }
+  .frow .nav:hover { color: var(--accent); }
+  .flink { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 12px; padding: 2px 4px; white-space: nowrap; }
+  .flink:hover { text-decoration: underline; }
+  .flink:disabled { color: var(--muted); cursor: default; text-decoration: none; }
+  .ftag { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .fbtns { margin-top: 10px; }
+  .picker { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+  .crumb { display: flex; gap: 10px; align-items: center; margin-bottom: 4px; color: var(--fg2); font-size: 12.5px; }
   .versions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 12px; }
   .ver { border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px; background: var(--panel); }
   .ver.newest { border-color: var(--accent); background: var(--tint); }

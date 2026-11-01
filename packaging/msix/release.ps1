@@ -25,7 +25,7 @@
 # Dev signing cert) and an authenticated gh CLI (`gh auth login`).
 param(
     [string]$Owner = "",
-    [string]$Repo = "Nimbo",
+    [string]$Repo = "OtherSync",
     [string]$Version = "",                 # X.Y.Z; empty = packaging/msix/VERSION
     [int]$Revision = -1,                   # passed to package.ps1: -1 = auto, 0 = stable (vX.Y.Z)
     [string]$SignSubject = "CN=Nimbo Dev",  # one knob for the signer/Publisher across MSIX, feed and installer (see the signing runbook)
@@ -197,7 +197,7 @@ if ($exists) {
     $extra = @()
     if ($PreRelease) { $extra += "--prerelease" }
     & $gh release create $tag @assets --repo "$Owner/$Repo" `
-        --title "Nimbo $tag" --target $target --notes-file $notesFile @extra
+        --title "OtherSync $tag" --target $target --notes-file $notesFile @extra
 }
 if ($LASTEXITCODE -ne 0) { throw "gh release failed" }
 

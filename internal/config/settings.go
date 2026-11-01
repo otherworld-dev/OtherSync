@@ -97,6 +97,11 @@ type Settings struct {
 	// (live mode, badges unregistered). The Settings button remains regardless.
 	BadgesOffered bool `json:"badgesOffered"`
 
+	// RenamedFrom is the former product name whose rename this install has
+	// dealt with ("Nimbo", for the rename to OtherSync): the one-time "is now"
+	// notice was shown, or the install was new and had nothing to be told.
+	RenamedFrom string `json:"renamedFrom,omitempty"`
+
 	DevIgnoresSeeded bool `json:"devIgnoresSeeded"`
 	// AppWindowSizes remembers the last window size per Nextcloud-app window
 	// (apps opened as desktop windows from the flyout dock), keyed by app id.
@@ -119,6 +124,10 @@ type Settings struct {
 	// package's private hive, not the keys Explorer reads — so it has to
 	// remember what it asked for to know when a rewrite is due.
 	SidebarTarget string `json:"sidebarTarget,omitempty"`
+	// SidebarName is the label our own entry was last written with. It names
+	// the account, so it changes with the shown account even when the folder
+	// does not, and an entry written before it carried the account has none.
+	SidebarName string `json:"sidebarName,omitempty"`
 }
 
 // AppWindowSize is a remembered app-window size in logical pixels.

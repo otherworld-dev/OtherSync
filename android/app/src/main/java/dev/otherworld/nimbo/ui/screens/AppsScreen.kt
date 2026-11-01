@@ -61,7 +61,7 @@ fun AppsScreen(
                 EmptyState(
                     icon = Icons.Filled.Apps,
                     title = "No apps to show",
-                    subtitle = "Once Nimbo has talked to your server, the apps it " +
+                    subtitle = "Once OtherSync has talked to your server, the apps it " +
                         "offers appear here.",
                 )
             }

@@ -203,7 +203,8 @@ export function BrowseOffline(rel) {
 }
 
 /**
- * BrowseRemote lists a remote directory (one level), excluding the dir itself.
+ * BrowseRemote lists a remote directory (one level), excluding the dir itself
+ * and anything the account's ignore rules exclude; folders first, then A-Z.
  * @param {string} path
  * @returns {$CancellablePromise<$models.BrowseEntry[]>}
  */
@@ -263,7 +264,8 @@ export function CloseLogin() {
  * CompleteSetup applies the chosen initial-sync option for the whole account
  * into localDir, then finishes onboarding. mode is one of:
  * 
- * 	"everything" — classic two-way sync of the entire account
+ * 	"everything" — classic two-way sync of the entire account; may be
+ * 	               "everything:" + a JSON array of folders to download first
  * 	"choose"     — set the base dir only; the caller opens Sync settings to pick
  * 	"ondemand"   — virtual files (Cloud Files placeholders, download on open)
  * 
@@ -591,12 +593,52 @@ export function InitialStatusTab() {
 }
 
 /**
+ * LaneList returns every account's large transfers: running, then waiting in
+ * queue order, then set aside.
+ * @returns {$CancellablePromise<$models.LaneEntryDTO[]>}
+ */
+export function LaneList() {
+    return $Call.ByID(3963512447).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType29($result);
+    }));
+}
+
+/**
+ * LaneResume brings a set-aside large file back into the queue.
+ * @param {string} abs
+ * @returns {$CancellablePromise<void>}
+ */
+export function LaneResume(abs) {
+    return $Call.ByID(925915116, abs);
+}
+
+/**
+ * LaneSetAside sets a large file aside: minutes from now, -1 until tomorrow
+ * morning, 0 until the user resumes it. A restart ends it either way.
+ * @param {string} abs
+ * @param {number} minutes
+ * @returns {$CancellablePromise<void>}
+ */
+export function LaneSetAside(abs, minutes) {
+    return $Call.ByID(1182554255, abs, minutes);
+}
+
+/**
+ * LaneSyncFirst moves a waiting large file to the front of its queue.
+ * @param {string} abs
+ * @returns {$CancellablePromise<void>}
+ */
+export function LaneSyncFirst(abs) {
+    return $Call.ByID(2986034398, abs);
+}
+
+/**
  * LicenceInfo reports the current licence state for the Settings UI.
  * @returns {$CancellablePromise<license$0.Info>}
  */
 export function LicenceInfo() {
     return $Call.ByID(2163230976).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType28($result);
+        return $$createType30($result);
     }));
 }
 
@@ -607,7 +649,7 @@ export function LicenceInfo() {
  */
 export function ListAccounts() {
     return $Call.ByID(2919187697).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType30($result);
+        return $$createType32($result);
     }));
 }
 
@@ -680,7 +722,7 @@ export function NotificationCount() {
  */
 export function NotificationList() {
     return $Call.ByID(2567004906).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType32($result);
+        return $$createType34($result);
     }));
 }
 
@@ -690,6 +732,18 @@ export function NotificationList() {
  */
 export function NotificationsEnabled() {
     return $Call.ByID(2345418796);
+}
+
+/**
+ * NowStatus is the flyout's status line and the Status window's "Right now".
+ * The windows call it on every "now" event, so the attention counts (which
+ * read files) come from a cache at most two seconds old.
+ * @returns {$CancellablePromise<$models.NowStatusDTO>}
+ */
+export function NowStatus() {
+    return $Call.ByID(964228537).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType35($result);
+    }));
 }
 
 /**
@@ -800,7 +854,7 @@ export function OpenVersions(remotePath) {
  */
 export function OtherAccountAttention() {
     return $Call.ByID(3107861882).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType34($result);
+        return $$createType37($result);
     }));
 }
 
@@ -819,7 +873,7 @@ export function PauseFor(minutes) {
  */
 export function PauseInfo() {
     return $Call.ByID(3615706181).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType35($result);
+        return $$createType38($result);
     }));
 }
 
@@ -864,7 +918,7 @@ export function PinApp(id) {
  */
 export function PolicyInfo() {
     return $Call.ByID(4136447139).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType36($result);
+        return $$createType39($result);
     }));
 }
 
@@ -874,7 +928,7 @@ export function PolicyInfo() {
  */
 export function Progress() {
     return $Call.ByID(1801045022).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType37($result);
+        return $$createType40($result);
     }));
 }
 
@@ -894,7 +948,7 @@ export function Quit() {
  */
 export function RecentActivity() {
     return $Call.ByID(3561310187).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType39($result);
+        return $$createType42($result);
     }));
 }
 
@@ -945,6 +999,18 @@ export function RemoveSyncFolder(remotePath, deleteLocal) {
  */
 export function RenameBlocked(abs, newName) {
     return $Call.ByID(3581123109, abs, newName);
+}
+
+/**
+ * RenameOnServer renames a "Can't sync" server item (a row with Remote set,
+ * identified by its Abs) to newName in the same server folder, never replacing
+ * anything there. It returns "" on success, else a message for the user.
+ * @param {string} abs
+ * @param {string} newName
+ * @returns {$CancellablePromise<string>}
+ */
+export function RenameOnServer(abs, newName) {
+    return $Call.ByID(3560832081, abs, newName);
 }
 
 /**
@@ -1044,8 +1110,20 @@ export function SaveLocalAddress(addr, pin) {
  */
 export function Search(term) {
     return $Call.ByID(3097496321, term).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType41($result);
+        return $$createType44($result);
     }));
+}
+
+/**
+ * SetAccountSidebarName sets the name an account's Explorer sidebar entry is
+ * shown under ("" goes back to the automatic one) and renames the entry
+ * straight away. It returns "" or a message to show.
+ * @param {string} id
+ * @param {string} name
+ * @returns {$CancellablePromise<string>}
+ */
+export function SetAccountSidebarName(id, name) {
+    return $Call.ByID(1293671913, id, name);
 }
 
 /**
@@ -1294,7 +1372,7 @@ export function SetVerbose(on) {
  */
 export function ShareList() {
     return $Call.ByID(427148648).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType43($result);
+        return $$createType46($result);
     }));
 }
 
@@ -1363,6 +1441,37 @@ export function SidebarEnabled() {
  */
 export function SidebarSupported() {
     return $Call.ByID(2636282971);
+}
+
+/**
+ * SignInAgain opens the sign-in window for one account (its row in Settings).
+ * @param {string} id
+ * @returns {$CancellablePromise<void>}
+ */
+export function SignInAgain(id) {
+    return $Call.ByID(3782040665, id);
+}
+
+/**
+ * SignInSomeoneElse is the sign-in window's "Sign in to a different account
+ * instead": until the window closes, it signs in whichever account the user
+ * picks rather than the one it was opened for.
+ * @returns {$CancellablePromise<void>}
+ */
+export function SignInSomeoneElse() {
+    return $Call.ByID(1324364904);
+}
+
+/**
+ * SignInTarget tells the sign-in window which account it is for: the one it was
+ * opened for, or with nothing running because the shown account was turned
+ * down, that account.
+ * @returns {$CancellablePromise<$models.SignInTargetDTO>}
+ */
+export function SignInTarget() {
+    return $Call.ByID(2489164518).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType47($result);
+    }));
 }
 
 /**
@@ -1439,7 +1548,7 @@ export function TailLog() {
  */
 export function TestLocalAddress(addr, pin) {
     return $Call.ByID(176774928, addr, pin).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType44($result);
+        return $$createType48($result);
     }));
 }
 
@@ -1466,7 +1575,7 @@ export function TogglePause() {
  */
 export function TrashList() {
     return $Call.ByID(2716350569).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType46($result);
+        return $$createType50($result);
     }));
 }
 
@@ -1513,7 +1622,7 @@ export function Version() {
  */
 export function VersionList() {
     return $Call.ByID(3868762695).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType48($result);
+        return $$createType52($result);
     }));
 }
 
@@ -1554,24 +1663,28 @@ const $$createType24 = $Create.Array($$createType23);
 const $$createType25 = $models.ScheduleDTO.createFrom;
 const $$createType26 = $models.SetupInfo.createFrom;
 const $$createType27 = $models.HeaderInfo.createFrom;
-const $$createType28 = license$0.Info.createFrom;
-const $$createType29 = $models.AccountEntryDTO.createFrom;
-const $$createType30 = $Create.Array($$createType29);
-const $$createType31 = $models.NotifItem.createFrom;
+const $$createType28 = $models.LaneEntryDTO.createFrom;
+const $$createType29 = $Create.Array($$createType28);
+const $$createType30 = license$0.Info.createFrom;
+const $$createType31 = $models.AccountEntryDTO.createFrom;
 const $$createType32 = $Create.Array($$createType31);
-const $$createType33 = $models.OtherAttention.createFrom;
+const $$createType33 = $models.NotifItem.createFrom;
 const $$createType34 = $Create.Array($$createType33);
-const $$createType35 = $models.PauseDTO.createFrom;
-const $$createType36 = $models.PolicyDTO.createFrom;
-const $$createType37 = $models.ProgressDTO.createFrom;
-const $$createType38 = $models.ActivityItem.createFrom;
-const $$createType39 = $Create.Array($$createType38);
-const $$createType40 = $models.SearchItem.createFrom;
-const $$createType41 = $Create.Array($$createType40);
-const $$createType42 = $models.ShareDTO.createFrom;
-const $$createType43 = $Create.Array($$createType42);
-const $$createType44 = $models.LocalTestDTO.createFrom;
-const $$createType45 = $models.TrashDTO.createFrom;
+const $$createType35 = $models.NowStatusDTO.createFrom;
+const $$createType36 = $models.OtherAttention.createFrom;
+const $$createType37 = $Create.Array($$createType36);
+const $$createType38 = $models.PauseDTO.createFrom;
+const $$createType39 = $models.PolicyDTO.createFrom;
+const $$createType40 = $models.ProgressDTO.createFrom;
+const $$createType41 = $models.ActivityItem.createFrom;
+const $$createType42 = $Create.Array($$createType41);
+const $$createType43 = $models.SearchItem.createFrom;
+const $$createType44 = $Create.Array($$createType43);
+const $$createType45 = $models.ShareDTO.createFrom;
 const $$createType46 = $Create.Array($$createType45);
-const $$createType47 = $models.VersionDTO.createFrom;
-const $$createType48 = $Create.Array($$createType47);
+const $$createType47 = $models.SignInTargetDTO.createFrom;
+const $$createType48 = $models.LocalTestDTO.createFrom;
+const $$createType49 = $models.TrashDTO.createFrom;
+const $$createType50 = $Create.Array($$createType49);
+const $$createType51 = $models.VersionDTO.createFrom;
+const $$createType52 = $Create.Array($$createType51);

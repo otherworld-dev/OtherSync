@@ -194,7 +194,9 @@ class NimboViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(route = Route.PERMISSIONS) }
                 return@launch
             }
-            _state.update { it.copy(route = Route.HOME) }
+            // A deep link (the supporter "Add to Nimbo" link) may already have sent
+            // the user somewhere while the account check ran; don't yank them to Home.
+            _state.update { if (it.route == Route.LOADING) it.copy(route = Route.HOME) else it }
             startService()
         }
     }
@@ -233,6 +235,10 @@ class NimboViewModel(app: Application) : AndroidViewModel(app) {
         loadTheme()
     }
 
+    fun openSupport(from: Route) {
+        _state.update { it.copy(route = Route.SUPPORT, supportReturn = from) }
+    }
+
     /** Records the appearance choice and applies it immediately. */
     fun setAppearance(preference: AppearancePreference) {
         _state.update { it.copy(appearance = preference) }
@@ -259,7 +265,7 @@ class NimboViewModel(app: Application) : AndroidViewModel(app) {
 
     fun onPermissionsContinue() {
         if (!_state.value.hasAllFiles) {
-            setMessage("All files access is required before Nimbo can sync")
+            setMessage("All files access is required before OtherSync can sync")
             return
         }
         _state.update { it.copy(route = Route.HOME) }

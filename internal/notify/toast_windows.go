@@ -10,6 +10,7 @@ import (
 
 	"github.com/gen2brain/beeep"
 	"github.com/go-toast/toast"
+	"github.com/otherworld/nimbo/internal/brand"
 	"github.com/otherworld/nimbo/internal/transport"
 )
 
@@ -28,7 +29,7 @@ func Toast(title, message, link string) {
 	message = sanitizeToastText(message)
 	link = sanitizeToastText(link)
 	if title == "" {
-		title = "Nimbo"
+		title = brand.Current.Name
 	}
 	// Native in-process WinRT is the real path (no child process, no injection
 	// surface). During bring-up the sanitised go-toast path is kept as a fallback
@@ -40,7 +41,9 @@ func Toast(title, message, link string) {
 	} else if toastAUMID() != "" {
 		slog.Warn("native toast raise failed, falling back", "err", err)
 	}
-	t := toast.Notification{AppID: "Nimbo", Title: title, Message: message}
+	// AppID is the AUMID the fallback toast is raised under (an identity, not
+	// text), so it stays the brand's app id, "Nimbo", across the rename.
+	t := toast.Notification{AppID: brand.Current.AppID, Title: title, Message: message}
 	if link != "" && !strings.HasPrefix(link, "action=") { // an action is not a URL
 		t.ActivationType = "protocol"
 		t.ActivationArguments = link
@@ -85,7 +88,8 @@ func sanitizeToastText(s string) string {
 // showToast displays a Nextcloud notification as a toast. Its server-side actions
 // (Accept/Decline a share, etc.) become toast buttons that call DoNotificationAction
 // via the toast activator; clicking the body opens the in-app notifications tab.
-func showToast(n transport.Notification, accountID string) {
+// address names the account ("login@host") on the toast's attribution line.
+func showToast(n transport.Notification, accountID, address string) {
 	title := n.Subject
 	if title == "" {
 		title = "Nextcloud"
@@ -102,5 +106,5 @@ func showToast(n transport.Notification, accountID string) {
 			Args:  "action=notify" + acct + "&id=" + strconv.Itoa(n.ID) + "&label=" + url.QueryEscape(act.Label),
 		})
 	}
-	RaiseActionable(title, strings.TrimSpace(n.Message), bodyArgs, buttons)
+	raiseActionable(title, strings.TrimSpace(n.Message), address, bodyArgs, buttons)
 }
