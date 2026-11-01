@@ -371,11 +371,20 @@ func (c *Client) PropFind(ctx context.Context, remotePath string, depth int) ([]
 // PROPFINDs with a few bulk ones — but the response can be large, so use it only
 // for subtrees being fully enumerated (e.g. an initial clone), not routine syncs.
 // Servers may refuse Depth: infinity (HTTP 403/507); callers should fall back.
+//
+// It is sent once, never retried: the server builds the whole answer in
+// memory, so on a big folder a 500 means it ran out doing so, and each retry
+// held a PHP worker at its memory limit for another minute (Deck #1004).
+// Falling back to a folder-by-folder listing is the caller's retry.
 func (c *Client) PropFindRecursive(ctx context.Context, remotePath string) ([]Entry, error) {
-	return c.propFind(ctx, remotePath, "infinity")
+	return c.propFindVia(ctx, remotePath, "infinity", c.DoOnce)
 }
 
 func (c *Client) propFind(ctx context.Context, remotePath, depth string) ([]Entry, error) {
+	return c.propFindVia(ctx, remotePath, depth, c.Do)
+}
+
+func (c *Client) propFindVia(ctx context.Context, remotePath, depth string, do func(*http.Request) (*http.Response, error)) ([]Entry, error) {
 	req, err := c.NewRequest(ctx, "PROPFIND", c.davURL(remotePath), strings.NewReader(propfindBody))
 	if err != nil {
 		return nil, err
@@ -383,7 +392,7 @@ func (c *Client) propFind(ctx context.Context, remotePath, depth string) ([]Entr
 	req.Header.Set("Content-Type", "application/xml; charset=utf-8")
 	req.Header.Set("Depth", depth)
 
-	resp, err := c.Do(req)
+	resp, err := do(req)
 	if err != nil {
 		return nil, err
 	}

@@ -19,6 +19,11 @@ type StatusError struct {
 }
 
 func (e *StatusError) Error() string {
+	if e.Op == "" {
+		// The retry loop's own record of the last attempt (Client.Do): it has
+		// always read as just the status.
+		return "server returned " + e.Status
+	}
 	return fmt.Sprintf("%s %q: server returned %s: %s", e.Op, e.Path, e.Status, e.Snippet)
 }
 
