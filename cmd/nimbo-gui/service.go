@@ -344,6 +344,11 @@ func (a *App) start(ctx context.Context) {
 	if a.app != nil {
 		a.app.Event.Emit("accent", eng.ThemeColor())
 	}
+	// The startup sweep in main runs before any engine exists, and an icon at
+	// a new path (an icon-style rev bump) can only be generated with one, so
+	// that sweep leaves every shortcut on the old icon. Sweep again now; it is
+	// a no-op when nothing needs fixing (#996: pins kept the Nimbo badge).
+	go a.repairAppShortcutIcons()
 	runCtx, cancel := context.WithCancel(ctx)
 	a.engCancel = cancel
 	eng.SetStatusFunc(func(s string) {
