@@ -3497,6 +3497,11 @@ func (e *Engine) SyncOnce(ctx context.Context, p Pair) (stats transfer.Stats, er
 
 	// Before the scan, and so before the baseline it prunes against is read.
 	relisting := e.relistBegin(st, pk, p)
+	if relisting {
+		if err := e.staggerCrawl(ctx, "one-off folder check"); err != nil {
+			return transfer.Stats{}, err
+		}
+	}
 
 	// A full pass scans both trees before any transfer; on a large sync the
 	// discovery alone takes minutes, so surface it rather than looking idle.
@@ -3536,6 +3541,9 @@ const (
 // fully-synced pair.
 func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (transfer.Stats, error) {
 	pk := PairKey(p.LocalDir, p.RemoteRoot)
+	if err := e.staggerCrawl(ctx, "first sync"); err != nil {
+		return transfer.Stats{}, err
+	}
 	// Takeover: a first-ever clone (no prior status) into a folder that ALREADY has
 	// files — e.g. migrating from the official Nextcloud client. We adopt files that
 	// match the server (size+mtime) instead of re-downloading, and crucially never
@@ -4869,6 +4877,11 @@ func (e *Engine) syncRemoteDelta(ctx context.Context, p Pair) (transfer.Stats, e
 	}
 	// Before the baseline the scan prunes against is read.
 	relisting := e.relistBegin(st, pk, p)
+	if relisting {
+		if err := e.staggerCrawl(ctx, "one-off folder check"); err != nil {
+			return transfer.Stats{}, err
+		}
+	}
 
 	e.scanTickCountFor(pk, "server", 0, "")
 	scanEnded := false
