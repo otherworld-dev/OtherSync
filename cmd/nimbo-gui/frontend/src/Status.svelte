@@ -244,7 +244,7 @@
 
   // "Right now": every job in progress, in full (Deck #988).
   type NowJob = { account: string; kind: string; path: string; size: number; sent: number; large: boolean; state: string };
-  type NowCheck = { account: string; folder: string; dirs: number };
+  type NowCheck = { account: string; folder: string; dirs: number; startsIn?: number };
   type Now = { jobs: NowJob[]; checking: NowCheck[] };
   let now = $state<Now>({ jobs: [], checking: [] });
   // Speed comes from two samples of the same job at least 2 s apart; between
@@ -297,6 +297,7 @@
   }
   const fmtNum = (n: number) => n.toLocaleString("en-US");
   function checkText(c: NowCheck): string {
+    if (c.startsIn && c.startsIn > 0) return `About to check every folder · starting in ${c.startsIn} s`;
     let s = "Checking folders for changes";
     if (c.dirs > 0) s += ` · ${fmtNum(c.dirs)}`;
     if (c.folder) s += ` · now in ${c.folder}`;

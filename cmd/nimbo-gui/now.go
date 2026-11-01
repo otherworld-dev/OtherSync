@@ -40,6 +40,10 @@ type NowCheckDTO struct {
 	AccountID string `json:"-"`      // as NowJobDTO.AccountID
 	Folder    string `json:"folder"` // the folder being listed now, "" when unknown
 	Dirs      int    `json:"dirs"`   // folders listed so far
+	// StartsIn > 0: not checking yet, but about to list every folder in this
+	// many seconds (the random pause before a first sync or the one-off
+	// folder check, Deck #1001).
+	StartsIn int `json:"startsIn"`
 }
 
 // NowStatusDTO is the composed status line and the detail behind it.
@@ -182,12 +186,17 @@ func composeNow(in nowInput, brandName string) NowStatusDTO {
 			downs++
 		}
 	}
-	dirs, checking := 0, false
+	dirs, checking, starting := 0, false, false
 	for _, c := range in.Checking {
-		if c.AccountID == in.ShownAccount {
-			checking = true
-			dirs += c.Dirs
+		if c.AccountID != in.ShownAccount {
+			continue
 		}
+		if c.StartsIn > 0 {
+			starting = true
+			continue
+		}
+		checking = true
+		dirs += c.Dirs
 	}
 
 	var extras []string
@@ -205,7 +214,7 @@ func composeNow(in nowInput, brandName string) NowStatusDTO {
 		extras = append(extras, plural(in.LargeAside, "large file set aside", "large files set aside"))
 	}
 
-	if len(running) > 0 || checking || in.Working != "" {
+	if len(running) > 0 || checking || starting || in.Working != "" {
 		out.State = "busy"
 		var parts []string
 		if s := transferSummary(ups, downs); s != "" {
@@ -228,6 +237,8 @@ func composeNow(in nowInput, brandName string) NowStatusDTO {
 			if dirs > 0 {
 				out.Main += " " + thousands(dirs)
 			}
+		} else if starting {
+			out.Main = "Starting shortly…"
 		} else {
 			out.Main = in.Working
 		}
@@ -742,6 +753,13 @@ func (a *App) gatherNow(shown *agent.Engine, att AttentionInfo, now time.Time) n
 			}
 		}
 		sn := ne.eng.ScanNow()
+		// The pause before a whole-tree crawl shows at once (it is a wait the
+		// user should see explained) and counts down, so look again each second.
+		if left := sn.StartsAt.Sub(now); !sn.StartsAt.IsZero() && left > 0 {
+			in.Checking = append(in.Checking, NowCheckDTO{Account: ne.login, AccountID: ne.id,
+				StartsIn: int((left + time.Second - 1) / time.Second)})
+			soonest(&in.revealIn, time.Second)
+		}
 		if shown, wait := checkShown(sn.Active, sn.Since, now); shown {
 			c := NowCheckDTO{Account: ne.login, AccountID: ne.id, Folder: sn.Folder}
 			if sn.Phase == "server" {

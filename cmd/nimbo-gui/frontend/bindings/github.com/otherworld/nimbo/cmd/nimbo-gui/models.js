@@ -1669,6 +1669,16 @@ export class NowCheckDTO {
              */
             this["dirs"] = 0;
         }
+        if (!("startsIn" in $$source)) {
+            /**
+             * StartsIn > 0: not checking yet, but about to list every folder in this
+             * many seconds (the random pause before a first sync or the one-off
+             * folder check, Deck #1001).
+             * @member
+             * @type {number}
+             */
+            this["startsIn"] = 0;
+        }
 
         Object.assign(this, $$source);
     }

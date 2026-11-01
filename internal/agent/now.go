@@ -35,6 +35,9 @@ type ScanNow struct {
 	// Since is when the oldest running scan began (a stage change does not
 	// restart it), so a reader can leave out passes over in a moment.
 	Since time.Time
+	// StartsAt is set while a whole-tree crawl waits its random moment before
+	// starting (stagger.go); zero otherwise. Independent of Active.
+	StartsAt time.Time
 }
 
 type nowJob struct {
@@ -52,6 +55,8 @@ type nowState struct {
 	scanSeq uint64
 	lastOK  time.Time
 	lastBad bool // the most recent pass finished with something failing
+	// startAt: a whole-tree crawl is waiting to start until then (zero = none).
+	startAt time.Time
 }
 
 func (e *Engine) nowSt() *nowState {
@@ -245,7 +250,7 @@ func (e *Engine) ScanNow() ScanNow {
 	s := e.nowSt()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var out ScanNow
+	out := ScanNow{StartsAt: s.startAt}
 	var newest uint64
 	for _, en := range s.scans {
 		out.Active = true
@@ -258,6 +263,15 @@ func (e *Engine) ScanNow() ScanNow {
 		}
 	}
 	return out
+}
+
+// noteCrawlWait records that a whole-tree crawl starts at until (zero: no
+// longer waiting).
+func (e *Engine) noteCrawlWait(until time.Time) {
+	s := e.nowSt()
+	s.mu.Lock()
+	s.startAt = until
+	s.mu.Unlock()
 }
 
 // noteFullCheck records the end of a full pass: ok = nothing failed.

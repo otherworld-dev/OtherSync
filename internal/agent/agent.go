@@ -1444,9 +1444,13 @@ func (e *Engine) removeConflict(localDir, rel string) {
 
 // --- Browser, sharing, settings, ignore (GUI pass-throughs) ---
 
-// Browse lists a remote directory (one level) for the file browser.
+// Browse lists a remote directory (one level) for the file browser, and for
+// on-demand folder population and reconcile, whose walks over every populated
+// folder are recursive listings in all but name, so it goes through the
+// account's listing pacer (Deck #1001). A lone listing fits in the pacer's
+// burst and is not slowed.
 func (e *Engine) Browse(ctx context.Context, remotePath string) ([]transport.Entry, error) {
-	return e.client.PropFind(ctx, remotePath, 1)
+	return e.client.PacedPropFind(ctx, remotePath, 1)
 }
 
 // Escaper returns the current name-escaping translator (nil-safe to use: a
@@ -3501,6 +3505,11 @@ func (e *Engine) SyncOnce(ctx context.Context, p Pair) (stats transfer.Stats, er
 
 	// Before the scan, and so before the baseline it prunes against is read.
 	relisting := e.relistBegin(st, pk, p)
+	if relisting {
+		if err := e.staggerCrawl(ctx, "one-off folder check"); err != nil {
+			return transfer.Stats{}, err
+		}
+	}
 
 	// A full pass scans both trees before any transfer; on a large sync the
 	// discovery alone takes minutes, so surface it rather than looking idle.
@@ -3540,6 +3549,9 @@ const (
 // fully-synced pair.
 func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (transfer.Stats, error) {
 	pk := PairKey(p.LocalDir, p.RemoteRoot)
+	if err := e.staggerCrawl(ctx, "first sync"); err != nil {
+		return transfer.Stats{}, err
+	}
 	// Takeover: a first-ever clone (no prior status) into a folder that ALREADY has
 	// files — e.g. migrating from the official Nextcloud client. We adopt files that
 	// match the server (size+mtime) instead of re-downloading, and crucially never
@@ -3694,7 +3706,7 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 	}
 
 	// Root: one Depth:1 listing for the account-root files + the top-level folders.
-	rootEntries, err := e.client.PropFind(ctx, root, 1)
+	rootEntries, err := e.client.PacedPropFind(ctx, root, 1)
 	if err != nil {
 		return stats, err
 	}
@@ -3899,7 +3911,7 @@ const cloneTakeoverMeta = "clone-takeover"
 func (e *Engine) listCloneFolder(ctx context.Context, pk, full string, excluded func(full string) bool) ([]transport.Entry, error) {
 	key := pk + "\x00" + full
 	if _, refused := e.wholeListRefused.Load(key); !refused {
-		entries, err := e.client.PropFindRecursive(ctx, full)
+		entries, err := e.client.PacedPropFindRecursive(ctx, full)
 		if err == nil || errors.Is(err, transport.ErrNotFound) || ctx.Err() != nil {
 			return entries, err
 		}
@@ -3910,7 +3922,7 @@ func (e *Engine) listCloneFolder(ctx context.Context, pk, full string, excluded 
 }
 
 // walkFolders lists dir and everything under it with one Depth: 1 PROPFIND
-// per folder, one at a time, giving the same entries a Depth: infinity
+// per folder, one at a time and through the account's pacer (Deck #1001), giving the same entries a Depth: infinity
 // listing would: dir's own row first, then every descendant once. It does not
 // go into a folder excluded says to leave out (that folder's own row is kept;
 // the caller filters it). A folder gone by the time its turn comes is skipped.
@@ -3923,7 +3935,7 @@ func walkFolders(ctx context.Context, c *transport.Client, dir string, excluded 
 		}
 		cur := queue[0]
 		queue = queue[1:]
-		entries, err := c.PropFind(ctx, cur, 1)
+		entries, err := c.PacedPropFind(ctx, cur, 1) // paced: a big fallback walk is the 31 Oct crawl otherwise (#1001)
 		if err != nil {
 			if cur != dir && errors.Is(err, transport.ErrNotFound) {
 				continue
@@ -4959,6 +4971,11 @@ func (e *Engine) syncRemoteDelta(ctx context.Context, p Pair) (transfer.Stats, e
 	}
 	// Before the baseline the scan prunes against is read.
 	relisting := e.relistBegin(st, pk, p)
+	if relisting {
+		if err := e.staggerCrawl(ctx, "one-off folder check"); err != nil {
+			return transfer.Stats{}, err
+		}
+	}
 
 	e.scanTickCountFor(pk, "server", 0, "")
 	scanEnded := false
