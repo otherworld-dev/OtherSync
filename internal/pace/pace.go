@@ -34,6 +34,13 @@
 //     70%. The median, not the mean, so a few big folders (a listing of 5,000
 //     files takes seconds on a healthy server) don't count as strain; the
 //     250 ms margin so a fast LAN's 5 ms -> 30 ms wobble doesn't either.
+//   - Slow-down on a fixed ceiling: a median over 1 s cuts the rate however
+//     slow the baseline is. The baseline is per client, so a PC that starts
+//     its first sync while other clients are already loading the server
+//     learns the slow answers as normal and would never back off on the
+//     relative test; the ceiling catches it. A healthy Nextcloud lists a
+//     typical folder in well under a second, and the median keeps the odd
+//     big folder from tripping it.
 //   - Slow-down on errors: a 5xx/429, an exhausted retry or a timeout halves
 //     the rate; a Retry-After also stops all listings for that long (capped at
 //     5 minutes). At most one cut per 5 s, so four workers failing at once
@@ -64,6 +71,7 @@ const (
 	DefaultMinRate       = 0.5
 	DefaultSlowFactor    = 3.0
 	DefaultSlowMargin    = 250 * time.Millisecond
+	DefaultSlowCeiling   = time.Second
 	DefaultHealthyFactor = 1.5
 	DefaultCutCooldown   = 5 * time.Second
 	DefaultRecoverEvery  = 10 * time.Second
@@ -117,7 +125,8 @@ type Config struct {
 	MinRate       float64 // floor
 	SlowFactor    float64 // median above baseline*SlowFactor ...
 	SlowMargin    time.Duration
-	HealthyFactor float64 // median at or under baseline*HealthyFactor counts as healthy
+	SlowCeiling   time.Duration // a median above this is slow whatever the baseline
+	HealthyFactor float64       // median at or under baseline*HealthyFactor counts as healthy
 	CutCooldown   time.Duration
 	RecoverEvery  time.Duration
 	RecoverStep   float64
@@ -146,6 +155,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.SlowMargin <= 0 {
 		c.SlowMargin = DefaultSlowMargin
+	}
+	if c.SlowCeiling <= 0 {
+		c.SlowCeiling = DefaultSlowCeiling
 	}
 	if c.HealthyFactor <= 0 {
 		c.HealthyFactor = DefaultHealthyFactor
@@ -329,7 +341,11 @@ func (p *Pacer) observeLatency(now time.Time, lat time.Duration) {
 	if alt := p.baseline + p.cfg.SlowMargin; alt > slowAt {
 		slowAt = alt
 	}
-	healthy := m <= time.Duration(float64(p.baseline)*p.cfg.HealthyFactor) || m <= p.baseline+p.cfg.SlowMargin/2
+	if slowAt > p.cfg.SlowCeiling {
+		slowAt = p.cfg.SlowCeiling
+	}
+	healthy := (m <= time.Duration(float64(p.baseline)*p.cfg.HealthyFactor) || m <= p.baseline+p.cfg.SlowMargin/2) &&
+		m <= p.cfg.SlowCeiling
 	switch {
 	case m > slowAt:
 		p.cut(now, latencyCut, fmt.Sprintf("the server is answering slowly (typically %s, usually %s)",

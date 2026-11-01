@@ -351,3 +351,47 @@ func TestDefaultsMatchTheDocumentedBudget(t *testing.T) {
 		t.Fatalf("burst %d does not cover a normal delta poll (~10-60 PROPFINDs)", DefaultBurst)
 	}
 }
+
+// A client that starts while the server is already loaded learns the slow
+// answers as its baseline, so the relative test never fires; the fixed
+// ceiling still cuts the rate and keeps it from recovering.
+func TestCeilingCatchesALateStarter(t *testing.T) {
+	observe := func(p *Pacer, clk *fakeClock, n int, lat time.Duration) {
+		for i := 0; i < n; i++ {
+			clk.advance(200 * time.Millisecond)
+			p.Observe(lat, OK)
+		}
+	}
+
+	p, clk, _ := newTest(Config{})
+	observe(p, clk, 16, 1500*time.Millisecond) // baseline is 1.5 s from the first sample
+	if got := p.Rate(); got >= DefaultRate {
+		t.Fatalf("rate after 1.5 s answers from the start = %.2f, want a cut below %.1f", got, DefaultRate)
+	}
+	cut := p.Rate()
+	clk.advance(time.Minute)
+	observe(p, clk, 16, 1500*time.Millisecond)
+	if got := p.Rate(); got > cut {
+		t.Fatalf("rate recovered to %.2f while answers stayed over the ceiling", got)
+	}
+
+	// Same history with the ceiling out of the way: the relative test alone
+	// never notices, which is the gap the ceiling closes.
+	q, qclk, _ := newTest(Config{SlowCeiling: time.Hour})
+	observe(q, qclk, 16, 1500*time.Millisecond)
+	if got := q.Rate(); got != DefaultRate {
+		t.Fatalf("without the ceiling rate = %.2f, want it untouched at %.1f", got, DefaultRate)
+	}
+}
+
+// Answers under the ceiling on a slow-but-steady server are left alone.
+func TestCeilingLeavesSteadyAnswersAlone(t *testing.T) {
+	p, clk, _ := newTest(Config{})
+	for i := 0; i < 32; i++ {
+		clk.advance(200 * time.Millisecond)
+		p.Observe(700*time.Millisecond, OK)
+	}
+	if got := p.Rate(); got != DefaultRate {
+		t.Fatalf("rate with steady 700 ms answers = %.2f, want %.1f", got, DefaultRate)
+	}
+}
