@@ -81,3 +81,29 @@ func TestStaggerEndsWhenTheEngineStops(t *testing.T) {
 		t.Fatalf("%d listings sent during the pause, want 0", n)
 	}
 }
+
+// While it waits, the pause is visible to "Right now" (ScanNow.StartsAt), and
+// it is cleared once the wait ends.
+func TestStaggerShowsInScanNow(t *testing.T) {
+	withStagger(t, time.Hour)
+	e := &Engine{}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- e.staggerCrawl(ctx, "first sync") }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for e.ScanNow().StartsAt.IsZero() {
+		if time.Now().After(deadline) {
+			t.Fatal("the pause never showed in ScanNow")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if left := time.Until(e.ScanNow().StartsAt); left < 59*time.Minute {
+		t.Errorf("StartsAt is %s away, want about an hour", left)
+	}
+	cancel()
+	<-done
+	if at := e.ScanNow().StartsAt; !at.IsZero() {
+		t.Errorf("StartsAt still %v after the pause ended", at)
+	}
+}

@@ -5,8 +5,8 @@ package agent
 // The pacer is per client, so it cannot stop a crowd: a company rolling the
 // app out to fifty PCs on the same morning, or every client coming back after
 // a server outage, would start their first syncs together and each open with
-// a full burst. Waiting a random 2–90 s first spreads them out, so the server
-// sees them arrive over a minute and a half instead of at once.
+// a full burst. Waiting a random 2–30 s first spreads them out, so the server
+// sees them arrive over half a minute instead of at once.
 //
 // Only the crawls that list everything wait: a first sync (cloneRemote) and
 // the one-off folder check (relist). Ordinary passes, Explorer browsing and
@@ -21,7 +21,7 @@ import (
 
 const (
 	staggerMin = 2 * time.Second
-	staggerMax = 90 * time.Second
+	staggerMax = 30 * time.Second
 )
 
 // crawlStagger returns how long to wait before a whole-tree crawl. A variable
@@ -38,6 +38,8 @@ func (e *Engine) staggerCrawl(ctx context.Context, what string) error {
 		return nil
 	}
 	slog.Info("waiting a moment before listing every server folder", "for", what, "wait", d.Round(time.Second))
+	e.noteCrawlWait(time.Now().Add(d)) // shown in "Right now" with a countdown
+	defer e.noteCrawlWait(time.Time{})
 	e.status("Starting shortly…")
 	t := time.NewTimer(d)
 	defer t.Stop()
