@@ -3683,6 +3683,11 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 			case cloneSkip:
 				// Takeover: differs from the server — leave it untouched with no
 				// baseline; the first normal sync surfaces it as a conflict (keep both).
+				// Its folders are dirtied after the downloads (below), or that sync
+				// skips them as unchanged and uploads the file over the server's.
+				unfinishedMu.Lock()
+				unfinished = append(unfinished, rel)
+				unfinishedMu.Unlock()
 			}
 		}
 		return
@@ -3852,6 +3857,9 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 	// VM after the server answered 423, with the status "Up to date"). Dirty
 	// the folders above every failed path, as later passes do, so the next
 	// scan lists them again, and ask for that pass now rather than at the poll.
+	// A takeover's skipped files are in the list too: with their folder pruned
+	// the next pass saw only the local file and uploaded it over the server's
+	// copy, where it should keep both (Deck #1004).
 	unfinishedMu.Lock()
 	retry := append([]string(nil), unfinished...)
 	unfinishedMu.Unlock()

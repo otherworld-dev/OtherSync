@@ -134,18 +134,67 @@ func TestARetriedTakeoverKeepsALocalFileThatDiffers(t *testing.T) {
 	if _, err := e.SyncOnce(context.Background(), pair); err != nil {
 		t.Fatalf("second try: %v", err)
 	}
-	// The normal sync after the clone may keep both copies as a conflict;
-	// what must not happen is the edit being gone.
+	assertKeptBoth(t, f, local, "A/a1", "my own edit")
+}
+
+// A first sync into a folder that already held files keeps both copies of a
+// file that differs from the server's: the server's under its own name, the
+// local one as a conflicted copy. The file was skipped during the first sync
+// and left for the normal sync after it, but that sync skipped its folder as
+// unchanged (the first sync had just stamped the folder's etag), saw only a
+// local file with nothing on the server, and uploaded it over the server's
+// copy. The VM test for Deck #1004 turned this up.
+func TestATakeoverKeepsBothCopiesOfAFileThatDiffers(t *testing.T) {
+	f := newFakeDAV(cloneTree("A/a1", "C/c1"))
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	e, _ := newHookEngine(t, srv.URL)
+	local := t.TempDir()
+	mine := filepath.Join(local, "A", "a1")
+	if err := os.MkdirAll(filepath.Dir(mine), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mine, []byte("my own edit, which the server has not seen"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(mine, old, old); err != nil {
+		t.Fatal(err)
+	}
+	pair := Pair{LocalDir: local}
+	if _, err := e.SyncOnce(context.Background(), pair); err != nil {
+		t.Fatalf("first sync: %v", err)
+	}
+	// The conflict is settled by the sync the first one asks for.
+	if _, err := e.SyncOnce(context.Background(), pair); err != nil {
+		t.Fatalf("the sync after: %v", err)
+	}
+	assertKeptBoth(t, f, local, "A/a1", "my own edit")
+}
+
+// assertKeptBoth checks a file that differed on both sides came out as both:
+// the server's copy untouched under its own name, locally too, and the local
+// version kept beside it.
+func assertKeptBoth(t *testing.T, f *fakeDAV, local, rel, mineHas string) {
+	t.Helper()
+	for _, p := range f.putPaths() {
+		if p == rel {
+			t.Fatalf("the local copy was uploaded over the server's %s", rel)
+		}
+	}
+	if b, err := os.ReadFile(filepath.Join(local, filepath.FromSlash(rel))); err != nil || string(b) != "body of "+rel {
+		t.Errorf("local %s = %q, %v; want the server's copy under its own name", rel, b, err)
+	}
 	found := false
-	_ = filepath.WalkDir(filepath.Join(local, "A"), func(p string, d os.DirEntry, err error) error {
+	_ = filepath.WalkDir(filepath.Join(local, filepath.FromSlash(filepath.Dir(rel))), func(p string, d os.DirEntry, err error) error {
 		if err == nil && !d.IsDir() {
-			if b, rerr := os.ReadFile(p); rerr == nil && strings.Contains(string(b), "my own edit") {
+			if b, rerr := os.ReadFile(p); rerr == nil && strings.Contains(string(b), mineHas) {
 				found = true
 			}
 		}
 		return nil
 	})
 	if !found {
-		t.Fatal("the local edit to A/a1 was overwritten by the retried first sync")
+		t.Fatalf("the local version of %s is gone", rel)
 	}
 }
