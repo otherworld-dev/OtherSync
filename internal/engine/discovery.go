@@ -71,6 +71,21 @@ type ScanOpts struct {
 	// as "can't sync" instead of letting them go missing (Deck #984). Called
 	// from worker goroutines.
 	OnUnholdable func(dir string, items []Unholdable)
+	// Descend, when non-nil, is consulted with each child directory's
+	// root-relative path before it is queued for listing; false leaves its
+	// subtree unlisted. The directory's own entry is still recorded (it came
+	// from its parent's listing), and a subtree the baseline can reproduce is
+	// still reproduced (that costs no request). The on-demand adopt scan uses
+	// it to list only the server folders that hold local files: everything
+	// else is populated lazily by the cloud filter (Deck #1003).
+	Descend func(rel string) bool
+	// OnListed, when non-nil, is called with the root-relative path of every
+	// directory whose children are now completely in the result: after a
+	// successful listing (cached or fetched) and for every directory
+	// reproduced from the baseline. "" is the root. A directory never
+	// reported was not enumerated, so what it holds is UNKNOWN, not absent.
+	// Called from worker goroutines; must be safe for concurrent use.
+	OnListed func(rel string)
 }
 
 // Unholdable is a server item a scan skipped because this OS cannot hold its
@@ -178,6 +193,9 @@ func RemoteScan(ctx context.Context, c PropFinder, root string, opts ScanOpts) (
 		if err == nil && opts.Progress != nil {
 			opts.Progress(int(listed.Add(1)))
 		}
+		if err == nil && opts.OnListed != nil {
+			opts.OnListed(relTo(it.dir, root))
+		}
 		if err == nil && opts.OnUnholdable != nil {
 			var bad []Unholdable
 			for _, e := range entries {
@@ -255,6 +273,11 @@ func RemoteScan(ctx context.Context, c PropFinder, root string, opts ScanOpts) (
 			}
 			if b, ok := base[rel]; ok && b.IsDir && b.RemoteETag == e.ETag {
 				addBaselineSubtree(out, base, childrenOf, rel) // unchanged subtree — reuse baseline
+				if opts.OnListed != nil {
+					reportBaselineDirs(opts.OnListed, base, childrenOf, rel)
+				}
+			} else if opts.Descend != nil && !opts.Descend(rel) {
+				continue // not needed: recorded, but its subtree stays unlisted
 			} else {
 				queue = append(queue, scanItem{
 					dir:          full,
@@ -346,6 +369,17 @@ func parentOf(rel string) string {
 		return rel[:i]
 	}
 	return ""
+}
+
+// reportBaselineDirs reports prefix and every directory beneath it in the
+// baseline as listed: addBaselineSubtree put all their children in the result.
+func reportBaselineDirs(onListed func(string), base map[string]BaselineState, childrenOf map[string][]string, prefix string) {
+	onListed(prefix)
+	for _, child := range childrenOf[prefix] {
+		if base[child].IsDir {
+			reportBaselineDirs(onListed, base, childrenOf, child)
+		}
+	}
 }
 
 // addBaselineSubtree copies every baseline descendant of prefix into out,
