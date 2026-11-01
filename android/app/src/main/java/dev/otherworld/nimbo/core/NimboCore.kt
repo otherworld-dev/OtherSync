@@ -38,7 +38,11 @@ import java.io.IOException
 
 object NimboCore {
 
-    const val DEFAULT_BASE_DIR_NAME = "Nimbo"
+    /**
+     * The sync folder name a NEW install gets. Installs from before the rename
+     * keep "Nimbo": the name is pinned per install (see [BaseDirName]).
+     */
+    const val DEFAULT_BASE_DIR_NAME = BaseDirName.CURRENT
 
     private const val TAG = "NimboCore"
 
@@ -113,9 +117,16 @@ object NimboCore {
 
     // -- setup ---------------------------------------------------------------
 
-    /** The default sync root: <external storage>/Nimbo. */
+    /** This install's sync folder name, pinned in [init]. */
+    @Volatile
+    private var baseDirName: String = DEFAULT_BASE_DIR_NAME
+
+    /**
+     * The default sync root: <external storage>/OtherSync on a new install,
+     * <external storage>/Nimbo on one from before the rename.
+     */
     fun defaultBaseDir(): String =
-        File(Environment.getExternalStorageDirectory(), DEFAULT_BASE_DIR_NAME).absolutePath
+        File(Environment.getExternalStorageDirectory(), baseDirName).absolutePath
 
     /**
      * Creates the one Client for this process. Idempotent, cheap and offline —
@@ -137,6 +148,18 @@ object NimboCore {
                 initError = e
                 Log.e(TAG, "newClient failed", e)
             }
+            // Before anything can start the engine (which points the core at
+            // defaultBaseDir): an install already in use keeps its folder.
+            // Only pinned when the account question was really answered: a
+            // signed-in install whose hasAccount() failed must not be pinned
+            // to the new name.
+            val created = client
+            val signedIn = created?.let { c -> runCatching { c.hasAccount() } }
+            baseDirName = BaseDirName.resolve(
+                appContext,
+                hasAccount = signedIn?.getOrNull() ?: false,
+                canPin = signedIn?.isSuccess == true,
+            )
         }
     }
 
@@ -221,7 +244,7 @@ object NimboCore {
 
     // -- folders (require the engine) ----------------------------------------
 
-    /** Creates <external>/Nimbo if needed and points the core at it. */
+    /** Creates the default sync root if needed and points the core at it. */
     suspend fun ensureBaseDir(): Result<String> = io {
         ensureBaseDirBlocking(requireClient())
     }
@@ -548,9 +571,9 @@ object NimboCore {
     private fun notInitialised(): IllegalStateException {
         val cause = initError
         return if (cause != null) {
-            IllegalStateException("Nimbo core failed to start: ${cause.message}", cause)
+            IllegalStateException("OtherSync core failed to start: ${cause.message}", cause)
         } else {
-            IllegalStateException("Nimbo core is not initialised")
+            IllegalStateException("OtherSync core is not initialised")
         }
     }
 

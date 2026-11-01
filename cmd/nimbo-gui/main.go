@@ -97,6 +97,14 @@ func main() {
 			slog.Warn("file logging unavailable, using stderr only", "err", lerr)
 		}
 		setupCrashLog(filepath.Join(filepath.Dir(d.LogFile()), "crash.log"))
+		// The rename to OtherSync: before anything writes settings.json,
+		// which is how it tells an existing install from a fresh one (see
+		// migrateRename).
+		if show, rerr := migrateRename(d, brand.Current); rerr != nil {
+			slog.Warn("could not record the product rename, will try again next launch", "err", rerr)
+		} else {
+			renameNoticeDue = show
+		}
 	} else {
 		applog.SetVerbose(verbose)
 		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: applog.Level()})))
@@ -107,6 +115,14 @@ func main() {
 	app := application.New(application.Options{
 		Name:        brand.Current.Name,
 		Description: brand.Current.Tagline,
+		// Name is display only on Windows, but on Linux Wails derives the GTK
+		// application id from it: pin that to the pre-rename value. Setting
+		// the id would also make it the program name (WM_CLASS / Wayland
+		// app_id), so keep that at the executable's name, as before.
+		Linux: application.LinuxOptions{
+			ApplicationID: linuxApplicationID(),
+			ProgramName:   filepath.Base(os.Args[0]),
+		},
 		Services:    []application.Service{application.NewService(svc)},
 		Assets:      application.AssetOptions{Handler: application.AssetFileServerFS(assets)},
 		// App windows host pages from the user's own server, and those pages
@@ -135,6 +151,9 @@ func main() {
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		startedOnce.Do(func() { close(svc.started) })
 	})
+	if renameNoticeDue {
+		svc.afterStart(svc.showRenameNotice)
+	}
 	// Logged here, not earlier: a second launch (Explorer's Share menu) hands
 	// its arguments to the running app and exits inside application.New, and
 	// must not read as a start that never logged "exiting".
@@ -241,6 +260,9 @@ func main() {
 	// identity (a re-signing, or a move to the Store build) — taskbar pins in
 	// particular, which nothing else ever rewrites. See appshortcuts.go.
 	go svc.repairAppShortcutIcons()
+	// Show the Start-menu folder under the product's name after a rename
+	// (it keeps its path). See shortcutsfolder.go.
+	go labelShortcutsFolder()
 
 	signedIn := hasAccount()
 	if !signedIn {

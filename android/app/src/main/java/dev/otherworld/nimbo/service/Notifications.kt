@@ -93,7 +93,7 @@ object Notifications {
     fun buildForeground(context: Context, status: String, progressPercent: Int?): Notification {
         val builder = NotificationCompat.Builder(context, CHANNEL_SYNC)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Nimbo")
+            .setContentTitle("OtherSync")
             .setContentText(status.ifBlank { "Working…" })
             .setContentIntent(mainActivityIntent(context, REQ_CONTENT))
             .setOngoing(true)
@@ -129,7 +129,7 @@ object Notifications {
             val id = nextAlertId()
             val notification = NotificationCompat.Builder(context, CHANNEL_ALERTS)
                 .setSmallIcon(R.drawable.ic_notification)
-                .setContentTitle(title.ifBlank { "Nimbo" })
+                .setContentTitle(title.ifBlank { "OtherSync" })
                 .setContentText(message)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(message))
                 .setContentIntent(alertContentIntent(context, id, link))
@@ -153,8 +153,8 @@ object Notifications {
             if (!manager.areNotificationsEnabled()) return
             if (!Permissions.hasNotifications(context)) return
 
-            val message = "Android didn't let Nimbo start syncing in the background. Tap to start it. " +
-                "To have it start by itself after a restart, turn on Ignore battery optimisation for Nimbo."
+            val message = "Android didn't let OtherSync start syncing in the background. Tap to start it. " +
+                "To have it start by itself after a restart, turn on Ignore battery optimisation for OtherSync."
             val notification = NotificationCompat.Builder(context, CHANNEL_ALERTS)
                 .setSmallIcon(R.drawable.ic_notification)
                 .setContentTitle("Sync is not running")

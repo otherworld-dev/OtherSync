@@ -1,5 +1,6 @@
 <script lang="ts">
   import { App } from "../bindings/github.com/otherworld/nimbo/cmd/nimbo-gui";
+  import { brand } from "./brand.svelte";
 
   // Called when onboarding finishes (parent closes the window).
   let { done }: { done: () => void } = $props();
@@ -189,7 +190,7 @@
       <div class="modalback">
         <div class="modalbox">
           <div class="mhead">Checking your files…</div>
-          <p class="sub left">Nimbo is comparing everything in this folder with your server before setting up. On a large account this can take several minutes. Nothing is changed until you confirm.</p>
+          <p class="sub left">{brand.name} is comparing everything in this folder with your server before setting up. On a large account this can take several minutes. Nothing is changed until you confirm.</p>
           <p class="sub left"><b>{scanDirs}</b> folders checked so far</p>
           <div class="actions">
             <button class="ghost" onclick={cancelScan}>Cancel</button>
@@ -230,10 +231,10 @@
       <div class="modalback">
         <div class="modalbox">
           <div class="mhead">Keep the files already in this folder?</div>
-          <p class="sub left">There are already files in <b>{localDir}</b>. Nimbo can keep them where they are instead of downloading everything again.</p>
+          <p class="sub left">There are already files in <b>{localDir}</b>. {brand.name} can keep them where they are instead of downloading everything again.</p>
           <ul class="sub mlist">
             {#if adopt.keep}<li><b>{adopt.keep}</b> already {adopt.keep === 1 ? "matches" : "match"} your server — kept on this PC.</li>{/if}
-            {#if adopt.replace}<li><b>{adopt.replace}</b> {adopt.replace === 1 ? "is an online-only leftover" : "are online-only leftovers"} from another app — replaced with {adopt.replace === 1 ? "a Nimbo placeholder" : "Nimbo placeholders"}.</li>{/if}
+            {#if adopt.replace}<li><b>{adopt.replace}</b> {adopt.replace === 1 ? "is an online-only leftover" : "are online-only leftovers"} from another app — replaced with {adopt.replace === 1 ? `a ${brand.name} placeholder` : `${brand.name} placeholders`}.</li>{/if}
             {#if adopt.upload}<li><b>{adopt.upload}</b> {adopt.upload === 1 ? "isn’t" : "aren’t"} on your server yet — uploaded.</li>{/if}
             {#if adopt.conflict}<li><b>{adopt.conflict}</b> {adopt.conflict === 1 ? "differs" : "differ"} from your server — both versions kept.</li>{/if}
           </ul>

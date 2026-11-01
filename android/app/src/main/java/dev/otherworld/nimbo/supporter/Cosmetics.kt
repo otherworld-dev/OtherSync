@@ -8,7 +8,7 @@ package dev.otherworld.nimbo.supporter
 
 /** One launcher alias per icon (see AndroidManifest.xml). */
 enum class AppIcon(val aliasName: String, val label: String) {
-    DEFAULT("dev.otherworld.nimbo.LauncherDefault", "Nimbo"),
+    DEFAULT("dev.otherworld.nimbo.LauncherDefault", "OtherSync"),
     FOREST("dev.otherworld.nimbo.LauncherForest", "Forest"),
     EMBER("dev.otherworld.nimbo.LauncherEmber", "Ember"),
     SLATE("dev.otherworld.nimbo.LauncherSlate", "Slate");
@@ -22,6 +22,10 @@ enum class AppIcon(val aliasName: String, val label: String) {
  * A fixed set, not a free colour picker: Theming.kt guarantees an app you can
  * read whatever the server sends, and fixed colours keep that guarantee (the
  * unit tests hold each one to it, on both themes).
+ *
+ * The enum NAMES are what SupporterPrefs saves, so never rename one. INDIGO was
+ * the app's own colour while it was Nimbo; FOLLOW_NEXTCLOUD now falls back to
+ * OtherSync teal (Theme.kt), and INDIGO stays for anyone who liked the old look.
  */
 enum class AccentChoice(val argb: Long?, val label: String) {
     FOLLOW_NEXTCLOUD(null, "Follow Nextcloud"),

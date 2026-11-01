@@ -1,4 +1,4 @@
-; Inno Setup script for Nimbo's Setup.exe.
+; Inno Setup script for OtherSync's Setup.exe (the file stays Nimbo-Setup.exe).
 ;
 ; It's a bootstrapper, not a traditional file-install: it bundles the signed MSIX
 ; and, on install (elevated), runs Add-AppxPackage so the real app is the MSIX
@@ -34,20 +34,20 @@
   #define Publisher "Otherworld Dev Ltd"
 #endif
 #ifndef FeedUrl
-  #define FeedUrl "https://github.com/otherworld-dev/Nimbo/releases/latest/download/Nimbo.appinstaller"
+  #define FeedUrl "https://github.com/otherworld-dev/OtherSync/releases/latest/download/Nimbo.appinstaller"
 #endif
 
 [Setup]
 AppId={{B7E9C1A2-3B4D-4F8A-A1C2-9D5E0F7B6A20}
-AppName=Nimbo
+AppName=OtherSync
 AppVersion={#FileVer}
 AppPublisher={#Publisher}
-AppPublisherURL=https://www.nimbosync.com
+AppPublisherURL=https://www.othersync.com
 AppCopyright=Copyright (C) {#GetDateTimeString('yyyy', '', '')} {#Publisher}
 ; Version info matching the Authenticode signer: a blank or mismatched company /
 ; copyright / version is one more "unknown file" signal to reputation scanners.
 VersionInfoVersion={#FileVer}
-VersionInfoDescription=Nimbo Setup
+VersionInfoDescription=OtherSync Setup
 VersionInfoOriginalFileName=Nimbo-Setup.exe
 WizardStyle=modern
 PrivilegesRequired=admin
@@ -85,11 +85,11 @@ Source: "stage\NCOverlays.dll"; DestDir: "{tmp}"; Flags: deleteafterinstall
 Source: "stage\icons\*.ico";    DestDir: "{tmp}\icons"; Flags: deleteafterinstall
 
 [Run]
-; Offer to launch Nimbo after install. postinstall entries run as the original
+; Offer to launch OtherSync after install. postinstall entries run as the original
 ; (non-elevated) user, and explorer.exe on the app's AUMID starts the package
 ; with its identity.
 Filename: "{win}\explorer.exe"; Parameters: "shell:AppsFolder\{#Pfn}!{#PkgAppId}"; \
-  Description: "Launch Nimbo now"; Flags: postinstall nowait skipifsilent
+  Description: "Launch OtherSync now"; Flags: postinstall nowait skipifsilent
 
 [Code]
 function SHLoadNonloadedIconOverlayIdentifiers: Integer;
@@ -231,7 +231,7 @@ begin
   ExtractTemporaryFile('NimboDev.cer');
   if not TrustDevCert then
   begin
-    Result := 'Nimbo could not be installed: its development certificate could not be trusted.';
+    Result := 'OtherSync could not be installed: its development certificate could not be trusted.';
     Exit;
   end;
 #endif
@@ -242,7 +242,7 @@ begin
   Log('Package install returned ' + IntToStr(rc));
   if rc = 0 then Exit;
 
-  Result := 'Nimbo could not be installed.';
+  Result := 'OtherSync could not be installed.';
   if LoadStringFromFile(ErrFile, Err) and (Trim(String(Err)) <> '') then
   begin
     Log('Package install error: ' + String(Err));

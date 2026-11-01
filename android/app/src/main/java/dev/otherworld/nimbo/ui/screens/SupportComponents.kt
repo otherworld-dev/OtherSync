@@ -195,7 +195,7 @@ fun SupportNudgeCard(onSupport: () -> Unit, onNotNow: () -> Unit) {
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                "Nimbo has been syncing for two weeks. If it's earned its keep, you can support it.",
+                "OtherSync has been syncing for two weeks. If it's earned its keep, you can support it.",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Spacer(Modifier.height(12.dp))

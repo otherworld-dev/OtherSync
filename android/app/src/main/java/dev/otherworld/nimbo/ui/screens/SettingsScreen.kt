@@ -113,7 +113,7 @@ fun SettingsScreen(
                     }
                 }
                 Text(
-                    "Your new icon appears after you leave Nimbo. Your home-screen shortcut may need re-adding.",
+                    "Your new icon appears after you leave OtherSync. Your home-screen shortcut may need re-adding.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -199,7 +199,7 @@ private fun AccentRow(themeColor: String) {
         Spacer(Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = if (parsed != null) "From your Nextcloud theme" else "Nimbo's own colour",
+                text = if (parsed != null) "From your Nextcloud theme" else "OtherSync's own colour",
                 style = MaterialTheme.typography.bodyLarge,
             )
             Text(
@@ -233,10 +233,10 @@ private fun SupportRow(tier: SupporterTier, onClick: () -> Unit) {
         )
         Spacer(Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text("Support Nimbo", style = MaterialTheme.typography.bodyLarge)
+            Text("Support OtherSync", style = MaterialTheme.typography.bodyLarge)
             Text(
-                if (tier == SupporterTier.NONE) "Nimbo is free. Support it if it's useful to you"
-                else "Thank you for supporting Nimbo",
+                if (tier == SupporterTier.NONE) "OtherSync is free. Support it if it's useful to you"
+                else "Thank you for supporting OtherSync",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

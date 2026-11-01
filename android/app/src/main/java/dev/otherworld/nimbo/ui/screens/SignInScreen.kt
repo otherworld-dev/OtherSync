@@ -96,7 +96,7 @@ fun SignInScreen(
             }
             Spacer(Modifier.height(20.dp))
             Text(
-                text = "Nimbo",
+                text = "OtherSync",
                 style = MaterialTheme.typography.headlineMedium,
                 fontSize = 34.sp,
                 fontWeight = FontWeight.Bold,
@@ -133,7 +133,7 @@ fun SignInScreen(
             Spacer(Modifier.height(10.dp))
             Text(
                 text = "Your browser opens so the server can approve this device. " +
-                    "Nimbo never sees your password.",
+                    "OtherSync never sees your password.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,

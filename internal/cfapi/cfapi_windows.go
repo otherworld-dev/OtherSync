@@ -26,6 +26,8 @@ import (
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
+
+	"github.com/otherworld/nimbo/internal/brand"
 )
 
 var (
@@ -118,6 +120,19 @@ func ShellNotifyCreated(path string, isDir bool) {
 //     in-sync instead of failing.
 //   - Unmanifested TEST binaries stay disguised unless they opt in; tests
 //     probing across a Disconnect use fsutil (exempt) as the observer.
+
+// providerName is the ProviderName a new sync root is registered with: the
+// product's name. It is not part of how a root is matched (that is the path,
+// the identity blob and providerID), and nothing reads it back.
+//
+// Windows keeps the name a root was FIRST registered with: a re-registration
+// with CF_REGISTER_FLAG_UPDATE succeeds but leaves it as it was (measured on
+// the VM, 2026-10-28: a root registered as "Nimbo" still reports "Nimbo" via
+// CfGetSyncRootInfoByPath after an OtherSync build re-registered it). Changing
+// it would mean unregistering the root, which is never worth it (#569), so
+// roots made before the rename keep "Nimbo" there; the name people see in
+// Explorer is the shell registration's display name, which does update.
+func providerName() string { return brand.Current.Name }
 
 // providerID identifies Nimbo as the sync provider (fixed GUID).
 // {7C9F2B41-5E3A-4D88-9C16-2A0F8B7D3E20}
@@ -218,7 +233,7 @@ func registerRoot(path string, hydration, population uint16) error {
 	if err != nil {
 		return err
 	}
-	name, _ := windows.UTF16PtrFromString("Nimbo")
+	name, _ := windows.UTF16PtrFromString(providerName())
 	ver, _ := windows.UTF16PtrFromString("1.0")
 	idW, err := windows.UTF16FromString(path) // identity blob = the root path
 	if err != nil {
@@ -736,12 +751,12 @@ func Purge(path string) error {
 	hydrate := func(context.Context, []byte, int64, int64) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("cfapi: purge (hydration disabled)")
 	}
-	connKey, err := MountStream(path, "Nimbo", "", hydrate, nil)
+	connKey, err := MountStream(path, brand.Current.Name, "", hydrate, nil)
 	if err != nil {
 		// A stale registration can block re-register; clear it and retry once.
 		UnregisterShellSyncRoot(path)
 		_ = UnregisterSyncRoot(path)
-		connKey, err = MountStream(path, "Nimbo", "", hydrate, nil)
+		connKey, err = MountStream(path, brand.Current.Name, "", hydrate, nil)
 	}
 	if err != nil {
 		// No provider available; unregister and remove best-effort.

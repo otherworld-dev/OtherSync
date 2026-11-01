@@ -5,9 +5,9 @@
   import FolderPicker from "./FolderPicker.svelte";
   import { planChanges, planEmpty, asksKeepOrDelete, freedBytes, downloadBytes, fmtSize } from "./folderSelection";
 
-  let brandName = $state("Nimbo");
+  let brandName = $state("OtherSync");
   let brandCompany = $state("Otherworld Dev Ltd");
-  let brandWebsite = $state("https://www.nimbosync.com");
+  let brandWebsite = $state("https://www.othersync.com");
   let brandSupport = $state("contact@otherworld.dev");
   let brandHelp = $state("");
   (async () => {
@@ -491,8 +491,8 @@
   function routeText(d: any): string {
     if (!d || !account.localAddress) return "";
     if (d.route === "local") return "Connected directly over your local network.";
-    if (d.routeReason === "certificate changed") return "The certificate at the local address isn't the one Nimbo trusts, so Nimbo is using the internet. If you renewed your server's certificate, test the address again while you're on your own network. If you're away from home, another device may be answering at that address — leave it.";
-    if (d.routeReason === "different server") return "The local address answers, but it's a different server or account, so Nimbo is using the internet.";
+    if (d.routeReason === "certificate changed") return `The certificate at the local address isn't the one ${brandName} trusts, so ${brandName} is using the internet. If you renewed your server's certificate, test the address again while you're on your own network. If you're away from home, another device may be answering at that address — leave it.`;
+    if (d.routeReason === "different server") return `The local address answers, but it's a different server or account, so ${brandName} is using the internet.`;
     return "Using the internet — the local address isn't reachable right now.";
   }
   async function switchAccount(id: string) {
@@ -517,7 +517,7 @@
   (async () => { shellSupported = await App.ShellMenuSupported(); shellOn = await App.ShellMenuEnabled(); })();
   async function toggleShell() { shellOn = !shellOn; const err = await App.SetShellMenu(shellOn); if (err) { shellOn = !shellOn; tell({ title: "Couldn't change the Explorer menu", message: err }); } }
 
-  // Each account's sidebar entry is named automatically ("Nimbo - adam"); the
+  // Each account's sidebar entry is named automatically ("OtherSync - adam", or "Nimbo - adam" for an account from before the rename); the
   // user can give it a name of their own instead (GitHub #19). Saved on change
   // (Enter or leaving the box); an empty box goes back to the automatic name.
   async function saveNavName(id: string, name: string) {
@@ -973,7 +973,7 @@
         <div class="modalback">
           <div class="addpanel modalbox">
             <div class="addhead">Converting your files back…</div>
-            <p class="hint">Leave Nimbo running until this finishes. Your files stay usable throughout.</p>
+            <p class="hint">Leave {brandName} running until this finishes. Your files stay usable throughout.</p>
             <p class="hint"><b>{(diag as any).revertDone.toLocaleString()}</b> of <b>{(diag as any).revertTotal.toLocaleString()}</b> files</p>
             <div class="addbtns">
               <button onclick={cancelRevertRun}>Cancel and stay on virtual files</button>
@@ -987,7 +987,7 @@
         <div class="modalback">
           <div class="addpanel modalbox">
             <div class="addhead">Converting your files…</div>
-            <p class="hint">Nimbo is adopting the files already in your folder as virtual files. You can keep using your computer — just leave Nimbo running until this finishes.</p>
+            <p class="hint">{brandName} is adopting the files already in your folder as virtual files. You can keep using your computer — just leave {brandName} running until this finishes.</p>
             <p class="hint"><b>{(diag as any).adoptConvertDone.toLocaleString()}</b> of <b>{(diag as any).adoptConvertTotal.toLocaleString()}</b> files</p>
             <div class="addbtns">
               <button onclick={cancelConvert} disabled={syncModeBusy}>Cancel and switch back</button>
@@ -1001,7 +1001,7 @@
         <div class="modalback">
           <div class="addpanel modalbox">
             <div class="addhead">Checking your files…</div>
-            <p class="hint">Nimbo is comparing everything in your folder with your server before switching. On a large account this can take several minutes. Nothing is changed until you confirm.</p>
+            <p class="hint">{brandName} is comparing everything in your folder with your server before switching. On a large account this can take several minutes. Nothing is changed until you confirm.</p>
             <p class="hint"><b>{(diag as any)?.adoptScanDirs || 0}</b> folders checked so far</p>
             <div class="addbtns">
               <button onclick={cancelScan}>Cancel</button>
@@ -1015,10 +1015,10 @@
         <div class="modalback">
           <div class="addpanel modalbox">
             <div class="addhead">Keep the files already in this folder?</div>
-            <p class="hint">There are already files in <b>{adopt.dir}</b>. Nimbo can keep them where they are instead of downloading everything again.</p>
+            <p class="hint">There are already files in <b>{adopt.dir}</b>. {brandName} can keep them where they are instead of downloading everything again.</p>
             <ul class="hint">
               {#if adopt.keep}<li><b>{adopt.keep}</b> already {adopt.keep === 1 ? "matches" : "match"} your server — kept on this PC, nothing re-downloaded.</li>{/if}
-              {#if adopt.replace}<li><b>{adopt.replace}</b> {adopt.replace === 1 ? "is an online-only leftover" : "are online-only leftovers"} from another client — replaced with {adopt.replace === 1 ? "a Nimbo placeholder" : "Nimbo placeholders"}.</li>{/if}
+              {#if adopt.replace}<li><b>{adopt.replace}</b> {adopt.replace === 1 ? "is an online-only leftover" : "are online-only leftovers"} from another client — replaced with {adopt.replace === 1 ? `a ${brandName} placeholder` : `${brandName} placeholders`}.</li>{/if}
               {#if adopt.upload}<li><b>{adopt.upload}</b> {adopt.upload === 1 ? "isn’t" : "aren’t"} on your server yet — uploaded.</li>{/if}
               {#if adopt.conflict}<li><b>{adopt.conflict}</b> {adopt.conflict === 1 ? "differs" : "differ"} from your server — both versions kept (your copy is uploaded as a “conflicted copy”).</li>{/if}
             </ul>
@@ -1054,7 +1054,7 @@
         <div class="modalback">
           <div class="addpanel modalbox">
             <div class="addhead">Starting fresh…</div>
-            <p class="hint">Clearing the folder and switching over. This can take a while for large folders — leave Nimbo running.</p>
+            <p class="hint">Clearing the folder and switching over. This can take a while for large folders — leave {brandName} running.</p>
           </div>
         </div>
       {/if}
@@ -1459,7 +1459,7 @@
         {#if account.server.toLowerCase().startsWith("https://")}
           <div class="field localroute">
             <label>Local network address</label>
-            <p class="fhint">Sync directly with your server when you're on the same network; Nimbo uses the internet address whenever the local one isn't reachable. Needs HTTPS on that address — a self-signed certificate is fine. Leave empty if your server isn't on your network. Your local address must serve the same site, including the /push/ws notification socket.</p>
+            <p class="fhint">Sync directly with your server when you're on the same network; {brandName} uses the internet address whenever the local one isn't reachable. Needs HTTPS on that address — a self-signed certificate is fine. Leave empty if your server isn't on your network. Your local address must serve the same site, including the /push/ws notification socket.</p>
             <div class="baserow">
               <input placeholder="192.168.1.100" bind:value={localAddr} disabled={localBusy} oninput={() => { localTest = null; localPin = ""; }} onkeydown={(e) => { if (e.key === "Enter" && localAddr.trim()) testLocal(); }} />
               <button class="small" disabled={localBusy || !localAddr.trim()} onclick={() => testLocal()}>{localBusy ? "Testing…" : "Test"}</button>
@@ -1623,7 +1623,7 @@ SHA-256: {localTest.fingerprint}</pre>
         <div class="logrow"><button class="small reportbtn" disabled={licBusy} onclick={removeLicence}>Remove licence</button></div>
       {:else}
         <p class="fhint">
-          Nimbo is <b>free for personal use</b>. A business licence unlocks central deployment policy and white-label branding for organisations — <button class="link" onclick={() => App.OpenURL(brandWebsite + "/business.html")}>about business licensing</button>.
+          {brandName} is <b>free for personal use</b>. A business licence unlocks central deployment policy and white-label branding for organisations — <button class="link" onclick={() => App.OpenURL(brandWebsite + "/business.html")}>about business licensing</button>.
           {#if lic.hasLicence && lic.err}<br /><span style="color:#c0392b">Installed licence: {lic.err}.</span>{/if}
         </p>
         <div class="addrow">

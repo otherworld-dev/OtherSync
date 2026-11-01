@@ -34,6 +34,22 @@ func TestSidebarLabel(t *testing.T) {
 	}
 }
 
+// Every account is named after the product as it is called now, one set up
+// before the rename included (its entry is renamed in place), unless the user
+// chose a name; the icon folder our own entry uses is one existing installs
+// have, so it keeps its name.
+func TestSidebarNamesAfterRename(t *testing.T) {
+	if got := sidebarLabel(account.Account{ID: "n", LoginName: "amy"}, nil); got != "OtherSync - amy" {
+		t.Errorf("account: %q", got)
+	}
+	if got := sidebarLabel(account.Account{ID: "n", LoginName: "amy", Label: "Nimbo - amy"}, nil); got != "Nimbo - amy" {
+		t.Errorf("a chosen name was replaced: %q", got)
+	}
+	if got := sidebarIconFolder(); got != "Nimbo" {
+		t.Errorf("sidebar icon folder = %q, want Nimbo", got)
+	}
+}
+
 func TestCleanSidebarName(t *testing.T) {
 	for in, want := range map[string]string{
 		"":                  "",

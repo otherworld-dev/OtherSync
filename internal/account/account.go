@@ -22,7 +22,7 @@ type Account struct {
 	// the local-network-route design (2026-09-13).
 	Local *LocalRoute `json:"local,omitempty"`
 	// Label is the name the user chose for this account's Explorer sidebar
-	// entry. "" = the automatic one ("Nimbo - <login>"); see sidebarLabel in
+	// entry. "" = the automatic one ("OtherSync - <login>"); see sidebarLabel in
 	// cmd/nimbo-gui.
 	Label string `json:"label,omitempty"`
 }

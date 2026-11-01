@@ -9,10 +9,14 @@
 // technique (no COM).
 package shellmenu
 
-import "golang.org/x/sys/windows/registry"
+import (
+	"github.com/otherworld/nimbo/internal/brand"
+	"golang.org/x/sys/windows/registry"
+)
 
 // The keys under HKCU the menu is written to. Variables so a test can write
-// somewhere other than the real Explorer menu.
+// somewhere other than the real Explorer menu. The key names stay "Nimbo"
+// after the rename to OtherSync (only the MUIVerb title follows the brand).
 var (
 	fileRoot = `Software\Classes\*\shell\Nimbo`
 	dirRoot  = `Software\Classes\Directory\shell\Nimbo`
@@ -84,7 +88,7 @@ func writeParent(root, exePath string) error {
 		return err
 	}
 	defer k.Close()
-	if err := k.SetStringValue("MUIVerb", "Nimbo"); err != nil {
+	if err := k.SetStringValue("MUIVerb", brand.Current.Name); err != nil {
 		return err
 	}
 	_ = k.SetStringValue("Icon", exePath+",0")

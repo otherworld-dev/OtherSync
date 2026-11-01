@@ -38,7 +38,7 @@ fun SupportScreen(
 ) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        topBar = { NimboTopBar(title = "Support Nimbo", onBack = onBack) },
+        topBar = { NimboTopBar(title = "Support OtherSync", onBack = onBack) },
     ) { inner ->
         Column(
             modifier = Modifier
@@ -50,7 +50,7 @@ fun SupportScreen(
         ) {
             if (tier == SupporterTier.NONE) {
                 Text(
-                    "Nimbo is free, with every feature. If it's useful to you, you can support it.",
+                    "OtherSync is free, with every feature. If it's useful to you, you can support it.",
                     style = MaterialTheme.typography.bodyLarge,
                 )
             } else {
@@ -58,7 +58,7 @@ fun SupportScreen(
                     SupporterBadge(tier)
                     Spacer(Modifier.width(10.dp))
                     Text(
-                        if (tier == SupporterTier.ONE_OFF) "You've supported Nimbo. Thank you."
+                        if (tier == SupporterTier.ONE_OFF) "You've supported OtherSync. Thank you."
                         else "You're a ${tier.label}. Thank you.",
                         style = MaterialTheme.typography.bodyLarge,
                     )
@@ -71,7 +71,7 @@ fun SupportScreen(
 
             HorizontalDivider()
             TextButton(onClick = onOpenBusiness) {
-                Text("Using Nimbo at work? Businesses need a commercial licence")
+                Text("Using OtherSync at work? Businesses need a commercial licence")
             }
         }
     }

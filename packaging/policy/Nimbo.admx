@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Group Policy / Intune administrative template for Nimbo (managed deployments).
+  Group Policy / Intune administrative template for OtherSync, formerly Nimbo (managed deployments).
   Install: copy Nimbo.admx to C:\Windows\PolicyDefinitions and Nimbo.adml to
   C:\Windows\PolicyDefinitions\en-US (or the Central Store). Policies appear
-  under Computer Configuration > Administrative Templates > Nimbo and write to
-  HKLM\SOFTWARE\Policies\Nimbo. They apply only on machines with a Nimbo
+  under Computer Configuration > Administrative Templates > OtherSync and write to
+  HKLM\SOFTWARE\Policies\Nimbo. They apply only on machines with an OtherSync
   business licence installed.
+  The file names, the namespace, the category id and the registry path stay
+  "Nimbo" after the rename, so GPOs and Intune profiles already deployed keep
+  working; only the displayed strings (Nimbo.adml) say OtherSync.
 -->
 <policyDefinitions revision="1.0" schemaVersion="1.0">
   <policyNamespaces>

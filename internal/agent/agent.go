@@ -28,6 +28,7 @@ import (
 
 	"github.com/otherworld/nimbo/internal/account"
 	"github.com/otherworld/nimbo/internal/activity"
+	"github.com/otherworld/nimbo/internal/brand"
 	"github.com/otherworld/nimbo/internal/cfapi"
 	"github.com/otherworld/nimbo/internal/config"
 	"github.com/otherworld/nimbo/internal/engine"
@@ -2493,7 +2494,7 @@ func (e *Engine) noteEncrypted(rel string) {
 	}
 	slog.Info("skipping end-to-end encrypted folder (not supported)", "path", rel)
 	e.toast("Encrypted folder skipped",
-		"\""+rel+"\" is end-to-end encrypted — Nimbo can't sync it and is leaving it alone.", "")
+		"\""+rel+"\" is end-to-end encrypted — "+brand.Current.Name+" can't sync it and is leaving it alone.", "")
 }
 
 func (e *Engine) toast(title, message, link string) {
@@ -5088,7 +5089,7 @@ func (e *Engine) toastGuardTripped() {
 	if throttled {
 		return
 	}
-	e.toast("Nimbo — syncing paused",
+	e.toast(brand.Current.Name+" — syncing paused",
 		"Your sync folder is missing or empty, so syncing is paused to protect your Nextcloud files. Restore or remount the folder to resume.", "")
 }
 

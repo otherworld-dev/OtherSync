@@ -103,13 +103,22 @@ func utf16Arg(s string) (uintptr, error) {
 // name must match the manifest's virtualization:ExcludedDirectory (patched by
 // build-partner.ps1 for white-label builds), or a packaged install writes the
 // shortcuts into its private AppData copy and Start never shows them.
+//
+// It is named after brand.InstalledName, not the product name: it keeps
+// "Nimbo Apps" after the rename to OtherSync. Existing installs have their
+// shortcuts in it and the app icons the pinned ones point at (appIconsDir), so
+// a new name would orphan the shortcuts and blank every pinned icon. Start
+// shows it under the new name all the same (labelShortcutsFolder).
 func shortcutsDir() string {
 	appData := os.Getenv("APPDATA")
 	if appData == "" {
 		return ""
 	}
-	return filepath.Join(appData, "Microsoft", "Windows", "Start Menu", "Programs", brand.Current.Name+" Apps")
+	return filepath.Join(appData, "Microsoft", "Windows", "Start Menu", "Programs", shortcutsFolderName())
 }
+
+// shortcutsFolderName is the Start-menu folder's own name, "Nimbo Apps".
+func shortcutsFolderName() string { return brand.Current.InstalledName() + " Apps" }
 
 // shortcutExists reports whether a .lnk with this filename exists in our
 // Start-menu folder. Filename-keyed (resolved from settings by app id) so a
@@ -132,22 +141,23 @@ func removeShortcutFile(filename string) error {
 	if err := os.Remove(filepath.Join(d, filename)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	// Prune when empty. The hidden icon folder lives in here, so "empty" means
-	// "nothing but that" — and once the user has removed the last shortcut, the
-	// icons it held have nothing left to point at either.
-	if entries, err := os.ReadDir(d); err == nil {
-		spent := true
-		for _, e := range entries {
-			if e.Name() != appIconsFolder {
-				spent = false
-				break
-			}
-		}
-		if spent {
-			_ = os.RemoveAll(filepath.Join(d, appIconsFolder))
-		}
+	// Prune when empty. The hidden icon folder and the desktop.ini that names
+	// the folder live in here, so "empty" means "nothing but those" — and once
+	// the user has removed the last shortcut, the icons it held have nothing
+	// left to point at either.
+	entries, err := os.ReadDir(d)
+	if err != nil {
+		return nil
 	}
-	_ = os.Remove(d) // prune when empty (fails silently otherwise)
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name()
+	}
+	if shortcutsFolderSpent(names) {
+		_ = os.RemoveAll(filepath.Join(d, appIconsFolder))
+		unlabelShortcutsFolder(d) // read-only, which RemoveDirectory refuses
+		_ = os.Remove(d)
+	}
 	return nil
 }
 
@@ -199,6 +209,7 @@ func createAppShortcut(id, name, aumid, icoPath string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
+	labelShortcutsFolder()
 
 	// COM wants a consistent apartment; lock the thread for the whole dance.
 	runtime.LockOSThread()

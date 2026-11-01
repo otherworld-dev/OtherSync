@@ -72,7 +72,7 @@ fun PermissionsScreen(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "Nimbo needs a few Android permissions before it can " +
+                    text = "OtherSync needs a few Android permissions before it can " +
                         "keep folders in sync in the background.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -83,7 +83,7 @@ fun PermissionsScreen(
                 PermissionRow(
                     icon = Icons.Filled.Folder,
                     title = "All files access",
-                    why = "Lets Nimbo read and write the sync folder in your shared storage.",
+                    why = "Lets OtherSync read and write the sync folder in your shared storage.",
                     requirement = "Required",
                     granted = hasAllFiles,
                     onGrant = onGrantAllFiles,

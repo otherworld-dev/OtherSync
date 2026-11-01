@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <policyDefinitionResources revision="1.0" schemaVersion="1.0">
-  <displayName>Nimbo administrative templates</displayName>
-  <description>Managed-deployment policies for the Nimbo Nextcloud sync client.</description>
+  <displayName>OtherSync administrative templates</displayName>
+  <description>Managed-deployment policies for the OtherSync Nextcloud sync client (formerly Nimbo).</description>
   <resources>
     <stringTable>
-      <string id="Nimbo">Nimbo</string>
+      <string id="Nimbo">OtherSync</string>
 
       <string id="ServerURL">Enforce Nextcloud server</string>
-      <string id="ServerURL_Help">Presets the Nextcloud server address users sign in to. Tick "Lock the server" to prevent users connecting Nimbo to any other server (e.g. a personal Nextcloud).</string>
+      <string id="ServerURL_Help">Presets the Nextcloud server address users sign in to. Tick "Lock the server" to prevent users connecting OtherSync to any other server (e.g. a personal Nextcloud).</string>
 
       <string id="DisableSignOut">Disable sign out</string>
       <string id="DisableSignOut_Help">When enabled, the Sign out option is hidden so users cannot disconnect the managed account. Disable this policy to allow sign out.</string>

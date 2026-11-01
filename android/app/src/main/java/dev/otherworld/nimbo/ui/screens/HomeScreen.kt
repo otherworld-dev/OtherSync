@@ -119,7 +119,7 @@ fun HomeScreen(
         modifier = Modifier.fillMaxSize(),
         topBar = {
             Column {
-                NimboTopBar(title = "Nimbo") {
+                NimboTopBar(title = "OtherSync") {
                     NotificationBell(notificationCount, onOpenNotifications)
                     IconButton(onClick = onOpenApps) {
                         Icon(Icons.Filled.Apps, contentDescription = "Nextcloud apps")
@@ -279,7 +279,7 @@ fun HomeScreen(
                     EmptyState(
                         icon = Icons.Filled.CloudQueue,
                         title = "No folders yet",
-                        subtitle = "Pick a folder on your server and Nimbo will keep " +
+                        subtitle = "Pick a folder on your server and OtherSync will keep " +
                             "it mirrored on this device.",
                         action = {
                             Button(
@@ -335,13 +335,13 @@ fun HomeScreen(
                     Spacer(Modifier.height(10.dp))
                     if (onRemoveFolderWithLocal == null) {
                         Text(
-                            text = "Nimbo stops watching this folder. Files already " +
+                            text = "OtherSync stops watching this folder. Files already " +
                                 "on this device and on the server are kept.",
                             style = MaterialTheme.typography.bodySmall,
                         )
                     } else {
                         Text(
-                            text = "Nimbo stops watching this folder. Nothing on the " +
+                            text = "OtherSync stops watching this folder. Nothing on the " +
                                 "server is touched.",
                             style = MaterialTheme.typography.bodySmall,
                         )
@@ -576,7 +576,7 @@ private fun FailingFolderCard(folder: FailingFolder) {
             }
             Spacer(Modifier.height(6.dp))
             Text(
-                text = "Nimbo keeps retrying. Nothing has been deleted.",
+                text = "OtherSync keeps retrying. Nothing has been deleted.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f),
             )

@@ -83,7 +83,7 @@ class DirectKeySupporter(
         publish(updated, definite = outcome != CheckOutcome.Unreachable)
         _notice.value = when (outcome) {
             is CheckOutcome.Active -> SupporterNotice(
-                if (outcome.tier == SupporterTier.ONE_OFF) "Key added. Thank you for supporting Nimbo."
+                if (outcome.tier == SupporterTier.ONE_OFF) "Key added. Thank you for supporting OtherSync."
                 else "Key added. You're a ${outcome.tier.label}. Thank you.",
             )
             CheckOutcome.Paused -> SupporterNotice(

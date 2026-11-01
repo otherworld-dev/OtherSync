@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gen2brain/beeep"
+	"github.com/otherworld/nimbo/internal/brand"
 	"github.com/otherworld/nimbo/internal/transport"
 )
 
@@ -17,7 +18,7 @@ func Toast(title, message, _ string) {
 		return
 	}
 	if title == "" {
-		title = "Nimbo"
+		title = brand.Current.Name
 	}
 	if err := beeep.Notify(title, message, ""); err != nil {
 		slog.Warn("toast failed", "err", err)

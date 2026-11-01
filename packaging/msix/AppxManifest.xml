@@ -17,7 +17,7 @@
   <Identity Name="Nimbo" Publisher="CN=Nimbo Dev" Version="0.1.0.0" ProcessorArchitecture="x64" />
 
   <Properties>
-    <DisplayName>Nimbo</DisplayName>
+    <DisplayName>OtherSync</DisplayName>
     <PublisherDisplayName>Otherworld</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
     <!-- The Start-menu folder for app-window shortcuts (shortcutsDir() in
@@ -26,7 +26,9 @@
          Start Menu\Programs is otherwise redirected into
          Packages\<PFN>\LocalCache\Roaming, where Nimbo sees its shortcuts and
          Start never does (GitHub #16). Needs the unvirtualizedResources
-         capability. The name is "<brand name> Apps", so build-partner.ps1
+         capability. The name is "<brand InstalledName> Apps": it stays
+         "Nimbo Apps" after the rename to OtherSync, because existing installs
+         keep their shortcuts and pinned-app icons in it. build-partner.ps1
          patches it for white-label builds. -->
     <virtualization:FileSystemWriteVirtualization>
       <virtualization:ExcludedDirectories>
@@ -57,7 +59,7 @@
   <Applications>
     <Application Id="Nimbo" Executable="nimbo-gui.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
-          DisplayName="Nimbo"
+          DisplayName="OtherSync"
           Description="Nextcloud desktop sync client"
           Square150x150Logo="Assets\Square150x150Logo.png"
           Square44x44Logo="Assets\Square44x44Logo.png"
@@ -69,7 +71,7 @@
              StartupTask API (internal/autostart), so TaskId must stay in step
              with startupTaskID there. -->
         <desktop:Extension Category="windows.startupTask" Executable="nimbo-gui.exe" EntryPoint="Windows.FullTrustApplication">
-          <desktop:StartupTask TaskId="NimboAutostart" Enabled="true" DisplayName="Nimbo" />
+          <desktop:StartupTask TaskId="NimboAutostart" Enabled="true" DisplayName="OtherSync" />
         </desktop:Extension>
 
         <!-- Stable launcher alias (%LOCALAPPDATA%\Microsoft\WindowsApps\nimbo-app.exe):
@@ -88,13 +90,13 @@
              -ToastActivated when a toast is clicked while the app isn't running). -->
         <com:Extension Category="windows.comServer">
           <com:ComServer>
-            <com:SurrogateServer DisplayName="Nimbo context menu">
+            <com:SurrogateServer DisplayName="OtherSync context menu">
               <com:Class Id="7E9C1A20-3B4D-4F8A-A1C2-9D5E0F7B6A11" Path="NimboCtxMenu.dll" ThreadingModel="STA" />
             </com:SurrogateServer>
             <!-- The three sync-state icon overlay handlers in NCOverlays.dll.
                  ThreadingModel matches what the DLL registers for itself when
                  installed by hand (Apartment == STA here). -->
-            <com:SurrogateServer DisplayName="Nimbo status overlays">
+            <com:SurrogateServer DisplayName="OtherSync status overlays">
               <com:Class Id="4F8B2C10-1A3D-4E55-9B21-0C7E5A9D0001" Path="NCOverlays.dll" ThreadingModel="STA" />
               <com:Class Id="4F8B2C10-1A3D-4E55-9B21-0C7E5A9D0002" Path="NCOverlays.dll" ThreadingModel="STA" />
               <com:Class Id="4F8B2C10-1A3D-4E55-9B21-0C7E5A9D0003" Path="NCOverlays.dll" ThreadingModel="STA" />
@@ -104,7 +106,7 @@
               <com:Class Id="4F8B2C10-1A3D-4E55-9B21-0C7E5A9D0103" Path="NCOverlays.dll" ThreadingModel="STA" />
               <com:Class Id="4F8B2C10-1A3D-4E55-9B21-0C7E5A9D0104" Path="NCOverlays.dll" ThreadingModel="STA" />
             </com:SurrogateServer>
-            <com3:ExeServer Executable="nimbo-gui.exe" Arguments="-ToastActivated" DisplayName="Nimbo toast activator">
+            <com3:ExeServer Executable="nimbo-gui.exe" Arguments="-ToastActivated" DisplayName="OtherSync toast activator">
               <com:Class Id="00EEDCE7-5C4E-4573-85C2-98790F8F98AE" />
             </com3:ExeServer>
           </com:ComServer>

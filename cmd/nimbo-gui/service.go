@@ -344,6 +344,11 @@ func (a *App) start(ctx context.Context) {
 	if a.app != nil {
 		a.app.Event.Emit("accent", eng.ThemeColor())
 	}
+	// The startup sweep in main runs before any engine exists, and an icon at
+	// a new path (an icon-style rev bump) can only be generated with one, so
+	// that sweep leaves every shortcut on the old icon. Sweep again now; it is
+	// a no-op when nothing needs fixing (#996: pins kept the Nimbo badge).
+	go a.repairAppShortcutIcons()
 	runCtx, cancel := context.WithCancel(ctx)
 	a.engCancel = cancel
 	eng.SetStatusFunc(func(s string) {
@@ -4538,7 +4543,7 @@ func (a *App) versionsLocalPath(localAbs string) {
 		if a.app != nil {
 			a.app.Dialog.Warning().
 				SetTitle("No version history").
-				SetMessage(filepath.Base(localAbs) + " isn't inside a folder synced by Nimbo.").
+				SetMessage(filepath.Base(localAbs) + " isn't inside a folder synced by " + brand.Current.Name + ".").
 				Show()
 		}
 		return
@@ -4561,7 +4566,7 @@ func (a *App) shareLocalPath(localAbs string) {
 		if a.app != nil {
 			a.app.Dialog.Warning().
 				SetTitle("Can't share").
-				SetMessage(filepath.Base(localAbs) + " isn't inside a folder synced by Nimbo.").
+				SetMessage(filepath.Base(localAbs) + " isn't inside a folder synced by " + brand.Current.Name + ".").
 				Show()
 		}
 		return
@@ -4720,7 +4725,7 @@ func (a *App) SetSidebar(on bool) string {
 		return err.Error()
 	}
 	name := a.ownSidebarLabel()
-	if err := shellns.Register(brand.Current.Name, name, target, icon); err != nil {
+	if err := shellns.Register(sidebarIconFolder(), name, target, icon); err != nil {
 		return err.Error()
 	}
 	rememberSidebarEntry(target, name)
@@ -4799,7 +4804,7 @@ func (a *App) syncSidebar() {
 		slog.Warn("sidebar icon unavailable", "err", err)
 		return
 	}
-	if err := shellns.Register(brand.Current.Name, name, target, icon); err != nil {
+	if err := shellns.Register(sidebarIconFolder(), name, target, icon); err != nil {
 		slog.Warn("sidebar registration failed", "err", err)
 		return
 	}
@@ -4993,7 +4998,7 @@ func (a *App) ReportProblem() string {
 		return err.Error()
 	}
 	revealPath(out)
-	openURL("https://github.com/otherworld-dev/Nimbo/issues/new?template=bug_report.yml")
+	openURL("https://github.com/otherworld-dev/OtherSync/issues/new?template=bug_report.yml")
 	return ""
 }
 
@@ -5322,7 +5327,7 @@ func (a *App) testLocalAddress(ctx context.Context, addr, pin string) (LocalTest
 	switch {
 	case p.PlainHTTP:
 		dto.Result = "not-https"
-		dto.Message = "This address doesn't use HTTPS. Nimbo needs HTTPS here too; a self-signed certificate is fine. If Nextcloud sits behind a reverse proxy, use the proxy's address, not the Nextcloud machine's."
+		dto.Message = "This address doesn't use HTTPS. " + brand.Current.Name + " needs HTTPS here too; a self-signed certificate is fine. If Nextcloud sits behind a reverse proxy, use the proxy's address, not the Nextcloud machine's."
 		return dto, nil
 	case !p.Verified && !p.Pinned:
 		// Before anyone is asked to trust this certificate, check that a

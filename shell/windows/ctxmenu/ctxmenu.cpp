@@ -168,7 +168,7 @@ public:
 
     // IExplorerCommand
     HRESULT STDMETHODCALLTYPE GetTitle(IShellItemArray*, LPWSTR* ppszName) override {
-        const wchar_t* t = (m_kind == KIND_ROOT) ? L"Nimbo" : kLeaves[m_kind].title;
+        const wchar_t* t = (m_kind == KIND_ROOT) ? L"OtherSync" : kLeaves[m_kind].title; // the product name; the Verb Id and CLSID stay Nimbo
         return TaskStrDup(t, ppszName);
     }
     HRESULT STDMETHODCALLTYPE GetIcon(IShellItemArray*, LPWSTR* ppszIcon) override {

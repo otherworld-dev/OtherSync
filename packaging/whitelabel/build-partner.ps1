@@ -37,6 +37,15 @@ foreach ($k in 'identityName','publisher','displayName','publisherDisplayName','
 }
 $appId = (Get-Content $brandSrc -Raw | ConvertFrom-Json).appId
 if (-not $appId) { throw "brand.json is missing 'appId'" }
+# formerName is the stock brand's (the rename Nimbo -> OtherSync). Copied into a
+# partner brand it would put the partner's shortcuts in "Nimbo Apps", share the
+# stock sidebar icon folder, label its accounts "Nimbo - <user>" and tell its
+# users "Nimbo is now <partner>". Only a partner that really renamed its own
+# product may carry one, and partner.json must say so with the same name.
+$formerName = (Get-Content $brandSrc -Raw | ConvertFrom-Json).formerName
+if ($formerName -and $formerName -ne $cfg.renamedFrom) {
+    throw "brand.json sets formerName '$formerName', which is the stock build's. Remove it from the partner's brand.json, or, if this partner really renamed its product from '$formerName', add `"renamedFrom`": `"$formerName`" to partner.json."
+}
 
 # Make Go + windres reachable even if not on PATH.
 function Ensure-Tool($exe, $candidates) {
@@ -98,10 +107,12 @@ try {
     # The launcher alias must be brand-unique too (Go derives it from brand appId,
     # lowercased + "-app" — keep in step with launcherAlias() in shortcut_windows.go).
     $m = $m -replace '(<desktop:ExecutionAlias Alias=")[^"]*"', "`${1}$($appId.ToLower())-app.exe`""
-    # The unvirtualized Start-menu folder is "<brand name> Apps" (shortcutsDir() in
-    # shortcut_windows.go); a stale "Nimbo Apps" would leave the partner's app
+    # The unvirtualized Start-menu folder is "<brand InstalledName> Apps"
+    # (shortcutsDir() in shortcut_windows.go): formerName when the brand has been
+    # renamed, else name. A stale "Nimbo Apps" would leave the partner's app
     # shortcuts in the package's private copy, where Start can't see them.
-    $brandName = (Get-Content $brandSrc -Raw | ConvertFrom-Json).name
+    $partnerBrand = Get-Content $brandSrc -Raw | ConvertFrom-Json
+    $brandName = if ($partnerBrand.formerName) { $partnerBrand.formerName } else { $partnerBrand.name }
     if (-not $brandName) { throw "brand.json is missing 'name'" }
     $appsDir = [System.Security.SecurityElement]::Escape("$brandName Apps") -replace '\$', '$$$$'
     $m = $m -replace '(<virtualization:ExcludedDirectory>\$\(KnownFolder:Programs\)\\)[^<]*', "`${1}$appsDir"

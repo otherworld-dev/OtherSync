@@ -18,68 +18,88 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 
-/** Nimbo indigo, the desktop app's brand accent (#5856E0). */
-val NimboIndigo = Color(0xFF5856E0)
+/*
+ * The OtherSync brand accent (the Other family brand sheet): bright teal on dark
+ * surfaces, deep teal on light ones, and the brand's dark Ink for text and icons
+ * that sit ON teal. White on deep teal is only 3.7:1, below the 4.5:1 the tests
+ * ask of text, which is why the brand puts Ink on its teal buttons instead.
+ *
+ * The rest of each scheme is Material 3's own palette generated from the deep
+ * teal (material-color-utilities, tonal spot), with the primary roles then
+ * pointed at the brand colours, the same way the indigo schemes were made.
+ */
 
-private val LightColors = lightColorScheme(
-    primary = NimboIndigo,
-    onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFE2DFFF),
-    onPrimaryContainer = Color(0xFF0B006B),
-    secondary = Color(0xFF5D5C71),
+/** OtherSync teal (#22D3C4): the accent on dark surfaces. */
+val BrandTeal = Color(0xFF22D3C4)
+
+/** Deep teal (#0D9488): the accent on light surfaces. */
+val BrandDeepTeal = Color(0xFF0D9488)
+
+/** The brand's Ink (#0A1118): text and icons on either teal. */
+val BrandInk = Color(0xFF0A1118)
+
+internal val LightColors = lightColorScheme(
+    primary = BrandDeepTeal,
+    onPrimary = BrandInk,
+    primaryContainer = Color(0xFF73F8E7),
+    onPrimaryContainer = Color(0xFF00201D),
+    secondary = Color(0xFF4A635F),
     onSecondary = Color(0xFFFFFFFF),
-    secondaryContainer = Color(0xFFE2E0F9),
-    onSecondaryContainer = Color(0xFF1A1A2C),
-    tertiary = Color(0xFF795369),
+    secondaryContainer = Color(0xFFCCE8E3),
+    onSecondaryContainer = Color(0xFF05201C),
+    tertiary = Color(0xFF46617A),
     onTertiary = Color(0xFFFFFFFF),
-    tertiaryContainer = Color(0xFFFFD8EB),
-    onTertiaryContainer = Color(0xFF2F1124),
+    tertiaryContainer = Color(0xFFCDE5FF),
+    onTertiaryContainer = Color(0xFF001D32),
     error = Color(0xFFBA1A1A),
     onError = Color(0xFFFFFFFF),
     errorContainer = Color(0xFFFFDAD6),
     onErrorContainer = Color(0xFF410002),
-    background = Color(0xFFFFFBFF),
-    onBackground = Color(0xFF1C1B1F),
-    surface = Color(0xFFFFFBFF),
-    onSurface = Color(0xFF1C1B1F),
-    surfaceVariant = Color(0xFFE4E1EC),
-    onSurfaceVariant = Color(0xFF47464F),
-    outline = Color(0xFF777680),
-    outlineVariant = Color(0xFFC8C5D0),
-    inverseSurface = Color(0xFF313034),
-    inverseOnSurface = Color(0xFFF3EFF4),
-    inversePrimary = Color(0xFFC2C1FF),
+    background = Color(0xFFFAFDFB),
+    onBackground = Color(0xFF191C1B),
+    surface = Color(0xFFFAFDFB),
+    onSurface = Color(0xFF191C1B),
+    surfaceVariant = Color(0xFFDAE5E2),
+    onSurfaceVariant = Color(0xFF3F4947),
+    outline = Color(0xFF6F7977),
+    outlineVariant = Color(0xFFBEC9C6),
+    inverseSurface = Color(0xFF2D3130),
+    inverseOnSurface = Color(0xFFEFF1EF),
+    // Snackbar actions sit on the dark inverse surface, so the bright teal.
+    inversePrimary = BrandTeal,
     scrim = Color(0xFF000000),
 )
 
-private val DarkColors = darkColorScheme(
-    primary = Color(0xFFC2C1FF),
-    onPrimary = Color(0xFF1800A7),
-    primaryContainer = Color(0xFF332DBC),
-    onPrimaryContainer = Color(0xFFE2DFFF),
-    secondary = Color(0xFFC6C4DD),
-    onSecondary = Color(0xFF2F2F42),
-    secondaryContainer = Color(0xFF454559),
-    onSecondaryContainer = Color(0xFFE2E0F9),
-    tertiary = Color(0xFFE9B9D2),
-    onTertiary = Color(0xFF47263A),
-    tertiaryContainer = Color(0xFF5F3C51),
-    onTertiaryContainer = Color(0xFFFFD8EB),
+internal val DarkColors = darkColorScheme(
+    primary = BrandTeal,
+    onPrimary = BrandInk,
+    primaryContainer = Color(0xFF005049),
+    onPrimaryContainer = Color(0xFF73F8E7),
+    secondary = Color(0xFFB1CCC7),
+    onSecondary = Color(0xFF1C3531),
+    secondaryContainer = Color(0xFF324B48),
+    onSecondaryContainer = Color(0xFFCCE8E3),
+    tertiary = Color(0xFFAECAE6),
+    onTertiary = Color(0xFF163349),
+    tertiaryContainer = Color(0xFF2E4961),
+    onTertiaryContainer = Color(0xFFCDE5FF),
     error = Color(0xFFFFB4AB),
     onError = Color(0xFF690005),
     errorContainer = Color(0xFF93000A),
     onErrorContainer = Color(0xFFFFB4AB),
-    background = Color(0xFF1C1B1F),
-    onBackground = Color(0xFFE5E1E6),
-    surface = Color(0xFF1C1B1F),
-    onSurface = Color(0xFFE5E1E6),
-    surfaceVariant = Color(0xFF47464F),
-    onSurfaceVariant = Color(0xFFC8C5D0),
-    outline = Color(0xFF918F9A),
-    outlineVariant = Color(0xFF47464F),
-    inverseSurface = Color(0xFFE5E1E6),
-    inverseOnSurface = Color(0xFF313034),
-    inversePrimary = NimboIndigo,
+    background = Color(0xFF191C1B),
+    onBackground = Color(0xFFE0E3E1),
+    surface = Color(0xFF191C1B),
+    onSurface = Color(0xFFE0E3E1),
+    surfaceVariant = Color(0xFF3F4947),
+    onSurfaceVariant = Color(0xFFBEC9C6),
+    outline = Color(0xFF899390),
+    outlineVariant = Color(0xFF3F4947),
+    inverseSurface = Color(0xFFE0E3E1),
+    inverseOnSurface = Color(0xFF2D3130),
+    // On the light inverse surface the deep teal is only 2.9:1, so this is
+    // the generated tone-40 teal (5:1) rather than a brand hex.
+    inversePrimary = Color(0xFF006A61),
     scrim = Color(0xFF000000),
 )
 

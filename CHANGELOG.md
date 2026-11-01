@@ -45,6 +45,11 @@ All notable changes to Nimbo are recorded here. The format follows
 
 ### Changed
 
+- Nimbo is now called OtherSync. Nothing else changes: it is the same app and it
+  updates in place, your settings, accounts, folders, pinned app windows and
+  Explorer integration all stay as they are. Your sync folders keep their names on
+  disk; the Explorer sidebar entries and the Start menu say OtherSync. After the
+  update it says so once. The website is now www.othersync.com (#996).
 - Nimbo now runs on Windows 10 (version 2004 or later) as well as Windows 11.
   Until now Setup failed on Windows 10 with "step returned 1" and then said it had
   finished anyway. The right-click menu entry shows in the classic menu there.

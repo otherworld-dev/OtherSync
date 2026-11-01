@@ -109,6 +109,33 @@ func TestSuggestAccountFolderSkipsUnusableCandidates(t *testing.T) {
 	}
 }
 
+// After the rename a new account's folder is "OtherSync - <login>", but an
+// older install's "Nimbo - <login>" that is already there (an account whose
+// folder was never recorded) is still found rather than a fresh one made
+// beside it.
+func TestSuggestAccountFolderAfterRename(t *testing.T) {
+	home := t.TempDir()
+	others := []accountFolder{{Account: "amy", Dir: filepath.Join(home, "Nextcloud")}}
+	if got, want := suggestAccountFolder(home, "bob", others, nil), filepath.Join(home, "OtherSync - bob"); got != want {
+		t.Fatalf("new account: %q, want %q", got, want)
+	}
+	old := filepath.Join(home, "Nimbo - bob")
+	if err := os.MkdirAll(old, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := suggestAccountFolder(home, "bob", others, nil); got != old {
+		t.Fatalf("existing folder: %q, want %q", got, old)
+	}
+	// Still only when it is free and usable.
+	taken := append(others, accountFolder{Account: "old bob", Dir: old})
+	if got, want := suggestAccountFolder(home, "bob", taken, nil), filepath.Join(home, "OtherSync - bob"); got != want {
+		t.Fatalf("existing folder taken: %q, want %q", got, want)
+	}
+	if got, want := suggestAccountFolder(home, "bob", others, func(string) bool { return false }), ""; got != want {
+		t.Fatalf("nothing usable: %q", got)
+	}
+}
+
 // What another account is actually SYNCING is what can collide at run time:
 // its live pairs in live mode, its mounted root in on-demand mode. Parked pairs
 // and a "choose"-mode parent folder sync nothing and must not hold anything back
