@@ -11,6 +11,8 @@ import (
 	"context"
 	"fmt"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -198,12 +200,24 @@ func TestRemoteTreeIsPaced(t *testing.T) {
 	defer srv.Close()
 	e, _ := newHookEngine(t, srv.URL)
 	e.client.SetListPacer(pace.New(pace.Config{Rate: 40, Burst: 1, Log: func(string, ...any) {}}))
+	// RemoteTree lists only the server folders holding local files (Deck
+	// #1003), so give every folder one: all 21 listings still happen.
+	local := t.TempDir()
+	for i := 0; i < n; i++ {
+		d := filepath.Join(local, fmt.Sprintf("d%03d", i))
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "f.txt"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	start := time.Now()
-	got, err := e.RemoteTree(context.Background(), "", "t", nil, nil)
+	got, err := e.RemoteTree(context.Background(), local, "t", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	scanDirs(t, got, n)
+	scanDirs(t, got.Entries, n)
 	// 21 PROPFINDs, burst 1, 40/s: at least 0.5 s.
 	if el := time.Since(start); el < 450*time.Millisecond {
 		t.Fatalf("RemoteTree's %d listings took %v; it bypassed the account pacer", n+1, el)
