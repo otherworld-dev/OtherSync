@@ -52,6 +52,13 @@ type Options struct {
 	// means a minute. Without it the paths were dropped, and the full pass that
 	// would find them again is held back by the same failure (Deck #691).
 	RetryChanges time.Duration
+	// ServerFault, if set, says whether a failed pass's error is the server
+	// answering with an error of its own (a 5xx), rather than not being
+	// reached. A change that syncs fine lifts the backoff an outage left, but
+	// not one a server fault left: the server was reachable all along, so a
+	// small upload getting through says nothing about the heavy pass (Deck
+	// #1004). Nil treats every failure as an outage.
+	ServerFault func(error) bool
 }
 
 // SyncFunc performs one reconciliation. It is always called serially. changed
@@ -89,6 +96,7 @@ func runLoop(ctx context.Context, opts Options, sync SyncFunc, events <-chan str
 	// poll/push triggers wait.
 	var failStreak int
 	var holdUntil time.Time
+	var lastFault bool // the last failed pass was a server fault (see Options.ServerFault)
 	base := opts.PollInterval
 	if base <= 0 {
 		base = 5 * time.Minute
@@ -97,9 +105,11 @@ func runLoop(ctx context.Context, opts Options, sync SyncFunc, events <-chan str
 		if err == nil || ctx.Err() != nil {
 			failStreak = 0
 			holdUntil = time.Time{}
+			lastFault = false
 			return
 		}
 		failStreak++
+		lastFault = opts.ServerFault != nil && opts.ServerFault(err)
 		d := base << uint(failStreak-1)
 		if d > time.Hour {
 			d = time.Hour
@@ -129,7 +139,9 @@ func runLoop(ctx context.Context, opts Options, sync SyncFunc, events <-chan str
 		switch {
 		case err == nil:
 			changeFails = 0
-			note(nil) // it reached the server: lift any outage backoff, as before
+			if !lastFault {
+				note(nil) // it reached the server: lift any outage backoff, as before
+			}
 		case ctx.Err() == nil:
 			changeFails++
 			slog.Error("sync failed", "err", err)

@@ -6,7 +6,6 @@ package transport
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -151,7 +150,7 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 			// Retry-After when it names one (e.g. Nextcloud maintenance mode).
 			delay := retryAfter(resp)
 			drain(resp)
-			lastErr = fmt.Errorf("server returned %s", resp.Status)
+			lastErr = &StatusError{Code: resp.StatusCode, Status: resp.Status}
 			if delay > 0 {
 				if err := sleep(req.Context(), delay); err != nil {
 					return nil, err

@@ -55,6 +55,8 @@ func TestSyncErrKindKeepsOfflineForTheNetwork(t *testing.T) {
 		{"a local folder we may not read", fmt.Errorf("local scan: walk local root: %w", denied), "error"},
 		{"a database error", errors.New("load baseline: database disk image is malformed"), "error"},
 		{"retries that ran out", exhausted, "offline"},
+		// The retry loop now keeps the last status as a StatusError (Deck #1004).
+		{"retries that ran out on a typed 503", transport.RetriesExhausted(4, &transport.StatusError{Code: 503, Status: "503 Service Unavailable"}), "offline"},
 		{"a refused connection", fmt.Errorf("stat %q: %w", "a.txt", dial), "offline"},
 		{"a dropped connection", fmt.Errorf("download: %w", io.ErrUnexpectedEOF), "offline"},
 	} {
