@@ -1440,9 +1440,13 @@ func (e *Engine) removeConflict(localDir, rel string) {
 
 // --- Browser, sharing, settings, ignore (GUI pass-throughs) ---
 
-// Browse lists a remote directory (one level) for the file browser.
+// Browse lists a remote directory (one level) for the file browser, and for
+// on-demand folder population and reconcile, whose walks over every populated
+// folder are recursive listings in all but name, so it goes through the
+// account's listing pacer (Deck #1001). A lone listing fits in the pacer's
+// burst and is not slowed.
 func (e *Engine) Browse(ctx context.Context, remotePath string) ([]transport.Entry, error) {
-	return e.client.PropFind(ctx, remotePath, 1)
+	return e.client.PacedPropFind(ctx, remotePath, 1)
 }
 
 // Escaper returns the current name-escaping translator (nil-safe to use: a
@@ -3666,7 +3670,7 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 	}
 
 	// Root: one Depth:1 listing for the account-root files + the top-level folders.
-	rootEntries, err := e.client.PropFind(ctx, root, 1)
+	rootEntries, err := e.client.PacedPropFind(ctx, root, 1)
 	if err != nil {
 		return stats, err
 	}
@@ -3718,7 +3722,7 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 	// flag is right), while its contents are the carve's. A carved folder that
 	// is no longer on the server has nothing to download.
 	list := func(l *cloneListing) {
-		entries, perr := e.client.PropFindRecursive(ctx, l.full)
+		entries, perr := e.client.PacedPropFindRecursive(ctx, l.full)
 		if perr != nil {
 			notFound := errors.Is(perr, transport.ErrNotFound)
 			sched.failedListing(l, notFound)

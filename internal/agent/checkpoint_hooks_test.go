@@ -71,6 +71,9 @@ type fakeDAV struct {
 	// onGET, when set, runs before a GET is served and outside the lock, so a
 	// test can hold one download while it changes something.
 	onGET func(rel string)
+	// onPROPFIND, likewise, runs before a PROPFIND is served and outside the
+	// lock, so a test can add latency or time the requests (Deck #1001).
+	onPROPFIND func(rel string)
 }
 
 func newFakeDAV(nodes map[string]davNode) *fakeDAV {
@@ -152,6 +155,9 @@ func (f *fakeDAV) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rel := strings.Trim(strings.TrimPrefix(r.URL.Path, davPrefix), "/")
 	if r.Method == "GET" && f.onGET != nil {
 		f.onGET(rel)
+	}
+	if r.Method == "PROPFIND" && f.onPROPFIND != nil {
+		f.onPROPFIND(rel)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()

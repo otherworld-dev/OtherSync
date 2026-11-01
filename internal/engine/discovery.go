@@ -19,6 +19,9 @@ import (
 // and 16 workers cold-crawling a large tree drove a small Nextcloud host to
 // exhaustion (MariaDB pinned, then "server has gone away" aborting the scan).
 // 4 keeps a cold crawl parallel while leaving the server room to breathe.
+// Concurrency alone does not bound the request RATE, though (4 workers against
+// a quick server ran ~50 PROPFINDs/s, Deck #1001): that is the account's
+// listing pacer's job (package pace, via pacedPropFinder below).
 const scanWorkers = 4
 
 // parseChecksumSHA1 extracts the SHA1 hex digest from an oc:checksums value such
@@ -37,6 +40,16 @@ func parseChecksumSHA1(checksums string) string {
 // server. *transport.Client satisfies it unchanged.
 type PropFinder interface {
 	PropFind(ctx context.Context, path string, depth int) ([]transport.Entry, error)
+}
+
+// pacedPropFinder is a PropFinder that can also list through its account's
+// shared listing pacer (Deck #1001). *transport.Client is one, so every
+// RemoteScan caller — full and delta scans, the relist, the on-demand adopt
+// crawl, the escape sweep — is rate-limited and backs off under server strain
+// without each call site having to remember to. Test fakes that implement only
+// PropFind crawl unpaced.
+type pacedPropFinder interface {
+	PacedPropFind(ctx context.Context, path string, depth int) ([]transport.Entry, error)
 }
 
 // ScanOpts bundles RemoteScan's optional inputs; the zero value is a plain raw
@@ -154,6 +167,10 @@ func RemoteScan(ctx context.Context, c PropFinder, root string, opts ScanOpts) (
 	)
 
 	cp := opts.Checkpoint
+	list := c.PropFind
+	if pc, ok := c.(pacedPropFinder); ok {
+		list = pc.PacedPropFind // checkpoint hits below never touch it: only real requests are paced
+	}
 	var listed atomic.Int64 // directories listed so far, for the Progress heartbeat
 
 	// process lists one directory (from cache when the checkpoint validates,
@@ -170,7 +187,7 @@ func RemoteScan(ctx context.Context, c PropFinder, root string, opts ScanOpts) (
 			entries, cached = cp.Load(it.dir, it.etag)
 		}
 		if !cached {
-			entries, err = c.PropFind(ctx, it.dir, 1)
+			entries, err = list(ctx, it.dir, 1)
 			if err == nil && cp != nil && !it.noCache && it.etag != "" {
 				cp.Save(it.dir, it.etag, childrenOnly(entries, it.dir))
 			}
