@@ -197,7 +197,7 @@ if ($exists) {
     $extra = @()
     if ($PreRelease) { $extra += "--prerelease" }
     & $gh release create $tag @assets --repo "$Owner/$Repo" `
-        --title "Nimbo $tag" --target $target --notes-file $notesFile @extra
+        --title "OtherSync $tag" --target $target --notes-file $notesFile @extra
 }
 if ($LASTEXITCODE -ne 0) { throw "gh release failed" }
 
