@@ -38,10 +38,11 @@ func TestRemoteTreeResumesFromCheckpoint(t *testing.T) {
 
 	// Pass 2: healed. The already-listed dir must come from the checkpoint.
 	f.clearFailPF("a/b")
-	remote, err := e.RemoteTree(context.Background(), "", "", nil, nil)
+	listing, err := e.RemoteTree(context.Background(), "", "", nil, nil)
 	if err != nil {
 		t.Fatalf("retry: %v", err)
 	}
+	remote := listing.Entries
 	if got := f.pfCount("a"); got != 1 {
 		t.Fatalf("dir a PROPFINDed %d times across both passes, want 1 (retry must reuse the cached listing)", got)
 	}
@@ -88,6 +89,11 @@ func adoptFixture(t *testing.T, mtimeNS int64, excludes []string) (*fakeDAV, *En
 	if err := e.dirs.SavePairs([]config.SyncPair{{LocalDir: local, RemoteRoot: "", Excludes: excludes}}); err != nil {
 		t.Fatal(err)
 	}
+	// The local folder holds every file, as a live sync leaves it: the adopt
+	// scan only lists server folders that hold local files (Deck #1003).
+	for rel, body := range map[string]string{"f1": "one", "a/f2": "two", "a/b/f3": "three", "a/node_modules/x": "x"} {
+		writeLocal(t, local, rel, body)
+	}
 	pk := PairKey(local, "")
 	for _, b := range []engine.BaselineState{
 		{Path: "a", IsDir: true, RemoteETag: "e-a"},
@@ -122,10 +128,11 @@ func TestRemoteTreePrunesUnchangedFoldersWithTheLiveBaseline(t *testing.T) {
 	synced := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
 	f, e, local := adoptFixture(t, synced.UnixNano(), nil)
 
-	remote, err := e.RemoteTree(context.Background(), local, "", nil, nil)
+	listing, err := e.RemoteTree(context.Background(), local, "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	remote := listing.Entries
 	if n := f.pfCount("a"); n != 0 {
 		t.Errorf("folder a was listed %d times, want 0: its ETag matches the baseline", n)
 	}
@@ -159,14 +166,14 @@ func TestRemoteTreePrunesUnchangedFoldersWithTheLiveBaseline(t *testing.T) {
 // so the scan crawls the server as before rather than replaying it.
 func TestRemoteTreeCrawlsWhenTheBaselineHasNoModifiedTimes(t *testing.T) {
 	f, e, local := adoptFixture(t, 0, nil)
-	remote, err := e.RemoteTree(context.Background(), local, "", nil, nil)
+	listing, err := e.RemoteTree(context.Background(), local, "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if n := f.pfCount("a"); n != 1 {
 		t.Errorf("folder a was listed %d times, want 1 (full crawl)", n)
 	}
-	if r := remote["a/f2"]; r.LastModified.IsZero() {
+	if r := listing.Entries["a/f2"]; r.LastModified.IsZero() {
 		t.Error("a crawled file has no modified time")
 	}
 }
@@ -188,10 +195,11 @@ func TestRemoteTreeCrawlsForASelectiveSyncPair(t *testing.T) {
 func TestRemoteTreeKeepsIgnoredPathsOutOfARebuiltFolder(t *testing.T) {
 	_, e, local := adoptFixture(t, time.Now().UnixNano(), nil)
 	skip := func(rel string) bool { return path.Base(rel) == "node_modules" }
-	remote, err := e.RemoteTree(context.Background(), local, "", skip, nil)
+	listing, err := e.RemoteTree(context.Background(), local, "", skip, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	remote := listing.Entries
 	for _, rel := range []string{"a/node_modules", "a/node_modules/x"} {
 		if _, ok := remote[rel]; ok {
 			t.Errorf("%s came back from the baseline although it is ignored", rel)
@@ -199,5 +207,101 @@ func TestRemoteTreeKeepsIgnoredPathsOutOfARebuiltFolder(t *testing.T) {
 	}
 	if _, ok := remote["a/f2"]; !ok {
 		t.Error("a/f2 missing")
+	}
+}
+
+// lazyFixture is a server with a needed chain (a/b) and a big server-only
+// folder the local side has never seen.
+func lazyFixture(t *testing.T) (*fakeDAV, *Engine) {
+	t.Helper()
+	f := newFakeDAV(map[string]davNode{
+		"":           {isDir: true, etag: "e-root"},
+		"a":          {isDir: true, etag: "e-a"},
+		"a/b":        {isDir: true, etag: "e-b"},
+		"a/b/f3":     {etag: "e-f3", body: "three"},
+		"a/f2":       {etag: "e-f2", body: "two"},
+		"f1":         {etag: "e-f1", body: "one"},
+		"big":        {isDir: true, etag: "e-big"},
+		"big/deep":   {isDir: true, etag: "e-deep"},
+		"big/deep/x": {etag: "e-x", body: "x"},
+	})
+	srv := httptest.NewServer(f)
+	t.Cleanup(srv.Close)
+	e, _ := newHookEngine(t, srv.URL)
+	return f, e
+}
+
+// Deck #1003: setting up virtual files in an existing, empty folder listed
+// every folder on the server (46,076 PROPFINDs on a real account; it took the
+// server down twice) to classify zero local files. Only the root is listed
+// now; everything else is populated lazily when Windows first opens it.
+func TestRemoteTreeListsOnlyTheRootForAnEmptyFolder(t *testing.T) {
+	f, e := lazyFixture(t)
+	local := t.TempDir()
+	listing, err := e.RemoteTree(context.Background(), local, "", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{"a", "a/b", "big", "big/deep"} {
+		if n := f.pfCount(dir); n != 0 {
+			t.Errorf("%s listed %d times for an empty local folder, want 0", dir, n)
+		}
+	}
+	if _, ok := listing.Entries["big"]; !ok {
+		t.Error("the root's own children must still be reported")
+	}
+	// What was never listed is unknown — never absent.
+	if got := listing.Lookup("big/deep/x"); got != engine.Unknown {
+		t.Errorf("Lookup(big/deep/x) = %v, want unknown", got)
+	}
+	if got := listing.Lookup("nothere"); got != engine.Absent {
+		t.Errorf("Lookup(nothere) = %v, want absent (the root was listed)", got)
+	}
+}
+
+// A local file deep in the tree gets exactly its ancestor chain listed; the
+// server-only folders beside it are never touched.
+func TestRemoteTreeListsOnlyFoldersHoldingLocalFiles(t *testing.T) {
+	f, e := lazyFixture(t)
+	local := t.TempDir()
+	writeLocal(t, local, "A/b/f3", "three") // case differs from the server: still listed
+	writeLocal(t, local, "new/only-here.txt", "n")
+	if err := os.MkdirAll(filepath.Join(local, "emptydir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	listing, err := e.RemoteTree(context.Background(), local, "", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := f.pfCount("a"); n != 1 {
+		t.Errorf("a listed %d times, want 1", n)
+	}
+	if n := f.pfCount("a/b"); n != 1 {
+		t.Errorf("a/b listed %d times, want 1", n)
+	}
+	for _, dir := range []string{"big", "big/deep"} {
+		if n := f.pfCount(dir); n != 0 {
+			t.Errorf("server-only %s listed %d times, want 0", dir, n)
+		}
+	}
+	if got := listing.Lookup("a/b/f3"); got != engine.Present {
+		t.Errorf("Lookup(a/b/f3) = %v, want present", got)
+	}
+	if got := listing.Lookup("new/only-here.txt"); got != engine.Absent {
+		t.Errorf("Lookup(new/only-here.txt) = %v, want absent (no 'new' in the listed root)", got)
+	}
+}
+
+// Ignored local trees cost no listing either.
+func TestRemoteTreeDoesNotListForIgnoredLocalFiles(t *testing.T) {
+	f, e := lazyFixture(t)
+	local := t.TempDir()
+	writeLocal(t, local, "big/deep/x", "x")
+	skip := func(rel string) bool { return rel == "big" }
+	if _, err := e.RemoteTree(context.Background(), local, "", skip, nil); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.pfCount("big"); n != 0 {
+		t.Errorf("ignored big listed %d times, want 0", n)
 	}
 }

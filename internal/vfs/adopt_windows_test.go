@@ -261,3 +261,68 @@ func TestAdoptEscapedNames(t *testing.T) {
 		}
 	}
 }
+
+// Deck #1003. The adopt scan now lists only the server folders holding local
+// files, so a file can sit under a folder nobody listed. Its server state is
+// unknown, and unknown must never be read as "not on the server": such a file
+// is left out of the plan (counted as deferred), never uploaded as new and
+// never marked in sync.
+func TestAdoptScanViewDefersUnknownFiles(t *testing.T) {
+	dir := adoptTree(t,
+		"match.txt:10:0",          // root listed, present
+		"localonly.txt:5:0",       // root listed, absent
+		"newdir/x.txt:5:0",        // root listed, no "newdir": absent
+		"unlisted/y.txt:10:0",     // "unlisted" exists but was never listed
+		"unlisted/deep/z.txt:1:0", // beneath it: unknown too
+		"unlisted/stub.txt:10:0:stub",
+	)
+	listing := engine.RemoteListing{
+		Entries: map[string]engine.RemoteState{
+			"match.txt": remoteFile(10, 0),
+			"unlisted":  {Path: "unlisted", IsDir: true},
+		},
+		Listed: map[string]bool{"": true},
+	}
+	plan, err := ScanView(dir, listing, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := actionFor(t, plan, "match.txt"); got != ActionKeep {
+		t.Errorf("match.txt: got %v, want Keep", got)
+	}
+	if got := actionFor(t, plan, "localonly.txt"); got != ActionUpload {
+		t.Errorf("localonly.txt: got %v, want Upload", got)
+	}
+	if got := actionFor(t, plan, "newdir/x.txt"); got != ActionUpload {
+		t.Errorf("newdir/x.txt: got %v, want Upload (its folder is proven absent)", got)
+	}
+	// A dead stub holds nothing, whatever the server has: still replaced.
+	if got := actionFor(t, plan, "unlisted/stub.txt"); got != ActionReplace {
+		t.Errorf("unlisted/stub.txt: got %v, want Replace", got)
+	}
+	for _, e := range plan.Entries {
+		if e.Rel == "unlisted/y.txt" || e.Rel == "unlisted/deep/z.txt" {
+			t.Errorf("%s is under a folder never listed: it must be left out, got %v", e.Rel, e.Action)
+		}
+	}
+	if plan.Deferred != 2 {
+		t.Errorf("Deferred = %d, want 2", plan.Deferred)
+	}
+}
+
+// End-to-end encrypted folders are never listed: their local files are unknown.
+func TestAdoptScanViewDefersOpaqueFolders(t *testing.T) {
+	dir := adoptTree(t, "vault/secret.txt:5:0")
+	listing := engine.RemoteListing{
+		Entries: map[string]engine.RemoteState{},
+		Listed:  map[string]bool{"": true},
+		Opaque:  map[string]bool{"vault": true},
+	}
+	plan, err := ScanView(dir, listing, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Entries) != 0 || plan.Deferred != 1 {
+		t.Errorf("plan = %+v, deferred %d; want the encrypted folder's file deferred", plan.Entries, plan.Deferred)
+	}
+}

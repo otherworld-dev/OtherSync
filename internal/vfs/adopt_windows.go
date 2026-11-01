@@ -98,6 +98,12 @@ type Entry struct {
 // placeholders, and duplicating it would be a second thing to keep correct.
 type Plan struct {
 	Entries []Entry `json:"entries"`
+	// Deferred counts local files left out of the plan because the scan never
+	// listed the server folder they would be in (ScanView): their server state
+	// is unknown, and unknown must not be read as "not on the server". They
+	// stay plain local files, which reconcile lists and heals or uploads once
+	// the folder is mounted — as it already does for an unreadable subtree.
+	Deferred int `json:"-"`
 	// remoteName maps local rel -> server name (see Scan); kept so Apply can
 	// name conflicted copies correctly on the server too.
 	remoteName func(rel string) string
@@ -180,6 +186,22 @@ func ResumePlan(entries []Entry, remoteName func(rel string) string) Plan {
 // escaper's Encode); nil means names are identical. remote must be keyed by
 // LOCAL (decoded) names.
 func Scan(localDir string, remote map[string]engine.RemoteState, skip func(rel string) bool, remoteName func(rel string) string) (Plan, error) {
+	return ScanView(localDir, engine.RemoteListing{Entries: remote}, skip, remoteName)
+}
+
+// ScanView is Scan over a listing that may cover only part of the server
+// (Engine.RemoteTree lists only the folders holding local files, Deck #1003).
+// Each file is looked up three ways (engine.RemoteListing.Lookup):
+//
+//   - present: classified as before (Keep or Conflict);
+//   - absent, proven by a listed folder that lacks it: Upload;
+//   - unknown, under a folder never listed: left OUT of the plan and counted in
+//     Deferred. Never Upload (it may well be on the server) and never Keep
+//     (marking an unconfirmed file in sync hands it to reconcile's deleter).
+//
+// A dehydrated stub is Replace whatever the listing says: that test does not
+// depend on the server at all.
+func ScanView(localDir string, remote engine.RemoteListing, skip func(rel string) bool, remoteName func(rel string) string) (Plan, error) {
 	var plan Plan
 	err := filepath.WalkDir(localDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -220,9 +242,14 @@ func Scan(localDir string, remote map[string]engine.RemoteState, skip func(rel s
 		if remoteName != nil {
 			rr = remoteName(rel)
 		}
+		presence := remote.Lookup(rel)
+		if presence == engine.Unknown && !cfapi.IsDehydrated(fi) {
+			plan.Deferred++
+			return nil
+		}
 		plan.Entries = append(plan.Entries, Entry{
 			Rel:        rel,
-			Action:     classify(fi, remote[rel], hasRemote(remote, rel)),
+			Action:     classify(fi, remote.Entries[rel], presence == engine.Present),
 			Size:       fi.Size(),
 			MTimeNanos: fi.ModTime().UnixNano(),
 			RemoteRel:  rr,
@@ -234,11 +261,6 @@ func Scan(localDir string, remote map[string]engine.RemoteState, skip func(rel s
 	}
 	plan.remoteName = remoteName
 	return plan, nil
-}
-
-func hasRemote(remote map[string]engine.RemoteState, rel string) bool {
-	_, ok := remote[rel]
-	return ok
 }
 
 // classify decides one entry's action. Order matters: the dehydrated test comes

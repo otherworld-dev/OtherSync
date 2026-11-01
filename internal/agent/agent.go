@@ -1460,10 +1460,23 @@ func (e *Engine) GlobalIgnoreMatcher() func(rel string) bool {
 	return engine.NewIgnore(gi).Match
 }
 
-// RemoteTree walks the whole remote subtree under root and returns its current
-// state keyed by root-relative path. Used by the on-demand adopt scan, which
-// must classify every pre-existing local file against the server before it can
-// show the user a summary.
+// RemoteTree lists the remote subtree under root for the on-demand adopt scan,
+// which must classify every pre-existing local file against the server before
+// it can show the user a summary.
+//
+// With a localDir the listing is LOCAL-GUIDED (Deck #1003): only the server
+// folders holding at least one non-ignored local file somewhere beneath them
+// are listed (localFolderNeeds). The adopt plan never looks at a server-only
+// path — reconcile and the cloud filter's lazy population (FETCH_PLACEHOLDERS)
+// create those placeholders — so crawling them was pure cost: 46,076 PROPFINDs
+// on a real account for a set-up into an empty folder, enough to take the
+// server down twice. An empty folder now costs one PROPFIND, the root.
+// localDir == "" crawls everything, as before.
+//
+// The result says which folders were enumerated (RemoteListing.Listed). A path
+// under one that was not is UNKNOWN, never absent: RemoteListing.Lookup draws
+// that line, and the adopt scan leaves unknown files alone. End-to-end
+// encrypted folders are reported as Opaque for the same reason.
 //
 // Names are reported RAW — no escaper decoding — because the on-demand world
 // (placeholder identities, reconcile, write-back) works in raw server names,
@@ -1491,8 +1504,31 @@ func (e *Engine) GlobalIgnoreMatcher() func(rel string) bool {
 // cost no PROPFINDs. progress (optional) receives the running count of
 // directories listed — the heartbeat a UI needs to distinguish a long crawl
 // from a hang.
-func (e *Engine) RemoteTree(ctx context.Context, localDir, root string, skip func(string) bool, progress func(int)) (map[string]engine.RemoteState, error) {
+func (e *Engine) RemoteTree(ctx context.Context, localDir, root string, skip func(string) bool, progress func(int)) (engine.RemoteListing, error) {
 	opts := engine.ScanOpts{Skip: skip, Progress: progress}
+	var (
+		mu     sync.Mutex
+		listed map[string]bool // nil: full crawl, every folder listed
+		opaque = map[string]bool{}
+	)
+	opts.OnEncrypted = func(rel string) {
+		mu.Lock()
+		opaque[rel] = true
+		mu.Unlock()
+	}
+	if localDir != "" {
+		need, err := localFolderNeeds(localDir, skip)
+		if err != nil {
+			return engine.RemoteListing{}, err
+		}
+		listed = map[string]bool{}
+		opts.Descend = func(rel string) bool { return need[strings.ToLower(rel)] }
+		opts.OnListed = func(rel string) {
+			mu.Lock()
+			listed[rel] = true
+			mu.Unlock()
+		}
+	}
 	var cp *scanCheckpoint
 	if st, err := e.getStore(); err == nil {
 		cp = newScanCheckpoint(st, "vfs-adopt:"+strings.Trim(root, "/"))
@@ -1504,12 +1540,16 @@ func (e *Engine) RemoteTree(ctx context.Context, localDir, root string, skip fun
 		cp.logSummary()
 	}
 	if err != nil {
-		return remote, err
+		return engine.RemoteListing{Entries: remote}, err
 	}
 	if opts.Base != nil {
 		settleRebuilt(remote, opts.Base, skip)
 	}
-	return remote, nil
+	if listed != nil {
+		slog.Info("adopt scan: listed only the server folders holding local files",
+			"foldersListed", len(listed), "entries", len(remote))
+	}
+	return engine.RemoteListing{Entries: remote, Listed: listed, Opaque: opaque}, nil
 }
 
 // adoptBaseline returns the live baseline the adopt scan may prune with, or

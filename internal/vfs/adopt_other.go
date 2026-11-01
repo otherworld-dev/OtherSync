@@ -41,7 +41,8 @@ type UploadItem struct {
 
 // Plan is a scan's result.
 type Plan struct {
-	Entries []Entry `json:"entries"`
+	Entries  []Entry `json:"entries"`
+	Deferred int     `json:"-"`
 }
 
 // Counts totals the entries per action.
@@ -74,6 +75,11 @@ func ResumePlan(entries []Entry, _ func(rel string) string) Plan { return Plan{E
 
 // Scan returns an empty plan off Windows; callers are gated by cfapi.Supported.
 func Scan(string, map[string]engine.RemoteState, func(rel string) bool, func(rel string) string) (Plan, error) {
+	return Plan{}, nil
+}
+
+// ScanView returns an empty plan off Windows; callers are gated by cfapi.Supported.
+func ScanView(string, engine.RemoteListing, func(rel string) bool, func(rel string) string) (Plan, error) {
 	return Plan{}, nil
 }
 
