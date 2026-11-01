@@ -100,6 +100,7 @@ func (e *Engine) awaitClosed(p Pair, abs string) {
 			if ch == nil {
 				return // the pair's watcher is gone; its next start syncs everything
 			}
+			e.askedByName.Store(filepath.Clean(abs), struct{}{})
 			select {
 			case ch <- abs:
 				return
