@@ -302,6 +302,9 @@ func (e *Engine) nudgeAll(pk string, abs []string) int {
 	if ch == nil || done == nil {
 		return 0
 	}
+	for _, a := range abs {
+		e.askedByName.Store(filepath.Clean(a), struct{}{})
+	}
 	go func() {
 		for _, a := range abs {
 			select {

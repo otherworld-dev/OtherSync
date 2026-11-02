@@ -224,6 +224,11 @@ type Engine struct {
 	// server failed to list in one Depth: infinity request this run, so a
 	// retried first sync lists them folder by folder straight away (Deck #1004).
 	wholeListRefused sync.Map
+	// askedByName holds the absolute paths handed to a pair's watcher by name
+	// (Sync this first, a conflict choice, a file another program let go), so
+	// the quick pass that follows syncs them even when they look unchanged
+	// locally: those passes exist to fetch or settle the server's side (#1011).
+	askedByName sync.Map
 
 	onToast      func(title, message, link string) // desktop toasts (GUI sets this)
 	encMu        sync.Mutex
@@ -1376,6 +1381,7 @@ func (e *Engine) ResolveConflict(ctx context.Context, item ConflictItem, choice 
 // nudgePath asks the pair's watcher to sync abs as if it had seen it change.
 // Best effort: with no watcher, or its queue full, the next pass finds it.
 func (e *Engine) nudgePath(localDir, remoteRoot, abs string) {
+	e.askedByName.Store(filepath.Clean(abs), struct{}{})
 	e.watchMu.Lock()
 	ch := e.nudges[PairKey(localDir, remoteRoot)]
 	e.watchMu.Unlock()
@@ -4865,11 +4871,22 @@ func (e *Engine) SyncPaths(ctx context.Context, p Pair, relPaths []string) (tran
 		if ig.Match(rel) {
 			continue // not synced, so not asked about: its Stat can't fail the pass
 		}
-		_, tracked := base[rel]
+		b, tracked := base[rel]
 		if fi, serr := os.Stat(filepath.Join(p.LocalDir, filepath.FromSlash(rel))); serr == nil {
 			ls := engine.LocalState{Path: rel, IsDir: fi.IsDir(), MTime: fi.ModTime()}
 			if !fi.IsDir() {
 				ls.Size = fi.Size()
+			}
+			// A file exactly as last synced: nothing to send, so nothing to ask
+			// the server. The watcher reports every file a download writes, and
+			// a first sync's downloads were each asked about one at a time,
+			// hundreds of thousands of requests on a big account (Deck #1011).
+			// A change on the server is the push's or the poll's to find.
+			// Folders are still asked: the guards against reading an outage as
+			// a deleted folder (Deck #691) are checked on that answer.
+			if tracked && !ls.IsDir && unchangedSinceSynced(ls, b) && !e.takeAskedByName(p.LocalDir, rel) {
+				delete(base, rel) // nor planned, nor pruned as gone from both sides
+				continue
 			}
 			local[rel] = ls
 		}
@@ -4920,6 +4937,20 @@ func (e *Engine) SyncPaths(ctx context.Context, p Pair, relPaths []string) (tran
 	// nil base: this remote map is stat-built (not a subtree listing), so it must
 	// never stamp dir etags — only failure-dirtying applies inside applyPlan.
 	return e.applyPlan(ctx, st, p, actions, remote, nil, false) // scoped/delta — merge blocks, don't clear
+}
+
+// takeAskedByName reports whether rel was handed to the watcher by name since
+// its last quick pass, and forgets it: one ask, one pass.
+func (e *Engine) takeAskedByName(localDir, rel string) bool {
+	_, asked := e.askedByName.LoadAndDelete(filepath.Clean(filepath.Join(localDir, filepath.FromSlash(rel))))
+	return asked
+}
+
+// unchangedSinceSynced reports whether a local file is exactly as its baseline
+// row recorded it: still a file, with the size and modification time the diff
+// itself compares.
+func unchangedSinceSynced(l engine.LocalState, b engine.BaselineState) bool {
+	return !l.IsDir && !b.IsDir && !engine.LocalFileChanged(l, b)
 }
 
 // remoteStateFrom converts a single Stat result into a RemoteState. It exists so
