@@ -3,11 +3,13 @@ package transport
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/otherworld/nimbo/internal/pace"
@@ -27,11 +29,70 @@ import (
 
 // newListPacer is the default pacer for a client of server.
 func newListPacer(server string) *pace.Pacer {
-	label := server
+	return pace.New(pace.Config{Label: hostLabel(server)})
+}
+
+// hostLabel names server in log lines: its host, or the URL as given.
+func hostLabel(server string) string {
 	if u, err := url.Parse(server); err == nil && u.Host != "" {
-		label = u.Host
+		return u.Host
 	}
-	return pace.New(pace.Config{Label: label})
+	return server
+}
+
+// Download gating (Deck #1055). Each Client also owns one pace.Gate: every
+// sync download (transfer.Download, so the executor and a first sync's
+// clone) goes through PacedGetFrom, which holds one of the gate's slots until
+// the body is closed. A download keeps a PHP worker busy for as long as it
+// streams, so the gate bounds how many of the server's workers this account
+// can take, and narrows when the server is slow to start answering.
+//
+// What is not gated: on-demand hydration (agent.OpenRange/ReadFile), which an
+// app opening a file is waiting on, and the CLI's one-off get.
+
+// newDownloadGate is the default download gate for a client of server.
+func newDownloadGate(server string) *pace.Gate {
+	return pace.NewGate(pace.GateConfig{Label: hostLabel(server)})
+}
+
+// DownloadGate returns the client's download gate (nil when gating is disabled).
+func (c *Client) DownloadGate() *pace.Gate { return c.downGate.Load() }
+
+// SetDownloadGate replaces the download gate; nil disables gating. For tests
+// and tuning: downloads already holding a slot of the old gate give it back
+// to the old gate.
+func (c *Client) SetDownloadGate(g *pace.Gate) { c.downGate.Store(g) }
+
+// PacedGetFrom is GetFrom through the account's download gate: it waits for a
+// slot, reports how long the server took to start answering (and whether it
+// answered with an error) so the gate can adapt, and keeps the slot until the
+// returned body is closed.
+func (c *Client) PacedGetFrom(ctx context.Context, remotePath string, offset int64) (io.ReadCloser, http.Header, int, error) {
+	g := c.DownloadGate()
+	if err := g.Acquire(ctx); err != nil {
+		return nil, nil, 0, err
+	}
+	start := g.Now()
+	body, hdr, status, err := c.GetFrom(ctx, remotePath, offset)
+	g.Observe(g.Now().Sub(start), paceOutcome(err))
+	if err != nil {
+		g.Release()
+		return nil, nil, status, err
+	}
+	return &gatedBody{ReadCloser: body, release: g.Release}, hdr, status, nil
+}
+
+// gatedBody gives its gate slot back on the first Close.
+type gatedBody struct {
+	io.ReadCloser
+	once    sync.Once
+	release func()
+}
+
+func (b *gatedBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.once.Do(b.release)
+	return err
 }
 
 // ListPacer returns the client's listing pacer (nil when pacing is disabled).

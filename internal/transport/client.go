@@ -36,6 +36,8 @@ type Client struct {
 
 	// pacer paces folder listings for this account (pace.go, Deck #1001).
 	pacer atomic.Pointer[pace.Pacer]
+	// downGate caps this account's sync downloads at once (pace.go, Deck #1055).
+	downGate atomic.Pointer[pace.Gate]
 
 	// Per-method request tally since construction (see RequestCounts).
 	countMu sync.Mutex
@@ -101,6 +103,7 @@ func New(server, user, appPassword string) *Client {
 		},
 	}
 	c.pacer.Store(newListPacer(server))
+	c.downGate.Store(newDownloadGate(server))
 	return c
 }
 
