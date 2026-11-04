@@ -17,6 +17,7 @@ import (
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 
+	"github.com/otherworld/nimbo/internal/brand"
 	"github.com/otherworld/nimbo/internal/config"
 	"github.com/otherworld/nimbo/internal/notify"
 	"github.com/otherworld/nimbo/internal/psquote"
@@ -36,6 +37,35 @@ import (
 // VERIFIED against the real registry afterwards rather than assumed.
 
 const overlayIdentRoot = `SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\ShellIconOverlayIdentifiers`
+
+// legacyBadgeFolder is the Program Files folder every build used before the
+// OtherSync rename (#1005), whatever its brand. Registering from the new
+// folder retires it.
+const legacyBadgeFolder = "Nimbo"
+
+// badgeFolder is the Program Files folder the badge DLL lives in, named after
+// the brand so a white-label build gets its own. Once a brand has shipped,
+// keep its name stable: a change moves the folder on the next registration.
+func badgeFolder() string {
+	return pathSegment(brand.Current.Name, brand.Current.AppID)
+}
+
+// pathSegment makes name safe as one Windows folder name: characters Windows
+// refuses are dropped, as are the trailing dots and spaces it strips silently.
+// An empty result falls back to fallback.
+func pathSegment(name, fallback string) string {
+	s := strings.Map(func(r rune) rune {
+		if r < 0x20 || strings.ContainsRune(`<>:"/\|?*`, r) {
+			return -1
+		}
+		return r
+	}, name)
+	s = strings.TrimRight(strings.TrimSpace(s), ". ")
+	if s == "" {
+		return fallback
+	}
+	return s
+}
 
 // badgePrioritySpaces mirrors kPrioritySpaces in overlays.cpp — the current
 // generation of the registration. Older installs registered at 18 spaces,
@@ -139,11 +169,13 @@ func (a *App) enableBadges() string {
 	// disk for a non-admin to tamper with between write and elevated read. It
 	// verifies the staged DLL (hash pin + Authenticode) before trusting it,
 	// then mirrors Nimbo.iss's InstallBadges (side-dir upgrade when Explorer holds the
-	// old DLL open).
+	// old DLL open, then retiring the pre-rename Program Files\Nimbo\Shell).
 	body := `$ErrorActionPreference = 'Stop'
 $stage = ` + psSingleQuote(stage) + `
 $want = ` + psSingleQuote(wantHash) + `
 $result = ` + psSingleQuote(result) + `
+$folder = ` + psSingleQuote(badgeFolder()) + `
+$legacyFolder = ` + psSingleQuote(legacyBadgeFolder) + `
 $src = Join-Path $stage 'NCOverlays.dll'
 try {
   $h = (Get-FileHash -Algorithm SHA256 -LiteralPath $src).Hash.ToUpper()
@@ -151,7 +183,11 @@ try {
   $sig = Get-AuthenticodeSignature -LiteralPath $src
   if ($sig.Status -ne 'Valid') { throw "staged component is not validly signed ($($sig.Status))" }
   if ($sig.SignerCertificate.Subject -notlike '*Otherworld Dev*') { throw 'staged component has an unexpected signer' }
-  $shellDir = Join-Path $env:ProgramFiles 'Nimbo\Shell'
+  Add-Type -Namespace NimboBadges -Name Native -MemberDefinition @'
+[DllImport("shell32.dll")] public static extern int SHLoadNonloadedIconOverlayIdentifiers();
+[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern bool MoveFileEx(string existing, string replacement, int flags);
+'@
+  $shellDir = Join-Path (Join-Path $env:ProgramFiles $folder) 'Shell'
   New-Item -ItemType Directory -Force -Path $shellDir | Out-Null
   $target = Join-Path $shellDir 'NCOverlays.dll'
   try {
@@ -166,9 +202,36 @@ try {
   New-Item -ItemType Directory -Force -Path $icoDir | Out-Null
   Copy-Item -Force (Join-Path $stage 'icons\*.ico') $icoDir
   & "$env:SystemRoot\System32\regsvr32.exe" /s $target
-  Add-Type -Namespace NimboBadges -Name Shell -MemberDefinition '[DllImport("shell32.dll")] public static extern int SHLoadNonloadedIconOverlayIdentifiers();'
-  [NimboBadges.Shell]::SHLoadNonloadedIconOverlayIdentifiers() | Out-Null
+  [NimboBadges.Native]::SHLoadNonloadedIconOverlayIdentifiers() | Out-Null
   'ok' | Out-File -LiteralPath $result -Encoding ascii
+  # Retire the pre-rename copy, but only once all four badge classes point
+  # into the new folder: until then the old DLL is still the one in use.
+  # Explorer usually has the old DLL loaded, so whatever won't delete now is
+  # deleted at the next restart (files first, then folders deepest first).
+  # Best-effort: the badges already work from the new folder.
+  try {
+    $legacyRoot = Join-Path $env:ProgramFiles $legacyFolder
+    $legacyShell = Join-Path $legacyRoot 'Shell'
+    $moved = $true
+    foreach ($n in 1..4) {
+      $key = 'Registry::HKEY_CLASSES_ROOT\CLSID\{4F8B2C10-1A3D-4E55-9B21-0C7E5A9D000' + $n + '}\InprocServer32'
+      $k = Get-Item -LiteralPath $key -ErrorAction SilentlyContinue
+      $dll = if ($k) { $k.GetValue('') } else { $null }
+      if (-not $dll -or -not $dll.StartsWith($shellDir + '\', [StringComparison]::OrdinalIgnoreCase)) { $moved = $false }
+    }
+    if ($moved -and $folder -ne $legacyFolder -and (Test-Path -LiteralPath $legacyShell)) {
+      foreach ($f in @(Get-ChildItem -LiteralPath $legacyShell -Recurse -Force -File)) {
+        try { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop }
+        catch { [NimboBadges.Native]::MoveFileEx($f.FullName, $null, 4) | Out-Null }
+      }
+      $dirs = @(Get-ChildItem -LiteralPath $legacyShell -Recurse -Force -Directory | Sort-Object { $_.FullName.Length } -Descending) + @(Get-Item -LiteralPath $legacyShell)
+      if (@(Get-ChildItem -LiteralPath $legacyRoot -Force | Where-Object { $_.Name -ne 'Shell' }).Count -eq 0) { $dirs += Get-Item -LiteralPath $legacyRoot }
+      foreach ($d in $dirs) {
+        try { Remove-Item -LiteralPath $d.FullName -Recurse -Force -ErrorAction Stop }
+        catch { [NimboBadges.Native]::MoveFileEx($d.FullName, $null, 4) | Out-Null }
+      }
+    }
+  } catch {}
 } catch {
   ('error: ' + $_) | Out-File -LiteralPath $result -Encoding ascii
 }
