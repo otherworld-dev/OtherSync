@@ -186,6 +186,10 @@ func (c Config) withDefaults() Config {
 	return c
 }
 
+func (c Config) judgeParams() judgeParams {
+	return judgeParams{SlowFactor: c.SlowFactor, SlowMargin: c.SlowMargin, SlowCeiling: c.SlowCeiling, HealthyFactor: c.HealthyFactor}
+}
+
 // Pacer is safe for concurrent use. A nil *Pacer paces nothing.
 type Pacer struct {
 	cfg Config
@@ -195,9 +199,7 @@ type Pacer struct {
 	tokens float64   // may go negative: outstanding reservations
 	last   time.Time // tokens are accounted up to here; in the future during a hold
 
-	window   []time.Duration // recent successful latencies (ring, unordered)
-	next     int
-	baseline time.Duration // 0 until minSamples have been seen
+	judge latencyJudge
 
 	lastCut    time.Time
 	lastChange time.Time
@@ -321,36 +323,12 @@ func (p *Pacer) Observe(latency time.Duration, o Outcome) {
 }
 
 func (p *Pacer) observeLatency(now time.Time, lat time.Duration) {
-	if len(p.window) < latencyWindow {
-		p.window = append(p.window, lat)
-	} else {
-		p.window[p.next] = lat
-		p.next = (p.next + 1) % latencyWindow
-	}
-	if len(p.window) < minSamples {
-		return
-	}
-	m := median(p.window)
+	v, m := p.judge.add(lat, p.cfg.judgeParams())
 	switch {
-	case p.baseline == 0 || m < p.baseline:
-		p.baseline = m
-	default:
-		p.baseline += time.Duration(float64(m-p.baseline) * baselineCreep)
-	}
-	slowAt := time.Duration(float64(p.baseline) * p.cfg.SlowFactor)
-	if alt := p.baseline + p.cfg.SlowMargin; alt > slowAt {
-		slowAt = alt
-	}
-	if slowAt > p.cfg.SlowCeiling {
-		slowAt = p.cfg.SlowCeiling
-	}
-	healthy := (m <= time.Duration(float64(p.baseline)*p.cfg.HealthyFactor) || m <= p.baseline+p.cfg.SlowMargin/2) &&
-		m <= p.cfg.SlowCeiling
-	switch {
-	case m > slowAt:
+	case v == slow:
 		p.cut(now, latencyCut, fmt.Sprintf("the server is answering slowly (typically %s, usually %s)",
-			m.Round(time.Millisecond), p.baseline.Round(time.Millisecond)))
-	case healthy && p.rate < p.cfg.Rate && now.Sub(p.lastChange) >= p.cfg.RecoverEvery:
+			m.Round(time.Millisecond), p.judge.baseline.Round(time.Millisecond)))
+	case v == healthy && p.rate < p.cfg.Rate && now.Sub(p.lastChange) >= p.cfg.RecoverEvery:
 		p.rate += p.cfg.RecoverStep
 		if p.rate > p.cfg.Rate {
 			p.rate = p.cfg.Rate
@@ -373,8 +351,7 @@ func (p *Pacer) cut(now time.Time, factor float64, why string) {
 	p.lastCut = now
 	p.lastChange = now
 	// Judge the next window on responses at the new rate only.
-	p.window = p.window[:0]
-	p.next = 0
+	p.judge.reset()
 	if nr == p.rate {
 		return // already at the floor
 	}

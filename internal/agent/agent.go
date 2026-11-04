@@ -3573,15 +3573,20 @@ func (e *Engine) SyncOnce(ctx context.Context, p Pair) (stats transfer.Stats, er
 }
 
 // cloneEnumConcurrency bounds concurrent recursive PROPFINDs while the tree is
-// being counted; cloneDownloadConcurrency x cloneFileWorkers is how many files
-// download at once (32: 64 gave no gain, the path caps ~5 MB/s, not the
-// client). Enumeration runs ahead of (and independently of) downloading so the
-// progress total is known in minutes instead of being chained to the slow
-// downloads.
+// being counted; cloneDownloaders is how many workers take files off the
+// download queue. Enumeration runs ahead of (and independently of)
+// downloading so the progress total is known in minutes instead of being
+// chained to the slow downloads.
+//
+// How many files actually download at once is the account's download gate
+// (transport.PacedGetFrom, 6 at most, fewer when the server is slow; Deck
+// #1055). This was 32 workers with nothing above them, and on 3 Nov 2026 a
+// laptop's first sync held every PHP worker a 16-worker server had, so the
+// web UI and every other client stalled for minutes. Eight workers keep the
+// gate's slots busy while a finished file is hashed and recorded.
 const (
-	cloneEnumConcurrency     = 6
-	cloneDownloadConcurrency = 4
-	cloneFileWorkers         = 8
+	cloneEnumConcurrency = 6
+	cloneDownloaders     = 8
 )
 
 // cloneRemote performs a resumable initial sync. It enumerates the tree in bulk
@@ -3854,7 +3859,7 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 		sched.queueDownloads(downloadsOf(actions), sub)
 	}
 
-	listers, downloaders := cloneEnumConcurrency, cloneDownloadConcurrency*cloneFileWorkers
+	listers, downloaders := cloneEnumConcurrency, cloneDownloaders
 	if e.cloneTestPools[0] > 0 {
 		listers, downloaders = e.cloneTestPools[0], e.cloneTestPools[1]
 	}

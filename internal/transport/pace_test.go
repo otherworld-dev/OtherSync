@@ -129,3 +129,68 @@ func TestSetListPacerNilDisables(t *testing.T) {
 		t.Fatal("SetListPacer(nil) should disable pacing")
 	}
 }
+
+// Every client gets its own download gate, open to the default 6 at once.
+func TestClientHasDefaultDownloadGate(t *testing.T) {
+	a, b := New("https://a.example", "u", "p"), New("https://b.example", "u", "p")
+	if a.DownloadGate() == nil || a.DownloadGate() == b.DownloadGate() {
+		t.Fatal("each client needs a download gate of its own")
+	}
+	if got := a.DownloadGate().Limit(); got != pace.DefaultGateMax {
+		t.Fatalf("default gate limit %d, want %d", got, pace.DefaultGateMax)
+	}
+}
+
+// A download holds its slot until the body is closed, not just until the
+// headers arrive: the server's worker is busy for as long as it streams.
+func TestPacedGetFromHoldsSlotUntilClose(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("hello"))
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "alice", "pw")
+	g := pace.NewGate(pace.GateConfig{Max: 1, Log: func(string, ...any) {}})
+	c.SetDownloadGate(g)
+
+	body, _, status, err := c.PacedGetFrom(context.Background(), "f.txt", 0)
+	if err != nil || status != http.StatusOK {
+		t.Fatalf("PacedGetFrom: status %d, err %v", status, err)
+	}
+	if g.InFlight() != 1 {
+		t.Fatalf("in flight %d while the body is open, want 1", g.InFlight())
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, _, _, err := c.PacedGetFrom(ctx, "g.txt", 0); err == nil {
+		t.Fatal("a second download started while the only slot was held")
+	}
+	_ = body.Close()
+	_ = body.Close() // a second Close must not free a slot it doesn't hold
+	if g.InFlight() != 0 {
+		t.Fatalf("in flight %d after Close, want 0", g.InFlight())
+	}
+}
+
+// A failed download gives its slot straight back, and a 5xx narrows the gate.
+func TestPacedGetFromErrorReleasesAndNarrows(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotImplemented) // 501: not retried, not strain
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "alice", "pw")
+	g := pace.NewGate(pace.GateConfig{Max: 6, Log: func(string, ...any) {}})
+	c.SetDownloadGate(g)
+	if _, _, _, err := c.PacedGetFrom(context.Background(), "f.txt", 0); err == nil {
+		t.Fatal("a 501 download succeeded")
+	}
+	if g.InFlight() != 0 {
+		t.Fatalf("in flight %d after a failed download, want 0", g.InFlight())
+	}
+	if g.Limit() != 6 {
+		t.Fatalf("a 501 narrowed the gate to %d; it is not strain", g.Limit())
+	}
+	g.Observe(0, paceOutcome(fmt.Errorf("x: %w", ErrRetriesExhausted)))
+	if g.Limit() != 3 {
+		t.Fatalf("an exhausted retry left the gate at %d, want 3", g.Limit())
+	}
+}
