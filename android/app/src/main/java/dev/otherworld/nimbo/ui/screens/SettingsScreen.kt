@@ -1,7 +1,7 @@
 /*
  * SettingsScreen.kt — the app's own preferences, as opposed to the account's.
  *
- * Appearance, plus the way in to supporting Nimbo. Everything else Nimbo does is decided by the sync
+ * Appearance, the way in to supporting Nimbo, and signing out. Everything else Nimbo does is decided by the sync
  * engine or by the server, and inventing settings for their own sake gives
  * people more ways to break something than to fix it.
  */
@@ -35,6 +35,13 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import dev.otherworld.nimbo.core.NcAccount
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,8 +68,12 @@ fun SettingsScreen(
     onIconChange: (AppIcon) -> Unit,
     onAccentChange: (AccentChoice) -> Unit,
     onOpenSupport: () -> Unit,
+    account: NcAccount?,
+    onSignOut: () -> Unit,
     onBack: () -> Unit,
 ) {
+    var confirmSignOut by remember { mutableStateOf(false) }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = { NimboTopBar(title = "Settings", onBack = onBack) },
@@ -121,8 +132,52 @@ fun SettingsScreen(
             } else {
                 LockedPerkRow("Alternative app icons", SupporterTier.BACKER, onOpenSupport)
             }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            SectionHeader("Account")
+            if (account != null) {
+                Text(
+                    accountLabel(account),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
+            TextButton(
+                onClick = { confirmSignOut = true },
+                modifier = Modifier.padding(horizontal = 8.dp),
+            ) {
+                Text("Sign out", color = MaterialTheme.colorScheme.error)
+            }
+            Spacer(Modifier.height(16.dp))
         }
     }
+
+    if (confirmSignOut) {
+        AlertDialog(
+            onDismissRequest = { confirmSignOut = false },
+            title = { Text("Sign out?") },
+            text = {
+                Text(
+                    "OtherSync stops syncing on this phone until you sign in again. " +
+                        "Your files stay on the server.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { confirmSignOut = false; onSignOut() }) {
+                    Text("Sign out")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmSignOut = false }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+/** "login@host", the way the account is named everywhere else. */
+private fun accountLabel(account: NcAccount): String {
+    val host = account.serverURL.substringAfter("://").trimEnd('/')
+    return if (account.loginName.isNotEmpty()) "${account.loginName}@$host" else host
 }
 
 /**

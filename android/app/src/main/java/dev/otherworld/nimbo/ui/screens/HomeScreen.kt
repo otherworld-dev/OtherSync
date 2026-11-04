@@ -104,7 +104,6 @@ fun HomeScreen(
     onOpenDiagnostics: () -> Unit,
     onOpenNotifications: () -> Unit,
     notificationCount: Int,
-    onSignOut: () -> Unit,
     onResumeFrozen: (String) -> Unit,
     onRemoveFolderWithLocal: ((String, Boolean) -> Unit)? = null,
     showSupportNudge: Boolean = false,
@@ -134,20 +133,13 @@ fun HomeScreen(
                         ) {
                             DropdownMenuItem(
                                 text = { Text("Nextcloud apps") },
+                                leadingIcon = { Icon(Icons.Filled.Apps, contentDescription = null) },
                                 onClick = { overflowOpen = false; onOpenApps() },
                             )
-                            SettingsMenuItem(
-                                onClick = { overflowOpen = false; onOpenSettings() },
-                                withIcon = false,
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Diagnostics") },
-                                onClick = { overflowOpen = false; onOpenDiagnostics() },
-                            )
                             HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text("Sign out") },
-                                onClick = { overflowOpen = false; onSignOut() },
+                            CommonMenuItems(
+                                onOpenSettings = { overflowOpen = false; onOpenSettings() },
+                                onOpenDiagnostics = { overflowOpen = false; onOpenDiagnostics() },
                             )
                         }
                     }

@@ -50,6 +50,7 @@ fun AppsScreen(
     onOpenNotifications: () -> Unit,
     notificationCount: Int,
     onOpenSettings: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
     onBack: (() -> Unit)? = null,
 ) {
     var overflowOpen by remember { mutableStateOf(false) }
@@ -67,7 +68,10 @@ fun AppsScreen(
                         expanded = overflowOpen,
                         onDismissRequest = { overflowOpen = false },
                     ) {
-                        SettingsMenuItem(onClick = { overflowOpen = false; onOpenSettings() })
+                        CommonMenuItems(
+                            onOpenSettings = { overflowOpen = false; onOpenSettings() },
+                            onOpenDiagnostics = { overflowOpen = false; onOpenDiagnostics() },
+                        )
                     }
                 }
             }
