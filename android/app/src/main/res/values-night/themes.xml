@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The dark half of values/themes.xml, so a phone in dark mode doesn't flash a
+    white window before the first Compose frame. NimboTheme still decides the
+    real look, including a dark/light preference that differs from the phone's.
+-->
+<resources>
+
+    <style name="Theme.Nimbo" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:colorPrimary">@color/brand_accent</item>
+        <item name="android:colorAccent">@color/brand_accent</item>
+        <item name="android:statusBarColor">@color/brand_accent</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+    </style>
+
+</resources>
