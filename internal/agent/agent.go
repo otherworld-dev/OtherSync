@@ -3612,10 +3612,17 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 	// download to refetch.
 	priorStatus, _ := st.CloneStatus(pk)
 	_ = st.SetCloneStatus(pk, "started")
-	// Entering (or resuming) a clone: any checkpoint rows are from a pre-clone
-	// life of this pair — there is no baseline worth chaining against, so drop
-	// them rather than let stale rescue rows linger for the age-out.
-	e.clearCheckpoint(st, pk)
+	// Entering a clone: any checkpoint rows are from a pre-clone life of this
+	// pair — there is no baseline worth chaining against, so drop them rather
+	// than let stale rescue rows linger for the age-out. A resumed clone keeps
+	// them: they are the folders its last try listed, which this one reuses
+	// while their etags still match (Deck #1111).
+	if priorStatus != "started" {
+		e.clearCheckpoint(st, pk)
+	}
+	cp := newScanCheckpoint(st, pk)
+	e.markCheckpointDirty(pk) // the first clean pass after the clone clears what it saved
+	defer cp.logSummary()
 	if err := os.MkdirAll(p.LocalDir, 0o755); err != nil {
 		return transfer.Stats{}, err
 	}
@@ -3763,6 +3770,7 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 	}
 	rootRemote := make(map[string]engine.RemoteState)
 	var topDirs []string
+	topRows := make(map[string]transport.Entry) // a top-level folder's own row, for its listing
 	rootOnMount, rootKnown := listingSelf(rootEntries, root)
 	for _, en := range rootEntries {
 		full := strings.Trim(en.Path, "/")
@@ -3773,6 +3781,7 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 		rootRemote[rel] = cloneRemoteState(rel, en, rootOnMount, rootKnown)
 		if en.IsDir {
 			topDirs = append(topDirs, full)
+			topRows[full] = en
 		}
 	}
 	rootActions, rootFiles, rootBytes := plan(rootRemote) // filters rootRemote in place
@@ -3803,15 +3812,78 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 	cloneMkdirs(ctx, newExec(rootRemote), rootActions, note)
 	sched.queueDownloads(downloadsOf(rootActions), rootRemote)
 
-	// list makes one recursive listing and queues what it finds. A folder
-	// carved out of it is left to its own listing, except the carved folder's
-	// own row: that is planned here, where its parent is known (so its share
-	// flag is right), while its contents are the carve's. A carved folder that
-	// is no longer on the server has nothing to download.
+	// list makes one recursive listing and queues what it finds, a batch at a
+	// time: the whole subtree when the server lists it in one go, else each
+	// folder as it is listed, so its files download while the rest is still
+	// being listed (Deck #1111). A folder carved out of it is left to its own
+	// listing, except the carved folder's own row: that is planned here, where
+	// its parent is known (so its share flag is right), while its contents are
+	// the carve's. A carved folder that is no longer on the server has nothing
+	// to download. The carves are fixed when the listing starts; one chosen
+	// later still comes first, as its downloads are ranked as they queue.
 	excluded := func(full string) bool { return ig.Match(relOf(full, true)) }
 	list := func(l *cloneListing) {
-		entries, perr := e.listCloneFolder(ctx, pk, l.full, excluded)
-		if perr != nil {
+		carved := sched.seal(l)
+		var self *transport.Entry
+		if row, ok := topRows[l.full]; ok && !l.carved {
+			self = &row
+		}
+		// The folder-by-folder listing does not go into a carved folder
+		// either: its own listing lists it.
+		skip := func(full string) bool {
+			if excluded(full) {
+				return true
+			}
+			rel := relOf(full, true)
+			for _, c := range carved {
+				if rel == c {
+					return true
+				}
+			}
+			return false
+		}
+		// Every ancestor of an entry comes in an earlier batch of the same
+		// listing (or this one), except the listed folder's own parent: the
+		// pair root, read above, for a top-level folder; for a carved one its
+		// own row is planned elsewhere.
+		onMount := make(map[string]bool)
+		visit := func(entries []transport.Entry) {
+			dirs := 0
+			for _, en := range entries {
+				if en.IsDir {
+					onMount[strings.Trim(en.Path, "/")] = en.OnMount()
+					dirs++
+				}
+			}
+			e.scanTickCountFor(pk, "server", int(listed.Add(int64(dirs))), l.rel)
+			sub := make(map[string]engine.RemoteState, len(entries))
+		entry:
+			for _, en := range entries {
+				full := strings.Trim(en.Path, "/")
+				rel := relOf(full, en.IsDir)
+				if rel == "" || (l.carved && rel == l.rel) {
+					continue
+				}
+				for _, c := range carved {
+					if rel == c {
+						sched.sawRow(c)
+					}
+					if strings.HasPrefix(rel, c+"/") {
+						continue entry
+					}
+				}
+				parentOnMount, parentKnown := rootOnMount, rootKnown
+				if parent := dirParent(full); parent != root {
+					parentOnMount, parentKnown = onMount[parent]
+				}
+				sub[rel] = cloneRemoteState(rel, en, parentOnMount, parentKnown)
+			}
+			actions, dlF, dlB := plan(sub)
+			cloneMkdirs(ctx, newExec(sub), actions, note)
+			e.progAddTotal(dlF, dlB)
+			sched.queueDownloads(downloadsOf(actions), sub)
+		}
+		if perr := e.listCloneFolder(ctx, st, cp, pk, l.full, self, skip, visit); perr != nil {
 			notFound := errors.Is(perr, transport.ErrNotFound)
 			sched.failedListing(l, notFound)
 			// A carved folder's 404 is only a failure if the listing holding
@@ -3820,43 +3892,7 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 			if !(l.carved && notFound) {
 				note(transfer.Stats{}, perr)
 			}
-			return
 		}
-		e.scanTickCountFor(pk, "server", int(listed.Add(1)), l.rel)
-		carved := sched.seal(l)
-		sub := make(map[string]engine.RemoteState, len(entries))
-		// Every ancestor of an entry is in the same recursive listing, except
-		// the listed folder's own parent: the pair root, read above, for a
-		// top-level folder; for a carved one its own row is planned elsewhere.
-		onMount := make(map[string]bool, len(entries))
-		for _, en := range entries {
-			onMount[strings.Trim(en.Path, "/")] = en.OnMount()
-		}
-	entry:
-		for _, en := range entries {
-			full := strings.Trim(en.Path, "/")
-			rel := relOf(full, en.IsDir)
-			if rel == "" || (l.carved && rel == l.rel) {
-				continue
-			}
-			for _, c := range carved {
-				if rel == c {
-					sched.sawRow(c)
-				}
-				if strings.HasPrefix(rel, c+"/") {
-					continue entry
-				}
-			}
-			parentOnMount, parentKnown := rootOnMount, rootKnown
-			if parent := dirParent(full); parent != root {
-				parentOnMount, parentKnown = onMount[parent]
-			}
-			sub[rel] = cloneRemoteState(rel, en, parentOnMount, parentKnown)
-		}
-		actions, dlF, dlB := plan(sub)
-		cloneMkdirs(ctx, newExec(sub), actions, note)
-		e.progAddTotal(dlF, dlB)
-		sched.queueDownloads(downloadsOf(actions), sub)
 	}
 
 	listers, downloaders := cloneEnumConcurrency, cloneDownloaders
@@ -3952,62 +3988,173 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 // that already held files), so every retry of it keeps the same rules.
 const cloneTakeoverMeta = "clone-takeover"
 
-// listCloneFolder lists a folder and everything under it for the first sync:
-// in one Depth: infinity request when the server will, else folder by folder.
-// On a big folder the server builds the whole answer in memory and can run out
-// doing so; the desktop's first sync got a 500 for Projects and To Sort every
-// few minutes for a day, each one a PHP worker at its memory limit, until the
-// server's host killed PHP (Deck #1004). A refusal is remembered for the run,
-// so a retry does not ask again.
-func (e *Engine) listCloneFolder(ctx context.Context, pk, full string, excluded func(full string) bool) ([]transport.Entry, error) {
+// cloneWholeRefusedMeta, followed by a server path, marks a folder the server
+// would not list in one Depth: infinity request. Kept with the pair, so a
+// first sync tried again after a restart does not ask again either.
+const cloneWholeRefusedMeta = "clone-whole-refused:"
+
+// listCloneFolder lists a folder and everything under it for the first sync,
+// handing what it finds to visit: in one Depth: infinity request when the
+// server will, else folder by folder (walkFolders). On a big folder the server
+// builds the whole answer in memory and can run out doing so; the desktop's
+// first sync got a 500 for Projects and To Sort every few minutes for a day,
+// each one a PHP worker at its memory limit, until the server's host killed
+// PHP (Deck #1004). A refusal is remembered with the pair, so a retry does not
+// ask again, even after a restart. self is the folder's own row from its
+// parent's listing (nil when not known).
+func (e *Engine) listCloneFolder(ctx context.Context, st *state.Store, cp *scanCheckpoint, pk, full string, self *transport.Entry, excluded func(full string) bool, visit func([]transport.Entry)) error {
 	key := pk + "\x00" + full
-	if _, refused := e.wholeListRefused.Load(key); !refused {
+	_, refused := e.wholeListRefused.Load(key)
+	if !refused {
+		if v, _ := st.PairMeta(pk, cloneWholeRefusedMeta+full); v != "" {
+			refused = true
+			e.wholeListRefused.Store(key, struct{}{})
+		}
+	}
+	if !refused {
 		entries, err := e.client.PacedPropFindRecursive(ctx, full)
-		if err == nil || errors.Is(err, transport.ErrNotFound) || ctx.Err() != nil {
-			return entries, err
+		if err == nil {
+			visit(entries)
+			return nil
+		}
+		if errors.Is(err, transport.ErrNotFound) || ctx.Err() != nil {
+			return err
 		}
 		slog.Warn("the server would not list a folder in one go; listing it one folder at a time", "folder", full, "err", err)
 		e.wholeListRefused.Store(key, struct{}{})
+		_ = st.SetPairMeta(pk, cloneWholeRefusedMeta+full, "1")
 	}
-	return walkFolders(ctx, e.client, full, excluded)
+	return walkFolders(ctx, e.client, cp, firstWalkItem(full, self), self, excluded, visit)
 }
 
-// walkFolders lists dir and everything under it with one Depth: 1 PROPFIND
-// per folder, one at a time and through the account's pacer (Deck #1001), giving the same entries a Depth: infinity
-// listing would: dir's own row first, then every descendant once. It does not
-// go into a folder excluded says to leave out (that folder's own row is kept;
-// the caller filters it). A folder gone by the time its turn comes is skipped.
-func walkFolders(ctx context.Context, c *transport.Client, dir string, excluded func(full string) bool) ([]transport.Entry, error) {
-	var out []transport.Entry
-	queue := []string{dir}
+// walkItem is one folder waiting its turn in walkFolders.
+type walkItem struct {
+	dir     string
+	etag    string // as its parent's listing gave it; "" = unknown, so never from the checkpoint
+	noCache bool   // a mount, or under one: its etag says nothing of what is inside
+}
+
+// firstWalkItem is the folder a walk starts from, with its own row's etag
+// when its parent's listing gave one.
+func firstWalkItem(dir string, self *transport.Entry) walkItem {
+	it := walkItem{dir: dir}
+	if self != nil {
+		it.etag = self.ETag
+		it.noCache = strings.Contains(self.Permissions, "M")
+	}
+	return it
+}
+
+// walkFolders lists a folder and everything under it with one Depth: 1
+// PROPFIND per folder, one at a time and through the account's pacer (Deck
+// #1001), giving the same entries a Depth: infinity listing would: the folder's
+// own row first, then every descendant once. Each folder's entries go to visit
+// as soon as it is listed, so its files can download while the walk goes on.
+// It does not go into a folder excluded says to leave out (that folder's own
+// row is kept; the caller filters it). A folder gone by the time its turn
+// comes is skipped.
+//
+// A big walk takes hours (tens of thousands of folders at the listing pace),
+// so it has to survive what happens in that time (Deck #1111). Each folder's
+// listing is saved to the scan checkpoint under the etag its parent gave it,
+// and a walk tried again (after a failure or a restart) reads a folder from
+// there while that etag still matches; any change below a folder changes its
+// etag, so only the changed branch is listed again. And a listing that fails
+// for longer than the transport's retries, as a laptop's wifi dropping for a
+// moment does, is tried again a little later instead of failing the walk.
+func walkFolders(ctx context.Context, c *transport.Client, cp *scanCheckpoint, first walkItem, self *transport.Entry, excluded func(full string) bool, visit func([]transport.Entry)) error {
+	queue := []walkItem{first}
 	for len(queue) > 0 {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return err
 		}
-		cur := queue[0]
+		it := queue[0]
 		queue = queue[1:]
-		entries, err := c.PacedPropFind(ctx, cur, 1) // paced: a big fallback walk is the 31 Oct crawl otherwise (#1001)
+		children, own, err := listWalkFolder(ctx, c, cp, it)
 		if err != nil {
-			if cur != dir && errors.Is(err, transport.ErrNotFound) {
+			if it.dir != first.dir && errors.Is(err, transport.ErrNotFound) {
 				continue
 			}
-			return nil, err
+			return err
 		}
-		for _, en := range entries {
-			full := strings.Trim(en.Path, "/")
-			if full == cur {
-				if cur == dir {
-					out = append(out, en) // its own row, once, as an infinity listing gives it
-				}
-				continue
+		batch := children
+		if it.dir == first.dir {
+			// Its own row, once, as an infinity listing gives it: fresh when
+			// the folder was listed, else the one its parent's listing gave.
+			if own == nil {
+				own = self
 			}
-			out = append(out, en)
+			if own != nil {
+				batch = append([]transport.Entry{*own}, children...)
+			}
+		}
+		visit(batch)
+		for _, en := range children {
+			full := strings.Trim(en.Path, "/")
 			if en.IsDir && !excluded(full) {
-				queue = append(queue, full)
+				queue = append(queue, walkItem{
+					dir:     full,
+					etag:    en.ETag,
+					noCache: it.noCache || strings.Contains(en.Permissions, "M"),
+				})
 			}
 		}
 	}
-	return out, nil
+	return nil
+}
+
+// listWalkFolder lists one folder of a walk: its children, and its own row
+// when it came from the server rather than the checkpoint.
+func listWalkFolder(ctx context.Context, c *transport.Client, cp *scanCheckpoint, it walkItem) (children []transport.Entry, own *transport.Entry, err error) {
+	useCP := cp != nil && it.etag != "" && !it.noCache
+	if useCP {
+		if cached, ok := cp.Load(it.dir, it.etag); ok {
+			return cached, nil, nil
+		}
+	}
+	entries, err := listPatiently(ctx, c, it.dir)
+	if err != nil {
+		return nil, nil, err
+	}
+	for i := range entries {
+		if strings.Trim(entries[i].Path, "/") == it.dir {
+			own = &entries[i]
+			continue
+		}
+		children = append(children, entries[i])
+	}
+	if useCP {
+		cp.Save(it.dir, it.etag, children)
+	}
+	return children, own, nil
+}
+
+// walkRetryDelays are the waits before each new try of a walk's folder
+// listing that failed on every attempt the transport made: the network or the
+// server was down for its whole retry budget, a few seconds. On 4 Nov 2026 a
+// laptop lost the server's name for longer than that, hours into a first
+// sync's listing, and the sync failed (Deck #1111). These wait out about 14
+// minutes in all before giving up. A var so tests can shorten it.
+var walkRetryDelays = []time.Duration{15 * time.Second, 30 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute, 5 * time.Minute}
+
+// listPatiently is a paced Depth: 1 listing, tried again after walkRetryDelays
+// while it keeps failing on every attempt. Any other error (a refusal, a
+// missing folder) is returned at once.
+func listPatiently(ctx context.Context, c *transport.Client, dir string) ([]transport.Entry, error) {
+	for i := 0; ; i++ {
+		entries, err := c.PacedPropFind(ctx, dir, 1)
+		if err == nil || !errors.Is(err, transport.ErrRetriesExhausted) || i >= len(walkRetryDelays) || ctx.Err() != nil {
+			return entries, err
+		}
+		slog.Warn("could not list a server folder; trying it again shortly", "folder", dir, "in", walkRetryDelays[i], "err", err)
+		t := time.NewTimer(walkRetryDelays[i])
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return nil, ctx.Err()
+		case <-t.C:
+		}
+	}
 }
 
 // localRootVanished reports whether a pair's local root is missing, unreadable, or
