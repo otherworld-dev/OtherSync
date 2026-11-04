@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Dark-mode overrides for values/colors.xml. -->
 <resources>
+    <!-- OtherSync teal (BrandTeal in Theme.kt), the accent on dark surfaces. -->
+    <color name="brand_accent">#FF22D3C4</color>
     <!-- NimboTheme's dark background (ui/theme/Theme.kt). -->
-    <color name="nimbo_window_background">#FF1C1B1F</color>
+    <color name="window_background">#FF191C1B</color>
 </resources>

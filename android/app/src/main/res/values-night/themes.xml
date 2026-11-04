@@ -7,10 +7,10 @@
 <resources>
 
     <style name="Theme.Nimbo" parent="@android:style/Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@color/nimbo_window_background</item>
-        <item name="android:colorPrimary">@color/nimbo_indigo</item>
-        <item name="android:colorAccent">@color/nimbo_indigo</item>
-        <item name="android:statusBarColor">@color/nimbo_indigo</item>
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:colorPrimary">@color/brand_accent</item>
+        <item name="android:colorAccent">@color/brand_accent</item>
+        <item name="android:statusBarColor">@color/brand_accent</item>
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
     </style>
 
