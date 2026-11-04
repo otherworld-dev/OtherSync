@@ -192,6 +192,8 @@ fun NimboNav(vm: NimboViewModel, supporterVm: SupporterViewModel) {
                             onOpenNotifications = { vm.openNotifications() },
                             notificationCount = state.notificationCount,
                             onOpenTrash = { vm.openTrash() },
+                            onOpenSettings = { vm.openSettings() },
+                            onOpenDiagnostics = { vm.navigate(Route.DIAGNOSTICS) },
                         )
 
                         Tab.SYNC -> HomeScreen(
@@ -215,7 +217,6 @@ fun NimboNav(vm: NimboViewModel, supporterVm: SupporterViewModel) {
                             onOpenDiagnostics = { vm.navigate(Route.DIAGNOSTICS) },
                             onOpenNotifications = { vm.openNotifications() },
                             notificationCount = state.notificationCount,
-                            onSignOut = { vm.signOut() },
                             onResumeFrozen = { dir -> vm.resumeFrozen(dir) },
                             showSupportNudge = shouldShowNudge(
                                 now = System.currentTimeMillis(),
@@ -240,6 +241,8 @@ fun NimboNav(vm: NimboViewModel, supporterVm: SupporterViewModel) {
                             onBack = null, // a tab, not a pushed screen
                             onOpenNotifications = { vm.openNotifications() },
                             notificationCount = state.notificationCount,
+                            onOpenSettings = { vm.openSettings() },
+                            onOpenDiagnostics = { vm.navigate(Route.DIAGNOSTICS) },
                         )
                     }
                 }
@@ -361,6 +364,8 @@ fun NimboNav(vm: NimboViewModel, supporterVm: SupporterViewModel) {
                     onIconChange = { icon -> supporterVm.setIcon(icon) },
                     onAccentChange = { a -> supporterVm.setAccent(a) },
                     onOpenSupport = { vm.openSupport(Route.SETTINGS) },
+                    account = state.account,
+                    onSignOut = { vm.signOut() },
                     onBack = { vm.navigate(Route.HOME) },
                 )
 
