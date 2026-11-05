@@ -778,14 +778,29 @@ func (a *App) refreshLicence() {
 	if info.Allows(license.TierBusiness) {
 		pol = policy.Load() // admin policy is a business-tier capability
 	}
+	pol = withBrandServer(pol, brand.Current)
 	a.licMu.Lock()
 	a.lic = info
 	a.pol = pol
 	a.licMu.Unlock()
 }
 
+// withBrandServer adds a partner build's baked-in server preset and lock to
+// the policy (Deck d1010). It needs no licence: the partner paid for the build.
+// An admin policy's own server address wins over the brand's; a lock from
+// either side holds.
+func withBrandServer(p policy.Policy, b brand.Brand) policy.Policy {
+	if p.ServerURL == "" {
+		p.ServerURL = b.ServerURL
+	}
+	if b.LockServer && p.ServerURL != "" {
+		p.LockServer = true
+	}
+	return p
+}
+
 // policyNow returns the effective admin policy (empty/permissive unless a
-// business licence is active).
+// business licence is active), plus a partner build's server lock.
 func (a *App) policyNow() policy.Policy {
 	a.licMu.Lock()
 	defer a.licMu.Unlock()

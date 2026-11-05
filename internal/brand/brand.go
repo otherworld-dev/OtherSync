@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 )
 
@@ -31,6 +32,12 @@ type Brand struct {
 	APIBase      string `json:"apiBase"`      // GitHub releases API root for the update check
 	AccentHex    string `json:"accentHex"`    // brand accent (tray badge, UI accent fallback)
 	AppID        string `json:"appId"`        // MSIX Application Id (AUMID) + self-update task name + the config/data dir name (slugged)
+	// ServerURL presets the Nextcloud server the sign-in window offers, and
+	// LockServer pins sign-in to it, the same lock the HKLM admin policy gives
+	// but baked into a partner build, so it needs no licence key or registry
+	// step on a client's PC (Deck d1010). Both are empty in the stock build.
+	ServerURL  string `json:"serverUrl,omitempty"`
+	LockServer bool   `json:"lockServer,omitempty"`
 }
 
 // Current is the active brand for this build.
@@ -66,14 +73,37 @@ func (b Brand) Validate() error {
 	return nil
 }
 
+// ValidateServer checks the server preset: an https address with a host, and
+// a lock only together with one. build-partner.ps1 refuses a brand that fails
+// it, so a broken one should never ship.
+func (b Brand) ValidateServer() error {
+	if b.ServerURL == "" {
+		if b.LockServer {
+			return fmt.Errorf("brand.json: lockServer is set but serverUrl is empty")
+		}
+		return nil
+	}
+	u, err := url.Parse(b.ServerURL)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return fmt.Errorf("brand.json: serverUrl %q must be an https:// address", b.ServerURL)
+	}
+	return nil
+}
+
 // sanitize drops a former name that fails Validate, so such a build runs as a
 // brand that was never renamed: its own Start-menu folder and labels, no
-// rename notice.
+// rename notice. A server preset that fails ValidateServer is dropped with its
+// lock: a lock to an unusable address would leave nobody able to sign in.
 func sanitize(b Brand) Brand {
 	if err := b.Validate(); err != nil {
 		slog.Error("ignoring formerName", "err", err)
 		b.FormerName = ""
 	}
+	if err := b.ValidateServer(); err != nil {
+		slog.Error("ignoring serverUrl and lockServer", "err", err)
+		b.ServerURL, b.LockServer = "", false
+	}
+	b.ServerURL = strings.TrimRight(b.ServerURL, "/")
 	return b
 }
 
