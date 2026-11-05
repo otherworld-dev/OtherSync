@@ -26,6 +26,38 @@ func TestRecorder_RecentAndErrorResolve(t *testing.T) {
 	}
 }
 
+// A success for a path takes its earlier failed rows out of the history, so a
+// file that uploaded after a few offline retries doesn't still look like it is
+// failing (Deck d992). Other paths' failures, and other folders', stay.
+func TestRecorder_SuccessDropsEarlierFailedRows(t *testing.T) {
+	r := New()
+	for i := 0; i < 4; i++ {
+		r.Add(Event{Local: "/l", Path: "retry.txt", Kind: "upload", Err: "offline"})
+	}
+	r.Add(Event{Local: "/l", Path: "other.txt", Kind: "upload", Err: "offline"})
+	r.Add(Event{Local: "/m", Path: "retry.txt", Kind: "upload", Err: "offline"})
+	r.Add(Event{Local: "/l", Path: "retry.txt", Kind: "upload"})
+
+	recent := r.Recent()
+	if len(recent) != 3 {
+		t.Fatalf("Recent len = %d, want 3: %+v", len(recent), recent)
+	}
+	if recent[0].Path != "retry.txt" || recent[0].Local != "/l" || !recent[0].OK() {
+		t.Errorf("Recent[0] = %+v, want the successful retry.txt upload", recent[0])
+	}
+	for _, e := range recent[1:] {
+		if e.OK() {
+			t.Errorf("unexpected success row %+v", e)
+		}
+		if e.Local == "/l" && e.Path == "retry.txt" {
+			t.Errorf("failed row for the resolved path left behind: %+v", e)
+		}
+	}
+	if errs := r.Errors(); len(errs) != 2 {
+		t.Errorf("Errors = %+v, want the two unresolved ones", errs)
+	}
+}
+
 func TestRecorder_Subscribe(t *testing.T) {
 	r := New()
 	ch := r.Subscribe()

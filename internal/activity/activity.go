@@ -38,17 +38,31 @@ func New() *Recorder {
 }
 
 // Add records an event. A success clears any prior unresolved error for the same
-// path; a failure records one. Subscribers are notified (non-blocking).
+// path, and takes that path's earlier failed rows out of the history, so a file
+// that went through after a few retries doesn't still look like it is failing
+// (Deck d992). A failure records an error. Subscribers are notified
+// (non-blocking).
 func (r *Recorder) Add(e Event) {
 	if e.Time.IsZero() {
 		e.Time = time.Now()
 	}
+	key := e.Local + "|" + e.Path
 	r.mu.Lock()
+	if e.OK() {
+		if _, failed := r.errs[key]; failed {
+			kept := r.events[:0]
+			for _, old := range r.events {
+				if old.OK() || old.Local != e.Local || old.Path != e.Path {
+					kept = append(kept, old)
+				}
+			}
+			r.events = kept
+		}
+	}
 	r.events = append(r.events, e)
 	if len(r.events) > maxEvents {
 		r.events = r.events[len(r.events)-maxEvents:]
 	}
-	key := e.Local + "|" + e.Path
 	if e.OK() {
 		delete(r.errs, key) // the path now synced cleanly — error resolved
 	} else {
