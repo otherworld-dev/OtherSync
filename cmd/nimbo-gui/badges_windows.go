@@ -201,13 +201,17 @@ try {
   $icoDir = Join-Path (Split-Path $target -Parent) 'icons'
   New-Item -ItemType Directory -Force -Path $icoDir | Out-Null
   Copy-Item -Force (Join-Path $stage 'icons\*.ico') $icoDir
-  & "$env:SystemRoot\System32\regsvr32.exe" /s $target
+  # regsvr32 is a GUI program, so & would return before it has registered
+  # anything; wait for it, or the steps below see the old registration.
+  $reg = Start-Process -FilePath "$env:SystemRoot\System32\regsvr32.exe" -ArgumentList @('/s', ('"' + $target + '"')) -Wait -PassThru -WindowStyle Hidden
+  if ($reg.ExitCode -ne 0) { throw "regsvr32 failed ($($reg.ExitCode))" }
   [NimboBadges.Native]::SHLoadNonloadedIconOverlayIdentifiers() | Out-Null
   'ok' | Out-File -LiteralPath $result -Encoding ascii
   # Retire the pre-rename copy, but only once all four badge classes point
   # into the new folder: until then the old DLL is still the one in use.
   # Explorer usually has the old DLL loaded, so whatever won't delete now is
   # deleted at the next restart (files first, then folders deepest first).
+  # MoveFileEx needs a real NULL: PowerShell turns $null into "" for a string.
   # Best-effort: the badges already work from the new folder.
   try {
     $legacyRoot = Join-Path $env:ProgramFiles $legacyFolder
@@ -222,13 +226,13 @@ try {
     if ($moved -and $folder -ne $legacyFolder -and (Test-Path -LiteralPath $legacyShell)) {
       foreach ($f in @(Get-ChildItem -LiteralPath $legacyShell -Recurse -Force -File)) {
         try { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop }
-        catch { [NimboBadges.Native]::MoveFileEx($f.FullName, $null, 4) | Out-Null }
+        catch { [NimboBadges.Native]::MoveFileEx($f.FullName, [NullString]::Value, 4) | Out-Null }
       }
       $dirs = @(Get-ChildItem -LiteralPath $legacyShell -Recurse -Force -Directory | Sort-Object { $_.FullName.Length } -Descending) + @(Get-Item -LiteralPath $legacyShell)
       if (@(Get-ChildItem -LiteralPath $legacyRoot -Force | Where-Object { $_.Name -ne 'Shell' }).Count -eq 0) { $dirs += Get-Item -LiteralPath $legacyRoot }
       foreach ($d in $dirs) {
         try { Remove-Item -LiteralPath $d.FullName -Recurse -Force -ErrorAction Stop }
-        catch { [NimboBadges.Native]::MoveFileEx($d.FullName, $null, 4) | Out-Null }
+        catch { [NimboBadges.Native]::MoveFileEx($d.FullName, [NullString]::Value, 4) | Out-Null }
       }
     }
   } catch {}
