@@ -3,6 +3,7 @@ package account
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -37,7 +38,7 @@ func TestInitLoginDefaultsToHTTPS(t *testing.T) {
 	defer srv.Close()
 	host := strings.TrimPrefix(srv.URL, "http://")
 	_, err := InitLogin(context.Background(), host)
-	if err == nil || !strings.Contains(err.Error(), "HTTPS client") {
+	if err == nil || !strings.Contains(errors.Unwrap(err).Error(), "HTTPS client") {
 		t.Fatalf("want https-vs-http transport error proving scheme default, got: %v", err)
 	}
 }

@@ -165,9 +165,10 @@ func main() {
 	toastActivationHandler = svc.dispatchToastActivation
 	registerToastActivator()
 
-	// Register the Explorer "Share with Nimbo" context-menu entry, pointing
-	// at the current executable (best-effort; ignored where unsupported).
-	if exe, err := os.Executable(); err == nil {
+	// Register the classic Explorer context-menu entries, pointing at the
+	// current executable (best-effort; ignored where unsupported), unless the
+	// user turned them off in Settings.
+	if exe, err := os.Executable(); err == nil && !shellMenuTurnedOff() {
 		if rerr := shellmenu.Register(exe); rerr != nil {
 			slog.Warn("could not register Explorer share menu", "err", rerr)
 		}

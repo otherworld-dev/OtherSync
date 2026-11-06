@@ -128,6 +128,10 @@ type Settings struct {
 	// the account, so it changes with the shown account even when the folder
 	// does not, and an entry written before it carried the account has none.
 	SidebarName string `json:"sidebarName,omitempty"`
+	// ShellMenuOff: the user turned the classic Explorer right-click submenu
+	// off in Settings. Every launch registers the menu unless this is set, so
+	// without it the choice only lasted until the next start (Deck d951).
+	ShellMenuOff bool `json:"shellMenuOff,omitempty"`
 }
 
 // AppWindowSize is a remembered app-window size in logical pixels.

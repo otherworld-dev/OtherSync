@@ -61,7 +61,7 @@
     busy = true;
     msg = "Connecting…";
     const url = await App.BeginLogin(server);
-    if (url.startsWith("error:")) { msg = url; busy = false; return; }
+    if (url.startsWith("error:")) { msg = "Sign-in failed: " + url.slice(6).trim(); busy = false; return; }
     // The window minimises itself meanwhile (it covered the browser's Grant
     // access button) and comes back for setup or an error.
     msg = "Finish signing in in the browser that just opened. This window steps aside until you have.";

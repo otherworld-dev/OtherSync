@@ -94,6 +94,13 @@ Filename: "{win}\explorer.exe"; Parameters: "shell:AppsFolder\{#Pfn}!{#PkgAppId}
 [Code]
 function SHLoadNonloadedIconOverlayIdentifiers: Integer;
   external 'SHLoadNonloadedIconOverlayIdentifiers@shell32.dll stdcall delayload';
+// NewName is a pointer so 0 can pass NULL: with MOVEFILE_DELAY_UNTIL_REBOOT
+// that deletes the file or empty folder at the next restart.
+function MoveFileEx(ExistingName: String; NewName: Cardinal; Flags: Cardinal): Boolean;
+  external 'MoveFileExW@kernel32.dll stdcall';
+
+const
+  MOVEFILE_DELAY_UNTIL_REBOOT = 4;
 
 // PSQuote renders S as a PowerShell single-quoted literal (no expansion,
 // embedded quotes doubled), so a path can't break out of the inline command.
@@ -156,16 +163,112 @@ end;
 // DLL loaded into explorer.exe would be a planting vector) and registers it
 // classically. Best-effort by design: badges are cosmetic and must never fail
 // the install. The Status column works without any of this.
+//
+// The folder was Program Files\Nimbo\Shell before the OtherSync rename (#1005).
+// It is retired once the badges are registered from the new one; the in-app
+// "Enable badges" step (cmd/nimbo-gui/badges_windows.go) does the same.
+
+// BadgesRegisteredUnder reports whether all four badge classes now load their
+// DLL from somewhere under Dir.
+function BadgesRegisteredUnder(const Dir: String): Boolean;
+var
+  i: Integer;
+  Dll: String;
+begin
+  Result := True;
+  for i := 1 to 4 do
+    if not RegQueryStringValue(HKEY_CLASSES_ROOT,
+        'CLSID\{4F8B2C10-1A3D-4E55-9B21-0C7E5A9D000' + IntToStr(i) + '}\InprocServer32', '', Dll)
+      or (CompareText(Copy(Dll, 1, Length(Dir) + 1), Dir + '\') <> 0) then
+      Result := False;
+end;
+
+// DeleteNowOrAtRestart removes a file or folder, or, when it is in use (Explorer
+// holding the old DLL), schedules it for deletion at the next restart.
+procedure DeleteNowOrAtRestart(const Path: String; IsDir: Boolean);
+var
+  Gone: Boolean;
+begin
+  if IsDir then
+    Gone := RemoveDir(Path)
+  else
+    Gone := DeleteFile(Path);
+  if not Gone then
+    if MoveFileEx(Path, 0, MOVEFILE_DELAY_UNTIL_REBOOT) then
+      Log('Will delete at restart: ' + Path)
+    else
+      Log('Could not delete: ' + Path);
+end;
+
+// DeleteTreeNowOrAtRestart clears Dir bottom-up, so anything scheduled for a
+// restart is queued before the folder holding it: Windows runs them in order.
+procedure DeleteTreeNowOrAtRestart(const Dir: String);
+var
+  FindRec: TFindRec;
+begin
+  if FindFirst(Dir + '\*', FindRec) then
+  begin
+    try
+      repeat
+        if (FindRec.Name <> '.') and (FindRec.Name <> '..') then
+        begin
+          if (FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0 then
+            DeleteTreeNowOrAtRestart(Dir + '\' + FindRec.Name)
+          else
+            DeleteNowOrAtRestart(Dir + '\' + FindRec.Name, False);
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+  DeleteNowOrAtRestart(Dir, True);
+end;
+
+// RetireOldBadgeFolder removes Program Files\Nimbo\Shell once nothing is
+// registered from it, and Program Files\Nimbo too if nothing else is in it.
+procedure RetireOldBadgeFolder(const NewShellDir: String);
+var
+  OldRoot: String;
+  FindRec: TFindRec;
+  Other: Boolean;
+begin
+  OldRoot := ExpandConstant('{commonpf}\Nimbo');
+  if not DirExists(OldRoot + '\Shell') then Exit;
+  if not BadgesRegisteredUnder(NewShellDir) then
+  begin
+    Log('Old badge folder kept: the badges are not all registered from ' + NewShellDir);
+    Exit;
+  end;
+  DeleteTreeNowOrAtRestart(OldRoot + '\Shell');
+
+  Other := False;
+  if FindFirst(OldRoot + '\*', FindRec) then
+  begin
+    try
+      repeat
+        if (FindRec.Name <> '.') and (FindRec.Name <> '..') and (CompareText(FindRec.Name, 'Shell') <> 0) then
+          Other := True;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+  if not Other then
+    DeleteNowOrAtRestart(OldRoot, True);
+end;
+
 procedure InstallBadges;
 var
-  Src, ShellDir, Target, IconSrc, IconDir: String;
+  Src, ShellRoot, ShellDir, Target, IconSrc, IconDir: String;
   Same: Boolean;
   FindRec: TFindRec;
 begin
   Src := ExpandConstant('{tmp}\NCOverlays.dll');
   if not FileExists(Src) then Exit;
   try
-    ShellDir := ExpandConstant('{commonpf}\Nimbo\Shell');
+    ShellRoot := ExpandConstant('{commonpf}\OtherSync\Shell');
+    ShellDir := ShellRoot;
     ForceDirectories(ShellDir);
     Target := ShellDir + '\NCOverlays.dll';
 
@@ -210,6 +313,8 @@ begin
     // Only works while free overlay slots remain (15 machine-wide); if it does
     // nothing, the next Explorer start loads them.
     SHLoadNonloadedIconOverlayIdentifiers();
+
+    RetireOldBadgeFolder(ShellRoot);
   except
     Log('Explorer badges not registered: ' + GetExceptionMessage);
   end;

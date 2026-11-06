@@ -1539,7 +1539,8 @@ SHA-256: {localTest.fingerprint}</pre>
         <p class="empty">Startup options aren't available on this platform.</p>
       {/if}
       {#if shellSupported}
-        <label class="check"><input type="checkbox" checked={shellOn} onchange={toggleShell} /> Add “Share with {brandName}” to the Explorer right-click menu</label>
+        <label class="check"><input type="checkbox" checked={shellOn} onchange={toggleShell} /> Add the {brandName} entries to the classic Explorer right-click menu</label>
+        <p class="fhint">Windows 11's new right-click menu shows {brandName} either way; this covers the classic one (Show more options).</p>
       {/if}
       {#if navSupported}
         <label class="check"><input type="checkbox" checked={navOn} disabled={navBusy} onchange={toggleNav} /> Show {brandName} in the Explorer sidebar (points at your default sync location)</label>
