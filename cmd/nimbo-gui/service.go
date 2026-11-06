@@ -4580,16 +4580,38 @@ func (a *App) ShellMenuSupported() bool { return shellmenu.Supported() }
 // ShellMenuEnabled reports whether the Explorer "Share" entry is registered.
 func (a *App) ShellMenuEnabled() bool { return shellmenu.Enabled() }
 
-// SetShellMenu registers or removes the Explorer "Share with Nimbo" entry.
+// SetShellMenu registers or removes the classic Explorer menu entries, and
+// remembers the choice so the next launch doesn't put them back.
 func (a *App) SetShellMenu(on bool) string {
-	if !on {
-		return errString(shellmenu.Unregister())
+	var err error
+	if on {
+		var exe string
+		if exe, err = os.Executable(); err == nil {
+			err = shellmenu.Register(exe)
+		}
+	} else {
+		err = shellmenu.Unregister()
 	}
-	exe, err := os.Executable()
 	if err != nil {
 		return err.Error()
 	}
-	return errString(shellmenu.Register(exe))
+	if d, derr := config.Resolve(); derr == nil {
+		if serr := d.UpdateSettings(func(s *config.Settings) { s.ShellMenuOff = !on }); serr != nil {
+			slog.Warn("could not save the Explorer menu setting", "err", serr)
+		}
+	}
+	return ""
+}
+
+// shellMenuTurnedOff reports whether the user turned the classic Explorer
+// menu off in Settings.
+func shellMenuTurnedOff() bool {
+	d, err := config.Resolve()
+	if err != nil {
+		return false
+	}
+	s, _ := d.LoadSettings()
+	return s.ShellMenuOff
 }
 
 func errString(err error) string {
