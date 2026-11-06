@@ -104,6 +104,38 @@ func TestValidateFormerName(t *testing.T) {
 	}
 }
 
+func TestValidateServer(t *testing.T) {
+	for _, c := range []struct {
+		b  Brand
+		ok bool
+	}{
+		{Brand{}, true},
+		{Brand{ServerURL: "https://cloud.acme.example"}, true},
+		{Brand{ServerURL: "https://acme.example/nextcloud", LockServer: true}, true},
+		{Brand{LockServer: true}, false},
+		{Brand{ServerURL: "http://cloud.acme.example", LockServer: true}, false},
+		{Brand{ServerURL: "cloud.acme.example"}, false},
+	} {
+		if err := c.b.ValidateServer(); (err == nil) != c.ok {
+			t.Errorf("%+v: ValidateServer() = %v, want ok=%v", c.b, err, c.ok)
+		}
+	}
+}
+
+// A lock to an unusable address is dropped with its address, not kept; a good
+// preset loses only a trailing slash.
+func TestSanitizeServer(t *testing.T) {
+	if b := sanitize(Brand{Name: "Acme", ServerURL: "http://x.example", LockServer: true}); b.ServerURL != "" || b.LockServer {
+		t.Errorf("bad preset kept: %+v", b)
+	}
+	if b := sanitize(Brand{Name: "Acme", ServerURL: "https://x.example/", LockServer: true}); b.ServerURL != "https://x.example" || !b.LockServer {
+		t.Errorf("good preset changed: %+v", b)
+	}
+	if s := stockBrand(); s.ServerURL != "" || s.LockServer {
+		t.Errorf("stock brand must not preset a server: %+v", s)
+	}
+}
+
 // A brand that fails the check runs as never renamed rather than wearing the
 // stock build's former name.
 func TestSanitizeDropsBadFormerName(t *testing.T) {

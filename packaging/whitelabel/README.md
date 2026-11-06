@@ -45,6 +45,8 @@ user-visible identity value:
 | `feedUrl`, `apiBase` | the in-app update check + "Update now" target — point these at the partner's OWN release feed |
 | `accentHex` | brand accent — **drives the app icon** (tile + cloud, auto-derived), plus the tray badge and UI accent fallback |
 | `appId` | the MSIX Application Id used in the AUMID and the self-update task name — must match the manifest's `<Application Id="…">` |
+| `serverUrl` | optional: the partner's Nextcloud (`https://…`, a subfolder is fine). The sign-in window fills it in |
+| `lockServer` | optional, needs `serverUrl`: sign-in always goes to `serverUrl` and the address can't be changed. The same lock as the `ServerURL`/`LockServer` admin policy, but baked in, so it needs no business licence or registry step on each PC (for a partner's clients). If an admin policy on the PC also sets a server, the policy's address wins. `build-partner.ps1` refuses a lock without an https `serverUrl` |
 | `formerName` | **Stock only: leave it out for partners.** The stock build's name before the rename to OtherSync ("Nimbo"). It keeps what existing stock installs made under the old name (the "Nimbo Apps" Start-menu folder, the `%LOCALAPPDATA%\Nimbo` sidebar icon folder, "Nimbo - <user>" sidebar labels) and triggers the one-time "Nimbo is now OtherSync" notice. A partner brand carrying it would share those with stock and tell its users "Nimbo is now <partner>". `build-partner.ps1` refuses a partner `brand.json` that sets it, unless `partner.json` has `"renamedFrom"` equal to it (a partner that really renamed its own product) |
 
 ## Steps to build a branded copy
