@@ -1269,7 +1269,8 @@ export function SetPauseSchedule(enabled, fromMin, toMin) {
 }
 
 /**
- * SetShellMenu registers or removes the Explorer "Share with Nimbo" entry.
+ * SetShellMenu registers or removes the classic Explorer menu entries, and
+ * remembers the choice so the next launch doesn't put them back.
  * @param {boolean} on
  * @returns {$CancellablePromise<string>}
  */
