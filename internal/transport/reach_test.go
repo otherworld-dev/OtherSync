@@ -23,12 +23,14 @@ func TestReachDebounce(t *testing.T) {
 		t.Errorf("one quick failure: down=%v wait=%v", down, wait)
 	}
 
-	// A second with no answer between: down once the first is reachGrace old.
+	// A second with no answer between: down once the first came back
+	// reachGrace ago.
+	first := t0.Add(100 * time.Millisecond)
 	r.note(t0.Add(time.Second), false, t0.Add(time.Second))
-	if down, wait := r.state(t0.Add(4 * time.Second)); down || wait != reachGrace-4*time.Second {
+	if down, wait := r.state(first.Add(4 * time.Second)); down || wait != reachGrace-4*time.Second {
 		t.Errorf("two failures 4 s in: down=%v wait=%v", down, wait)
 	}
-	if down, _ := r.state(t0.Add(reachGrace)); !down {
+	if down, _ := r.state(first.Add(reachGrace)); !down {
 		t.Error("two failures reachGrace in: not down")
 	}
 
@@ -38,11 +40,31 @@ func TestReachDebounce(t *testing.T) {
 		t.Errorf("after an answer: down=%v wait=%v", down, wait)
 	}
 
-	// A dial nobody answered for reachGrace is enough on its own.
+	// A dial nobody answered for 21 s counts twice, from when it failed.
 	t1 := t0.Add(time.Hour)
-	r.note(t1, false, t1.Add(21*time.Second))
-	if down, _ := r.state(t1.Add(21 * time.Second)); !down {
-		t.Error("one 21 s failure: not down")
+	failed := t1.Add(21 * time.Second)
+	r.note(t1, false, failed)
+	if down, wait := r.state(failed); down || wait != reachGrace {
+		t.Errorf("one 21 s failure just now: down=%v wait=%v", down, wait)
+	}
+	if down, _ := r.state(failed.Add(reachGrace)); !down {
+		t.Error("one 21 s failure reachGrace ago: not down")
+	}
+}
+
+// The case the VM found: an upload that has been running for a minute fails
+// once and its retry goes straight through. The line never flashes.
+func TestReachLongUploadResetThenRetrySucceeds(t *testing.T) {
+	t0 := time.Now()
+	var r reach
+	failed := t0.Add(65 * time.Second)
+	r.note(t0, false, failed)
+	if down, _ := r.state(failed); down {
+		t.Error("down the moment a long upload failed")
+	}
+	r.note(failed.Add(500*time.Millisecond), true, failed.Add(600*time.Millisecond))
+	if down, wait := r.state(failed.Add(time.Minute)); down || wait != 0 {
+		t.Errorf("after the retry answered: down=%v wait=%v", down, wait)
 	}
 }
 

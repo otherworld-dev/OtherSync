@@ -14,12 +14,19 @@ import (
 // some 90 s of "Uploading X" before it said so. Every request passes through
 // the router, so it notes there whether the server answered.
 //
-// One quick failure is a blip until shown otherwise: the callers retry within
-// a second or two, and an answer clears it. The server counts as unreachable
-// once there have been two failures in a row with no answer between them, or
-// one that took reachGrace to fail (a dial nobody answered), and the first of
-// them was sent at least reachGrace ago, so a server restarting in a few
-// seconds never shows.
+// One failure is a blip until shown otherwise: the callers retry within a
+// second or two, and an answer clears it. The server counts as unreachable
+// once there have been two failures in a row with no answer between them and
+// the first of them came reachGrace ago, so nothing shows unless the server
+// has been failing for that long. A request that went unanswered for
+// reachGrace before it failed (a dial nobody answered, an upload whose
+// connection went quiet) counts as two: it has already waited that long.
+//
+// The clock starts when the first failure comes back, not when its request
+// was sent. On the VM a 30 MB upload that had been running for a minute
+// failed 20 s after the network went; counted from when it was sent, a single
+// reset of a long upload would have flashed the line even when the retry
+// went straight through.
 
 // reachGrace is how long the server must have gone unanswered before it
 // counts as unreachable.
@@ -27,9 +34,8 @@ var reachGrace = 10 * time.Second
 
 type reach struct {
 	mu       sync.Mutex
-	failures int       // connection failures in a row, no answer between them
-	since    time.Time // when the first of them was sent
-	slow     bool      // one of them took reachGrace or longer to fail
+	failures int       // connection failures in a row, no answer between them (a slow one counts twice)
+	since    time.Time // when the first of them came back
 	onChange func()
 }
 
@@ -40,13 +46,15 @@ func (r *reach) note(sent time.Time, answered bool, now time.Time) {
 	changed := true
 	if answered {
 		changed = r.failures > 0
-		r.failures, r.slow = 0, false
+		r.failures = 0
 	} else {
 		if r.failures == 0 {
-			r.since = sent
+			r.since = now
 		}
 		r.failures++
-		r.slow = r.slow || now.Sub(sent) >= reachGrace
+		if now.Sub(sent) >= reachGrace {
+			r.failures++
+		}
 	}
 	f := r.onChange
 	r.mu.Unlock()
@@ -61,7 +69,7 @@ func (r *reach) note(sent time.Time, answered bool, now time.Time) {
 func (r *reach) state(now time.Time) (down bool, wait time.Duration) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.failures == 0 || (r.failures < 2 && !r.slow) {
+	if r.failures < 2 {
 		return false, 0
 	}
 	if age := now.Sub(r.since); age < reachGrace {
