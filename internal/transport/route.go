@@ -86,6 +86,8 @@ type router struct {
 	up     bool
 	reason string
 	downCh chan struct{} // one buffered signal per up→down flip (Client.RouteDown)
+
+	reach reach // whether the server answers (reach.go)
 }
 
 func newRouter(public *http.Transport, serverURL string) *router {
@@ -147,11 +149,26 @@ func (r *router) pick(req *http.Request) (*http.Transport, bool) {
 // RoundTrip forwards to the picked transport. A connection-level failure on
 // the local transport marks the route down; the request itself is NOT
 // replayed here — the callers' existing retries resend it and it goes public.
+//
+// It also notes whether the account's server answered (reach.go). A failure on
+// the local route says nothing about the server, which the request then
+// reaches the public way; an answer on either route does.
 func (r *router) RoundTrip(req *http.Request) (*http.Response, error) {
 	tr, isLocal := r.pick(req)
+	sent := time.Now()
 	resp, err := tr.RoundTrip(req)
 	if err != nil && isLocal && req.Context().Err() == nil && connectionError(err) {
 		r.markDown(reasonFor(err))
+	}
+	if req.Context().Err() == nil && hostPortOf(req.URL) == r.host {
+		switch {
+		case !unanswered(resp, err):
+			if err == nil {
+				r.reach.note(sent, true, time.Now())
+			}
+		case !isLocal:
+			r.reach.note(sent, false, time.Now())
+		}
 	}
 	return resp, err
 }
