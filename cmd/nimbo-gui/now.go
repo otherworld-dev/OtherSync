@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/otherworld/nimbo/internal/account"
 	"github.com/otherworld/nimbo/internal/agent"
 	"github.com/otherworld/nimbo/internal/brand"
 )
@@ -92,6 +93,11 @@ type nowInput struct {
 	// OtherProblem: its sync stopped or failed.
 	OtherOffline bool
 	OtherProblem bool
+	// SignIn lists the other accounts the server turned down, by login, and
+	// SignInID is the first one's ID: their engines are stopped, so nothing
+	// else on the line would mention them (Deck #1130).
+	SignIn   []string
+	SignInID string
 
 	// revealIn is how long until something kept off the line by the quiet
 	// period would show (0 = nothing waiting), so NowStatus can look again
@@ -114,12 +120,25 @@ func composeNow(in nowInput, brandName string) NowStatusDTO {
 		out.LastCheck = in.LastCheck.Format(time.RFC3339)
 	}
 
-	// Needs you: every account counts (as the tray warning always has).
+	// Needs you: every account counts (as the tray warning always has). An
+	// account to sign in again comes first: nothing of it syncs until then.
 	at := in.Attention
-	if n := at.Conflicts + at.Blocked + at.Detached; n > 0 {
+	if n := at.Conflicts + at.Blocked + at.Detached; n > 0 || len(in.SignIn) > 0 {
 		out.State = "attention"
 		out.Main = plural(n, "item needs you", "items need you")
 		var parts []string
+		if len(in.SignIn) > 0 {
+			if len(in.SignIn) == 1 {
+				out.Main = in.SignIn[0] + " needs signing in again"
+			} else {
+				out.Main = plural(len(in.SignIn), "account needs signing in again", "accounts need signing in again")
+			}
+			if n > 0 {
+				out.Sub = plural(n, "item needs you", "items need you")
+			}
+			out.Tab = signInTab + in.SignInID
+			return out
+		}
 		if at.Blocked > 0 {
 			parts = append(parts, thousands(at.Blocked)+" can't sync")
 		}
@@ -794,6 +813,18 @@ func (a *App) gatherNow(shown *agent.Engine, att AttentionInfo, now time.Time) n
 		}
 	}
 
+	a.acctMu.Lock()
+	lost := make(map[string]bool, len(a.authLostIDs))
+	for id, l := range a.authLostIDs {
+		lost[id] = l
+	}
+	a.acctMu.Unlock()
+	if len(lost) > 0 { // the accounts file is read only while one is signed out
+		if _, st, ok := accountsAndDirs(); ok {
+			in.SignIn, in.SignInID = signedOutOthers(st.Accounts, lost, in.ShownAccount)
+		}
+	}
+
 	ps := shown.PauseState()
 	in.Paused, in.PauseUntil = ps.Paused, ps.Until
 	in.Offline, in.Problem, in.Working, in.Holding = accountState(engines[0].status, engines[0].down)
@@ -828,6 +859,25 @@ func (a *App) gatherNow(shown *agent.Engine, att AttentionInfo, now time.Time) n
 		}
 	}
 	return in
+}
+
+// signInTab is the line's Tab for an account to sign in again: OpenStatusTab
+// opens that account's sign-in window instead of a Status tab.
+const signInTab = "signin:"
+
+// signedOutOthers lists, in the accounts file's order, the logins of the
+// accounts other than shown that need signing in again, and the first one's ID.
+func signedOutOthers(accounts []account.Account, lost map[string]bool, shown string) (logins []string, firstID string) {
+	for _, ac := range accounts {
+		if ac.ID == shown || !lost[ac.ID] {
+			continue
+		}
+		if firstID == "" {
+			firstID = ac.ID
+		}
+		logins = append(logins, ac.LoginName)
+	}
+	return logins, firstID
 }
 
 // classifyStatus reads an engine status line: the server unreachable, sync
