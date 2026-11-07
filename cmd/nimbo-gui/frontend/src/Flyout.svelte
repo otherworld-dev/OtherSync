@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { kindIcon, kindLabel } from "./kinds";
+  import { activityLabel, kindIcon } from "./kinds";
   import { Events } from "@wailsio/runtime";
   import { App } from "../bindings/github.com/otherworld/nimbo/cmd/nimbo-gui";
 
@@ -267,7 +267,7 @@
   };
   const activityTitle = (r: Activity) =>
     (r.localPath ? "Show in folder" : "Open in Sync status") +
-    ` · ${kindLabel(r.kind)} · ${r.path}${r.err ? " · " + r.err : ""}` +
+    ` · ${activityLabel(r.kind, r.err)} · ${r.path}${r.err ? " · " + r.err : ""}` +
     (r.localPath ? " · right-click for Sync status" : "");
   const pauseFor = (m: number) => { App.PauseFor(m); pauseMenu = false; setTimeout(refresh, 150); };
   const untilTomorrow = () => { App.PauseUntilTomorrow(); pauseMenu = false; setTimeout(refresh, 150); };

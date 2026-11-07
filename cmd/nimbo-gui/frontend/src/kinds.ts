@@ -21,5 +21,19 @@ const labels: Record<string, string> = {
   corrupt: "Damaged cloud file",
 };
 
+// A row with an error is something that didn't happen: a failed upload read
+// "Uploaded" followed by its error (Deck #1129).
+const failedLabels: Record<string, string> = {
+  download: "Download failed", upload: "Upload failed",
+  "delete-local": "Couldn't delete locally", "delete-remote": "Couldn't delete on server",
+  "move-local": "Move failed", "move-remote": "Move failed", move: "Move failed",
+  rename: "Rename failed", "mkdir-local": "Couldn't create folder",
+  "mkdir-remote": "Couldn't create folder",
+};
+
 export const kindIcon = (k: string) => icons[k] ?? "•";
 export const kindLabel = (k: string) => labels[k] ?? k;
+// activityLabel is an activity row's label: kindLabel, or what failed when the
+// row carries an error.
+export const activityLabel = (k: string, err?: string) =>
+  (err && failedLabels[k]) || kindLabel(k);
