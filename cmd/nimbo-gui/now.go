@@ -640,7 +640,7 @@ type nowEngine struct {
 	status string
 	since  time.Time           // when status last changed
 	mounts map[string]*odMount // this account's on-demand mounts by local dir
-	down   bool                // one of its mounts can't list the server's root
+	down   bool                // its server isn't answering, or a mount can't list its root
 }
 
 // gatherNow collects every account's jobs and checks, deduped by local path,
@@ -720,6 +720,13 @@ func (a *App) gatherNow(shown *agent.Engine, att AttentionInfo, now time.Time) n
 			shownPath := vfsDisplayPath(ne.eng.Escaper(), h.Path)
 			h.Account, h.AccountID, h.Path = ne.login, ne.id, shownPath
 			add(mountLocal(ne.mounts, shownPath), h)
+		}
+		// The server stopped answering requests: say so without waiting for
+		// a listing of the root to fail (Deck #1128).
+		if c := ne.eng.Client(); c != nil {
+			down, wait := c.Unreachable(now)
+			ne.down = ne.down || down
+			soonest(&in.revealIn, wait)
 		}
 		var incomplete, haveCheck bool
 		var oldest time.Time // the least recent mount's last full check (zero = one never finished)
