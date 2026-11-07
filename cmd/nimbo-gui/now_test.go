@@ -530,3 +530,18 @@ func TestComposeNowMatchesAccountsByID(t *testing.T) {
 		t.Errorf("own job: got %q / %q", got.State, got.Main)
 	}
 }
+
+// Deck #1128: a hung upload kept "Uploading X" on the line until a root
+// listing failed. Once the client says the server isn't answering, the line
+// says so over the transfer still "running".
+func TestUnreachableServerOutranksAHungUpload(t *testing.T) {
+	in := nowInput{Now: time.Now(), ShownAccount: "a",
+		Jobs: []NowJobDTO{{AccountID: "a", Kind: "upload", Path: "Report.docx", Size: 100, Sent: 40, State: "running"}}}
+	if got := composeNow(in, "Nimbo"); got.State != "busy" || got.Main != "Uploading Report.docx" {
+		t.Fatalf("answering: got %q / %q", got.State, got.Main)
+	}
+	in.Offline, in.Problem, in.Working, in.Holding = accountState("Syncing…", true)
+	if got := composeNow(in, "Nimbo"); got.State != "offline" || got.Main != "Can't reach the server" {
+		t.Errorf("not answering: got %q / %q", got.State, got.Main)
+	}
+}

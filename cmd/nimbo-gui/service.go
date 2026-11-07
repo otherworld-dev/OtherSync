@@ -386,6 +386,8 @@ func (a *App) start(ctx context.Context) {
 	})
 	// The large-file queue changed (Status → Large files, the flyout's line).
 	eng.SetLaneFunc(func() { a.emit("lane"); a.nudgeNow() })
+	// The server stopped or started answering again (the line's "Can't reach").
+	eng.Client().SetReachFunc(a.nudgeNow)
 	// Desktop toasts for conflicts, can't-sync files and sync errors (subject to
 	// the user's notifications preference).
 	eng.SetToastFunc(notify.Toast)
@@ -554,6 +556,7 @@ func (a *App) startSecondaries(ctx context.Context) {
 		id := ac.ID
 		eng.SetStatusFunc(func(s string) { a.recordAcctStatus(id, s); a.emit("account"); a.nudgeNow() })
 		eng.SetLaneFunc(func() { a.emit("lane"); a.nudgeNow() })
+		eng.Client().SetReachFunc(a.nudgeNow)
 		// Its transfers show in "Right now" and in the line's other-account
 		// mention, so their progress refreshes them (the "progress" event
 		// stays the shown account's).
