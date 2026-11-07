@@ -4038,7 +4038,15 @@ func (a *App) OpenStatus() { a.openStatus("") }
 
 // OpenStatusTab opens (or focuses) the status window on a specific tab
 // ("activity", "conflicts", "notifications", "blocked", "inuse", "detached", "trash").
-func (a *App) OpenStatusTab(tab string) { a.openStatus(tab) }
+func (a *App) OpenStatusTab(tab string) {
+	// The status line's "needs signing in again" opens that account's sign-in
+	// (Deck #1130); reusing this call needs no new binding.
+	if id, ok := strings.CutPrefix(tab, signInTab); ok {
+		a.showLoginFor(id)
+		return
+	}
+	a.openStatus(tab)
+}
 
 // InitialStatusTab returns (and clears) the tab the status window should open
 // on; the status view calls it once on mount. "" means the default tab.
