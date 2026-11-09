@@ -1415,16 +1415,26 @@ func (e *Engine) setConflicts(p Pair, infos []transfer.ConflictInfo) {
 	e.conflictMu.Unlock()
 	notifyAll(subs)
 
-	// Toast conflicts that weren't already pending for this pair.
-	if e.onToast != nil {
-		seen := make(map[string]bool, len(old))
-		for _, c := range old {
-			seen[c.Path] = true
-		}
-		for _, c := range items {
-			if !seen[c.Path] {
+	seen := make(map[string]bool, len(old))
+	for _, c := range old {
+		seen[c.Path] = true
+	}
+	// Log each conflict once when it starts and stops waiting. A waiting conflict
+	// keeps its folders re-listed on every poll, and without these lines the log
+	// showed only the repeating pass, never which file it was for (Deck d1150).
+	now := make(map[string]bool, len(items))
+	for _, c := range items {
+		now[c.Path] = true
+		if !seen[c.Path] {
+			slog.Info("conflict waiting for a decision", "path", c.Path, "kind", c.Kind)
+			if e.onToast != nil {
 				e.toast("Sync conflict", filepath.Base(c.Path)+" needs your decision", "action=conflicts")
 			}
+		}
+	}
+	for _, c := range old {
+		if !now[c.Path] {
+			slog.Info("conflict no longer waiting", "path", c.Path)
 		}
 	}
 }
@@ -1436,6 +1446,8 @@ func (e *Engine) removeConflict(localDir, rel string) {
 	for _, c := range list {
 		if c.Path != rel {
 			kept = append(kept, c)
+		} else {
+			slog.Info("conflict no longer waiting", "path", rel)
 		}
 	}
 	if len(kept) == 0 {
