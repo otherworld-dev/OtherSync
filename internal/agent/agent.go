@@ -143,6 +143,8 @@ type Engine struct {
 	lockedSubs []chan struct{}
 	lockToast  map[string]time.Time // path+owner -> last toast, to survive a flapping lock
 
+	own ownPush // our recent uploads, to skip the push round they bring (ownpush.go, Deck d1103)
+
 	// statusIcons registers live sync folders as cloud sync roots so Explorer
 	// draws native sync-state icons on them — the only route that works for a
 	// packaged build (see statusroot_windows.go).
@@ -385,6 +387,7 @@ func NewEngineFor(ctx context.Context, accountID string) (*Engine, error) {
 		locked:    make(map[string][]LockedFile),
 		lockToast: make(map[string]time.Time),
 	}
+	client.SetWroteFunc(eng.noteOwnWrite)
 	eng.lockMgr = newLockMgr(client, d, acc.LoginName)
 	eng.lockWarn = newLockWarner(d, func() string { return acc.LoginName })
 	eng.statusIcons = newStatusRoots()
@@ -3114,6 +3117,12 @@ func (e *Engine) pauseChanged() {
 // TriggerSync requests an immediate sync of all watched pairs (used by the
 // tray's "Sync now"). It is a no-op until Run has started.
 func (e *Engine) TriggerSync() {
+	e.notePushed(nil) // not a notice of our own upload: the round must run
+	e.sendTriggers()
+}
+
+// sendTriggers wakes every watched pair's push trigger.
+func (e *Engine) sendTriggers() {
 	e.watchMu.Lock()
 	chans := make([]chan struct{}, 0, len(e.triggers))
 	for _, ch := range e.triggers {
@@ -5734,6 +5743,7 @@ func (e *Engine) startWatcher(p Pair) {
 			UserSync:      userExt,
 			Nudge:         nudge,
 			OnPush:        pushFn,
+			PushIsOwn:     func(ctx context.Context) bool { return e.pushIsOwn(ctx, key) },
 			FullSyncEvery: time.Hour, // most polls are fast remote-deltas; full walk hourly
 			ServerFault:   func(err error) bool { return transport.StatusCode(err) >= 500 },
 		}, syncFn)
@@ -5796,8 +5806,12 @@ func (e *Engine) runPush(ctx context.Context) {
 	c.SetStatusFunc(e.setPushState)
 	_ = c.Run(ctx, func(ev push.Event) {
 		switch ev.Type {
-		case "notify_file":
-			e.TriggerSync()
+		case "notify_file", "notify_file_id":
+			// With ids, a round that only finds our own upload is skipped
+			// (Deck d1103); without, anything may have changed.
+			ids, _ := ev.FileIDs()
+			e.notePushed(ids)
+			e.sendTriggers()
 			if e.onFilesChanged != nil {
 				e.onFilesChanged()
 			}

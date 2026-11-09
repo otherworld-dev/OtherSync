@@ -724,6 +724,7 @@ func (c *Client) PutWithChecksum(ctx context.Context, remotePath string, newBody
 		return "", "", statusError("PUT", remotePath, resp)
 	}
 	etag, fileID = revisionHeaders(resp.Header)
+	c.noteWrote(remotePath, fileID)
 	return etag, fileID, nil
 }
 
@@ -747,6 +748,41 @@ func revisionHeaders(h http.Header) (etag, fileID string) {
 	}
 	fileID = h.Get("OC-FileId")
 	return etag, fileID
+}
+
+// SetWroteFunc registers f to hear about every file upload this client
+// finishes (a PUT, or the MOVE that assembles a chunked one), with the file id
+// the server gave it. The engine uses it to tell the server's push notice for
+// its own upload from somebody else's change (Deck d1103). f must be quick and
+// safe for concurrent use; nil stops it.
+func (c *Client) SetWroteFunc(f func(remotePath, fileID string)) {
+	if f == nil {
+		c.onWrote.Store(nil)
+		return
+	}
+	c.onWrote.Store(&f)
+}
+
+func (c *Client) noteWrote(remotePath, fileID string) {
+	if f := c.onWrote.Load(); f != nil && fileID != "" {
+		(*f)(remotePath, fileID)
+	}
+}
+
+// NumericFileID turns a file id in either of Nextcloud's spellings into the
+// number notify_push sends: oc:fileid is plain ("4213"), the OC-FileId header
+// pads it and appends the instance id ("00004213ocrt2fp5q2bq"). ok is false
+// when there is no number to read.
+func NumericFileID(s string) (uint64, bool) {
+	end := 0
+	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
+		end++
+	}
+	if end == 0 {
+		return 0, false
+	}
+	n, err := strconv.ParseUint(s[:end], 10, 64)
+	return n, err == nil
 }
 
 // Mkcol creates a directory (collection) at remotePath. An existing directory

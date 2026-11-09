@@ -59,6 +59,12 @@ type Options struct {
 	// small upload getting through says nothing about the heavy pass (Deck
 	// #1004). Nil treats every failure as an outage.
 	ServerFault func(error) bool
+	// PushIsOwn, if set, is asked before a push runs OnPush and says whether
+	// everything the server reported since the last push was our own upload,
+	// already in the baseline; that round is then skipped (Deck d1103). It is
+	// asked once per push, so it may consume what it judged. Never asked for a
+	// sync the user asked for.
+	PushIsOwn func(ctx context.Context) bool
 }
 
 // SyncFunc performs one reconciliation. It is always called serially. changed
@@ -171,6 +177,7 @@ func runLoop(ctx context.Context, opts Options, sync SyncFunc, events <-chan str
 	var debounce <-chan time.Time        // nil until armed by an event
 	changed := make(map[string]struct{}) // local paths touched since the last fire
 	pushed := false                      // a push (no path) is pending for this window
+	userAsked := false                   // ...and the user asked for it (never skipped as our own)
 	forceFull := false                   // watcher overflowed → recover with a full scan
 	var retry <-chan time.Time           // armed when a sync of local changes failed
 	retryPaths := make(map[string]struct{})
@@ -207,6 +214,7 @@ func runLoop(ctx context.Context, opts Options, sync SyncFunc, events <-chan str
 			failStreak = 0 // asked for by the user: not a retry to space out
 			holdUntil = time.Time{}
 			pushed = true
+			userAsked = true
 			debounce = time.After(opts.Debounce)
 
 		case <-opts.FullSync:
@@ -220,8 +228,8 @@ func runLoop(ctx context.Context, opts Options, sync SyncFunc, events <-chan str
 				paths = append(paths, p)
 			}
 			changed = make(map[string]struct{})
-			doPush := pushed
-			pushed = false
+			doPush, byUser := pushed, userAsked
+			pushed, userAsked = false, false
 
 			// A watcher overflow lost the specific paths, so do a full local scan to
 			// recover — it covers the changed paths and the remote, so skip the rest.
@@ -249,6 +257,8 @@ func runLoop(ctx context.Context, opts Options, sync SyncFunc, events <-chan str
 			if doPush {
 				if holding() {
 					slog.Debug("push skipped; backing off after failures", "until", holdUntil)
+				} else if !byUser && opts.PushIsOwn != nil && opts.PushIsOwn(ctx) {
+					slog.Info("push skipped; the server only reported our own upload")
 				} else if opts.OnPush != nil {
 					runPush("push")
 				} else {
