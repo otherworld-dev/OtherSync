@@ -230,9 +230,17 @@ func (s *Store) baselineLocked(pairKey string) (map[string]engine.BaselineState,
 
 // queryBaseline reads a pair's full baseline from the database.
 func (s *Store) queryBaseline(pairKey string) (map[string]engine.BaselineState, error) {
+	pairRows, scan, err := s.fullLoadPlan(pairKey)
+	if err != nil {
+		return nil, err
+	}
+	from := `baseline`
+	if scan {
+		from = `baseline NOT INDEXED`
+	}
 	rows, err := s.db.Query(
 		`SELECT path, is_dir, remote_etag, remote_fileid, local_size, local_mtime_nanos, content_sha1, mount_root, content_key
-		   FROM baseline WHERE account_id = ? AND pair_key = ?`,
+		   FROM `+from+` WHERE account_id = ? AND pair_key = ?`,
 		s.accountID, pairKey,
 	)
 	if err != nil {
@@ -240,7 +248,7 @@ func (s *Store) queryBaseline(pairKey string) (map[string]engine.BaselineState, 
 	}
 	defer rows.Close()
 
-	out := make(map[string]engine.BaselineState)
+	out := make(map[string]engine.BaselineState, pairRows)
 	for rows.Next() {
 		var b engine.BaselineState
 		var isDir, mountRoot int
@@ -252,6 +260,42 @@ func (s *Store) queryBaseline(pairKey string) (map[string]engine.BaselineState, 
 		out[b.Path] = b
 	}
 	return out, rows.Err()
+}
+
+// fullLoadPlan decides how queryBaseline reads a whole pair, and returns the
+// pair's row count so the map can be sized once instead of growing.
+//
+// The baseline is a rowid table, so a row found through the primary-key index
+// costs a second lookup into the table, in path order, which is random across
+// the file; with SQLite's default 2 MB page cache against a 140 MB database
+// nearly every one is a cache miss. On the desktop's 352k-row baseline that
+// read took 2.5 s through the index and 0.65 s as a straight pass over the
+// table, and it ran on every 5-minute server poll (Deck d1102). A pass over the
+// table also reads every other pair's rows, so it is only chosen when this pair
+// is a large share of the table. MAX(rowid) stands in for the table's size: it
+// is free, and since upserts keep their rowid it can only overstate the table,
+// which errs towards the index, the old behaviour.
+func (s *Store) fullLoadPlan(pairKey string) (pairRows int, tableScan bool, err error) {
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM baseline WHERE account_id = ? AND pair_key = ?`,
+		s.accountID, pairKey,
+	).Scan(&pairRows); err != nil {
+		return 0, false, fmt.Errorf("count baseline: %w", err)
+	}
+	var maxRowid int64
+	if err := s.db.QueryRow(`SELECT COALESCE(MAX(rowid), 0) FROM baseline`).Scan(&maxRowid); err != nil {
+		return 0, false, fmt.Errorf("size baseline: %w", err)
+	}
+	return pairRows, useTableScan(pairRows, maxRowid), nil
+}
+
+// useTableScan is fullLoadPlan's rule: scan the table once the pair holds at
+// least a quarter of it. Measured, an indexed row costs roughly ten times a
+// scanned one, so a quarter leaves a wide margin; small pairs stay on the index,
+// where a scan would mostly read rows it then throws away.
+func useTableScan(pairRows int, maxRowid int64) bool {
+	const minRows = 1000 // too small for the choice to matter
+	return pairRows >= minRows && int64(pairRows)*4 >= maxRowid
 }
 
 // LoadBaselineScoped returns only the baseline rows under a subtree (descendants
