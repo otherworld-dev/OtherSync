@@ -38,6 +38,8 @@ type Client struct {
 	pacer atomic.Pointer[pace.Pacer]
 	// downGate caps this account's sync downloads at once (pace.go, Deck #1055).
 	downGate atomic.Pointer[pace.Gate]
+	// onWrote hears about each file this client wrote (see SetWroteFunc).
+	onWrote atomic.Pointer[func(remotePath, fileID string)]
 
 	// Per-method request tally since construction (see RequestCounts).
 	countMu sync.Mutex

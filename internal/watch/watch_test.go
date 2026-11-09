@@ -498,3 +498,46 @@ func TestNudgedPathsSyncDuringTheBackoff(t *testing.T) {
 		t.Fatal("the nudged paths were held back by the backoff")
 	}
 }
+
+// A push that only reported our own upload is skipped; one that reported
+// anything else runs, and a sync the user asked for runs without asking
+// (Deck d1103).
+func TestAPushOfOurOwnUploadIsSkipped(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ext := make(chan struct{}, 1)
+	user := make(chan struct{}, 1)
+	var pushes, asked atomic.Int32
+	var own atomic.Bool
+	go func() {
+		_ = runLoop(ctx, Options{Root: t.TempDir(), Debounce: 10 * time.Millisecond, PollInterval: time.Hour,
+			OnPush:    func(context.Context) error { pushes.Add(1); return nil },
+			PushIsOwn: func(context.Context) bool { asked.Add(1); return own.Load() },
+			External:  ext, UserSync: user}, func(context.Context, []string) error { return nil }, make(chan string))
+	}()
+	settle := func() { time.Sleep(100 * time.Millisecond) }
+
+	own.Store(true)
+	ext <- struct{}{}
+	settle()
+	if pushes.Load() != 0 || asked.Load() != 1 {
+		t.Fatalf("own push: %d rounds, asked %d; want 0 rounds, asked once", pushes.Load(), asked.Load())
+	}
+
+	own.Store(false)
+	ext <- struct{}{}
+	settle()
+	if pushes.Load() != 1 {
+		t.Fatalf("someone else's change: %d rounds, want 1", pushes.Load())
+	}
+
+	own.Store(true)
+	user <- struct{}{}
+	settle()
+	if pushes.Load() != 2 {
+		t.Fatalf("user sync: %d rounds, want 2", pushes.Load())
+	}
+	if asked.Load() != 2 {
+		t.Fatalf("PushIsOwn asked %d times, want 2 (never for the user's sync)", asked.Load())
+	}
+}
