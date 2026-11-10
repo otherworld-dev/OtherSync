@@ -245,7 +245,8 @@
   // "Right now": every job in progress, in full (Deck #988).
   type NowJob = { account: string; kind: string; path: string; size: number; sent: number; large: boolean; state: string };
   type NowCheck = { account: string; folder: string; dirs: number; startsIn?: number };
-  type Now = { jobs: NowJob[]; checking: NowCheck[] };
+  // state and main are the flyout's line; only "offline" is shown here.
+  type Now = { jobs: NowJob[]; checking: NowCheck[]; state?: string; main?: string };
   let now = $state<Now>({ jobs: [], checking: [] });
   // Speed comes from two samples of the same job at least 2 s apart; between
   // samples the last figure is kept so it doesn't flicker.
@@ -276,7 +277,7 @@
     }
     for (const k of [...samples.keys()]) if (!live.has(k)) samples.delete(k);
     rates = next;
-    now = { jobs: n.jobs ?? [], checking: n.checking ?? [] };
+    now = { jobs: n.jobs ?? [], checking: n.checking ?? [], state: n.state, main: n.main };
   }
   const nowAccounts = $derived(new Set([...now.jobs.map(j => j.account), ...now.checking.map(c => c.account)].filter(Boolean)));
   const nowMulti = $derived(nowAccounts.size > 1);
@@ -442,7 +443,10 @@
   <div class="body">
     {#if tab === "activity"}
       <div class="nowhead">Right now</div>
-      {#if now.jobs.length === 0 && now.checking.length === 0}<p class="empty">Nothing in progress</p>{/if}
+      <!-- Offline with no engine, every list here is empty and the window read
+           as signed out (10 Nov 2026): say what is actually going on. -->
+      {#if now.state === "offline" && now.main}<p class="empty">{now.main}</p>
+      {:else if now.jobs.length === 0 && now.checking.length === 0}<p class="empty">Nothing in progress</p>{/if}
       {#each now.checking as c}
         <div class="nowrow">
           <span class="ni">⟳</span>
