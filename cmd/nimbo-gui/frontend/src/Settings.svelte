@@ -89,10 +89,10 @@
   const mPlan = $derived(planChanges(mTarget, mCommitted));
 
   async function loadFolders() {
-    pairs = (await App.GetPairs()) ?? [];
-    synced = (await App.SyncedRemotes()) ?? [];
-    baseDir = await App.GetBaseDir();
-    if (adding && step === "browse") entries = (await App.BrowseRemote(cur)) ?? [];
+    pairs = (await App.GetPairs("")) ?? [];
+    synced = (await App.SyncedRemotes("")) ?? [];
+    baseDir = await App.GetBaseDir("");
+    if (adding && step === "browse") entries = (await App.BrowseRemote("", cur)) ?? [];
   }
   loadFolders();
 
@@ -158,12 +158,12 @@
     const errs: { rel: string; msg: string }[] = [];
     for (const rel of plan.exclude) {
       try {
-        const err = await App.DeselectFolder(dir, rel, deleteLocal);
+        const err = await App.DeselectFolder("", dir, rel, deleteLocal);
         if (err) errs.push({ rel, msg: err });
       } catch (e) { errs.push({ rel, msg: String(e) }); }
     }
     for (const rel of plan.include) {
-      try { await App.RemoveExclude(dir, rel); }
+      try { await App.RemoveExclude("", dir, rel); }
       catch (e) { errs.push({ rel, msg: String(e) }); }
     }
     await loadFolders();
@@ -215,7 +215,7 @@
     busy = true; addErr = "";
     if (everything) {
       const dir = parent.trim();
-      const err = !dir ? "Choose a local folder" : await App.AddSyncPair(dir, "");
+      const err = !dir ? "Choose a local folder" : await App.AddSyncPair("", dir, "");
       busy = false;
       if (err) { addErr = err; return; }
       exitAdding();
@@ -230,10 +230,10 @@
       // server copy is always kept; the folder simply re-downloads into its new home.
       const cov = coveringPair(r);
       if (cov) {
-        const derr = await App.DeselectFolder(cov.localDir, relWithin(r, trim(cov.remoteRoot)), true);
+        const derr = await App.DeselectFolder("", cov.localDir, relWithin(r, trim(cov.remoteRoot)), true);
         if (derr) { errs.push(`/${r}: ${derr}`); continue; }
       }
-      const err = await App.AddSyncPair(joinLocal((names[r] || base(r)).trim()), r);
+      const err = await App.AddSyncPair("", joinLocal((names[r] || base(r)).trim()), r);
       if (err) errs.push(`/${r}: ${err}`);
     }
     busy = false;
@@ -242,7 +242,7 @@
     await loadFolders();
   }
   async function removePair(p: Pair) {
-    await App.RemoveSyncFolder(trim(p.remoteRoot), false); // keep local files
+    await App.RemoveSyncFolder("", trim(p.remoteRoot), false); // keep local files
     await loadFolders();
   }
 
@@ -256,7 +256,7 @@
   let resumeBusy = $state("");
   async function resumeFrozen(p: Pair) {
     resumeBusy = p.localDir;
-    const err = await App.SetSyncMode("guard-resume:" + p.localDir);
+    const err = await App.SetSyncMode("guard-resume:\n" + p.localDir);
     if (err) tell({ title: "Couldn't resume syncing", message: err });
     await loadFolders();
     resumeBusy = "";
@@ -286,7 +286,7 @@
       ok: "Move",
     })) return;
     moveBusy = true;
-    const err = await App.MoveSyncFolder(p.localDir, dest);
+    const err = await App.MoveSyncFolder("", p.localDir, dest);
     moveBusy = false;
     if (err) { tell({ title: "Couldn't move the folder", message: err }); return; }
     await loadFolders();
@@ -307,8 +307,8 @@
   // read the folder back rather than assuming it was saved.
   const saveBase = async () => {
     const want = baseDir.trim();
-    await App.SetBaseDir(want);
-    baseDir = await App.GetBaseDir();
+    await App.SetBaseDir("", want);
+    baseDir = await App.GetBaseDir("");
     if (baseDir === want) flashSaved("base");
   };
 
@@ -418,7 +418,7 @@
   let signOutOpen = $state(false);
   let clearOnSignOut = $state(false);
   async function signOut() {
-    const err = await App.SignOut(clearOnSignOut);
+    const err = await App.SignOut("", clearOnSignOut);
     if (err) { tell({ title: "Couldn't sign out", message: err }); return; }
     signOutOpen = false;
     // Signing out may hand over to another configured account (multi-account);
@@ -466,13 +466,13 @@
   $effect(() => { localAddr = account.localAddress ?? ""; });
   async function testLocal(pin = "") {
     localBusy = true; localTest = null; localPin = pin;
-    try { localTest = await App.TestLocalAddress(localAddr, pin); }
+    try { localTest = await App.TestLocalAddress("", localAddr, pin); }
     finally { localBusy = false; }
   }
   async function saveLocal() {
     localBusy = true;
     try {
-      const err = await App.SaveLocalAddress(localAddr, localPin);
+      const err = await App.SaveLocalAddress("", localAddr, localPin);
       if (err) { tell({ title: "Couldn't save the local address", message: err }); return; }
       localTest = null; localPin = "";
       account = await App.AccountInfo();
@@ -482,7 +482,7 @@
   async function clearLocal() {
     localBusy = true;
     try {
-      const err = await App.SaveLocalAddress("", "");
+      const err = await App.SaveLocalAddress("", "", "");
       if (err) { tell({ title: "Couldn't clear the local address", message: err }); return; }
       localTest = null; localPin = ""; localAddr = "";
       account = await App.AccountInfo();
@@ -564,12 +564,12 @@
   let offCur = $state("");
   let offEntries = $state<OffEntry[]>([]);
   let pinBusy = $state(false);
-  async function loadOffline() { offEntries = (await App.BrowseOffline(offCur)) ?? []; }
+  async function loadOffline() { offEntries = (await App.BrowseOffline("", offCur)) ?? []; }
   const offNav = async (rel: string) => { offCur = rel; await loadOffline(); };
   const offUp = () => offNav(offCur.split("/").slice(0, -1).join("/"));
   async function togglePin(e: OffEntry) {
     pinBusy = true;
-    const err = await App.SetOfflinePin(e.rel, !e.pinned);
+    const err = await App.SetOfflinePin("", e.rel, !e.pinned);
     pinBusy = false;
     if (err) { tell({ title: "Couldn't change Keep on this PC", message: err }); return; }
     await loadOffline();

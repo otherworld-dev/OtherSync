@@ -114,7 +114,7 @@
   async function pickGo(path: string) {
     pcur = path.replace(/^\/+|\/+$/g, "");
     ploading = true;
-    pentries = (((await App.BrowseRemote(pcur)) ?? []) as Entry[]).filter(e => e.isDir);
+    pentries = (((await App.BrowseRemote("", pcur)) ?? []) as Entry[]).filter(e => e.isDir);
     ploading = false;
   }
   function openPick() { picking = true; pickGo(""); }
