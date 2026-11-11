@@ -624,119 +624,6 @@
           {#if policy.lockSyncMode}<p class="managed">🔒 Set by your organisation.</p>{/if}
         </div>
       {/if}
-      {#if revert}
-        <div class="modalback">
-          <div class="addpanel modalbox">
-            <div class="addhead">Switch back to normal files?</div>
-            <p class="hint">Your files in <b>{revert.dir}</b> go back to being ordinary files, in place.</p>
-            <ul class="hint">
-              {#if revert.hydrated}<li><b>{revert.hydrated.toLocaleString()}</b> {revert.hydrated === 1 ? "is" : "are"} on this PC — converted back instantly, nothing transferred.</li>{/if}
-              {#if revert.dehydrated}<li><b>{revert.dehydrated.toLocaleString()}</b> {revert.dehydrated === 1 ? "is" : "are"} online-only. {revert.dehydrated === 1 ? "It'll" : "They'll"} download through normal syncing after the switch ({mb(revert.downloadBytes)}).</li>{/if}
-              {#if revert.ignored}<li><b>{revert.ignored.toLocaleString()}</b> {revert.ignored === 1 ? "is" : "are"} online-only in folders that normal syncing skips (your exclusions, such as node_modules). {revert.ignored === 1 ? "It stays" : "They stay"} on the server and won't download.</li>{/if}
-              {#if revert.unsynced}<li><b>{revert.unsynced.toLocaleString()}</b> {revert.unsynced === 1 ? "is" : "are"} online-only and no sync folder covers {revert.unsynced === 1 ? "it, so it" : "them, so they"} won't download. {revert.unsynced === 1 ? "It stays" : "They stay"} on the server.</li>{/if}
-            </ul>
-            {#if revert.folders}
-              <p class="hint">Your sync folders are restored automatically.</p>
-            {:else}
-              <p class="hint">No sync folder is set up, so nothing will sync after the switch until you add one (pick an account on the left, then Add folder).</p>
-            {/if}
-            <div class="addbtns">
-              <button class="primary" onclick={confirmRevert}>Switch to normal files</button>
-              <button onclick={askFreshFromRevert}>Start fresh…</button>
-              <button onclick={cancelRevertDialog}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      {/if}
-      {#if (diag as any)?.revertTotal > 0}
-        <div class="modalback">
-          <div class="addpanel modalbox">
-            <div class="addhead">Converting your files back…</div>
-            <p class="hint">Leave {brandName} running until this finishes. Your files stay usable throughout.</p>
-            <p class="hint"><b>{(diag as any).revertDone.toLocaleString()}</b> of <b>{(diag as any).revertTotal.toLocaleString()}</b> files</p>
-            <div class="addbtns">
-              <button onclick={cancelRevertRun}>Cancel and stay on virtual files</button>
-            </div>
-          </div>
-        </div>
-      {/if}
-      {#if (diag as any)?.adoptConvertTotal > 0}
-        <!-- Background conversion in progress (driven purely by the diag poll,
-             so it shows regardless of which call started the switch). -->
-        <div class="modalback">
-          <div class="addpanel modalbox">
-            <div class="addhead">Converting your files…</div>
-            <p class="hint">{brandName} is adopting the files already in your folder as virtual files. You can keep using your computer — just leave {brandName} running until this finishes.</p>
-            <p class="hint"><b>{(diag as any).adoptConvertDone.toLocaleString()}</b> of <b>{(diag as any).adoptConvertTotal.toLocaleString()}</b> files</p>
-            <div class="addbtns">
-              <button onclick={cancelConvert} disabled={syncModeBusy}>Cancel and switch back</button>
-            </div>
-          </div>
-        </div>
-      {/if}
-      {#if scanning}
-        <!-- Blocks the window for the whole crawl: without this, a multi-minute
-             scan behind a small hint line reads as "the switch did nothing". -->
-        <div class="modalback">
-          <div class="addpanel modalbox">
-            <div class="addhead">Checking your files…</div>
-            <p class="hint">{brandName} is comparing everything in your folder with your server before switching. On a large account this can take several minutes. Nothing is changed until you confirm.</p>
-            <p class="hint"><b>{(diag as any)?.adoptScanDirs || 0}</b> folders checked so far</p>
-            <div class="addbtns">
-              <button onclick={cancelScan}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      {/if}
-      {#if adopt}
-        <!-- Confirm before touching a folder that already holds files: the scan
-             changed nothing, so cancelling here is free. -->
-        <div class="modalback">
-          <div class="addpanel modalbox">
-            <div class="addhead">Keep the files already in this folder?</div>
-            <p class="hint">There are already files in <b>{adopt.dir}</b>. {brandName} can keep them where they are instead of downloading everything again.</p>
-            <ul class="hint">
-              {#if adopt.keep}<li><b>{adopt.keep}</b> already {adopt.keep === 1 ? "matches" : "match"} your server — kept on this PC, nothing re-downloaded.</li>{/if}
-              {#if adopt.replace}<li><b>{adopt.replace}</b> {adopt.replace === 1 ? "is an online-only leftover" : "are online-only leftovers"} from another client — replaced with {adopt.replace === 1 ? `a ${brandName} placeholder` : `${brandName} placeholders`}.</li>{/if}
-              {#if adopt.upload}<li><b>{adopt.upload}</b> {adopt.upload === 1 ? "isn’t" : "aren’t"} on your server yet — uploaded.</li>{/if}
-              {#if adopt.conflict}<li><b>{adopt.conflict}</b> {adopt.conflict === 1 ? "differs" : "differ"} from your server — both versions kept (your copy is uploaded as a “conflicted copy”).</li>{/if}
-            </ul>
-            {#if adopt.uploadBytes}<p class="hint">Upload size: {mb(adopt.uploadBytes)}</p>{/if}
-            <div class="addbtns">
-              <button class="primary" onclick={confirmAdopt}>Keep my files</button>
-              <button onclick={askFreshFromAdopt}>Start fresh…</button>
-              <button onclick={cancelAdopt}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      {/if}
-      {#if fresh}
-        <div class="modalback">
-          <div class="addpanel modalbox">
-            <div class="addhead">{fresh.target === "ondemand" ? "Delete the local copies?" : "Clear the folder and re-download?"}</div>
-            {#if fresh.target === "ondemand"}
-              <p class="hint">Everything in <b>{fresh.dir}</b> ({fresh.total.toLocaleString()} files) is removed from this PC and becomes online-only. Your synced-folder setup is cleared too. Your files on the server are untouched and download when you open them.</p>
-              {#if fresh.localOnly}<p class="hint danger"><b>{fresh.localOnly.toLocaleString()}</b> files aren’t on your server yet — deleting them here loses them <b>forever</b>.</p>{/if}
-              {#if fresh.changed}<p class="hint danger"><b>{fresh.changed.toLocaleString()}</b> files have local changes that differ from the server — those changes are discarded.</p>{/if}
-            {:else}
-              <p class="hint">Everything in <b>{fresh.dir}</b> is removed from this PC and your synced-folder setup is cleared — you pick what to sync again afterwards. Your files on the server are untouched.</p>
-              <p class="hint danger">Anything in this folder that never reached the server is lost <b>forever</b>.</p>
-            {/if}
-            <div class="addbtns">
-              <button class="danger" onclick={confirmFresh}>Delete and start fresh</button>
-              <button class="primary" onclick={cancelFresh}>Go back</button>
-            </div>
-          </div>
-        </div>
-      {/if}
-      {#if freshBusy}
-        <div class="modalback">
-          <div class="addpanel modalbox">
-            <div class="addhead">Starting fresh…</div>
-            <p class="hint">Clearing the folder and switching over. This can take a while for large folders — leave {brandName} running.</p>
-          </div>
-        </div>
-      {/if}
       {#if syncMode === "live" && diag && !(diag as any).badgesRegistered}
         <p class="fhint">
           Folder badges (the little status icons on your files) aren’t set up on this install.
@@ -1008,6 +895,125 @@
         {#if brandHelp}· <button class="link" onclick={() => App.OpenURL(brandHelp)}>Help</button>{/if}
         · <button class="link" onclick={() => App.OpenURL("mailto:" + brandSupport)}>{brandSupport}</button>
       </p>
+    {/if}
+
+    <!-- File availability's blocking dialogs and progress overlays. Outside the
+         page switch so they cover the whole window whatever page is selected:
+         a scan or conversion stays in view (with its Cancel) when a deep link
+         moves to another page, and the account pages can't change folders or
+         offline pins mid-switch. -->
+    {#if revert}
+      <div class="modalback">
+        <div class="addpanel modalbox">
+          <div class="addhead">Switch back to normal files?</div>
+          <p class="hint">Your files in <b>{revert.dir}</b> go back to being ordinary files, in place.</p>
+          <ul class="hint">
+            {#if revert.hydrated}<li><b>{revert.hydrated.toLocaleString()}</b> {revert.hydrated === 1 ? "is" : "are"} on this PC — converted back instantly, nothing transferred.</li>{/if}
+            {#if revert.dehydrated}<li><b>{revert.dehydrated.toLocaleString()}</b> {revert.dehydrated === 1 ? "is" : "are"} online-only. {revert.dehydrated === 1 ? "It'll" : "They'll"} download through normal syncing after the switch ({mb(revert.downloadBytes)}).</li>{/if}
+            {#if revert.ignored}<li><b>{revert.ignored.toLocaleString()}</b> {revert.ignored === 1 ? "is" : "are"} online-only in folders that normal syncing skips (your exclusions, such as node_modules). {revert.ignored === 1 ? "It stays" : "They stay"} on the server and won't download.</li>{/if}
+            {#if revert.unsynced}<li><b>{revert.unsynced.toLocaleString()}</b> {revert.unsynced === 1 ? "is" : "are"} online-only and no sync folder covers {revert.unsynced === 1 ? "it, so it" : "them, so they"} won't download. {revert.unsynced === 1 ? "It stays" : "They stay"} on the server.</li>{/if}
+          </ul>
+          {#if revert.folders}
+            <p class="hint">Your sync folders are restored automatically.</p>
+          {:else}
+            <p class="hint">No sync folder is set up, so nothing will sync after the switch until you add one (pick an account on the left, then Add folder).</p>
+          {/if}
+          <div class="addbtns">
+            <button class="primary" onclick={confirmRevert}>Switch to normal files</button>
+            <button onclick={askFreshFromRevert}>Start fresh…</button>
+            <button onclick={cancelRevertDialog}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    {/if}
+    {#if (diag as any)?.revertTotal > 0}
+      <div class="modalback">
+        <div class="addpanel modalbox">
+          <div class="addhead">Converting your files back…</div>
+          <p class="hint">Leave {brandName} running until this finishes. Your files stay usable throughout.</p>
+          <p class="hint"><b>{(diag as any).revertDone.toLocaleString()}</b> of <b>{(diag as any).revertTotal.toLocaleString()}</b> files</p>
+          <div class="addbtns">
+            <button onclick={cancelRevertRun}>Cancel and stay on virtual files</button>
+          </div>
+        </div>
+      </div>
+    {/if}
+    {#if (diag as any)?.adoptConvertTotal > 0}
+      <!-- Background conversion in progress (driven purely by the diag poll,
+           so it shows regardless of which call started the switch). -->
+      <div class="modalback">
+        <div class="addpanel modalbox">
+          <div class="addhead">Converting your files…</div>
+          <p class="hint">{brandName} is adopting the files already in your folder as virtual files. You can keep using your computer — just leave {brandName} running until this finishes.</p>
+          <p class="hint"><b>{(diag as any).adoptConvertDone.toLocaleString()}</b> of <b>{(diag as any).adoptConvertTotal.toLocaleString()}</b> files</p>
+          <div class="addbtns">
+            <button onclick={cancelConvert} disabled={syncModeBusy}>Cancel and switch back</button>
+          </div>
+        </div>
+      </div>
+    {/if}
+    {#if scanning}
+      <!-- Blocks the window for the whole crawl: without this, a multi-minute
+           scan behind a small hint line reads as "the switch did nothing". -->
+      <div class="modalback">
+        <div class="addpanel modalbox">
+          <div class="addhead">Checking your files…</div>
+          <p class="hint">{brandName} is comparing everything in your folder with your server before switching. On a large account this can take several minutes. Nothing is changed until you confirm.</p>
+          <p class="hint"><b>{(diag as any)?.adoptScanDirs || 0}</b> folders checked so far</p>
+          <div class="addbtns">
+            <button onclick={cancelScan}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    {/if}
+    {#if adopt}
+      <!-- Confirm before touching a folder that already holds files: the scan
+           changed nothing, so cancelling here is free. -->
+      <div class="modalback">
+        <div class="addpanel modalbox">
+          <div class="addhead">Keep the files already in this folder?</div>
+          <p class="hint">There are already files in <b>{adopt.dir}</b>. {brandName} can keep them where they are instead of downloading everything again.</p>
+          <ul class="hint">
+            {#if adopt.keep}<li><b>{adopt.keep}</b> already {adopt.keep === 1 ? "matches" : "match"} your server — kept on this PC, nothing re-downloaded.</li>{/if}
+            {#if adopt.replace}<li><b>{adopt.replace}</b> {adopt.replace === 1 ? "is an online-only leftover" : "are online-only leftovers"} from another client — replaced with {adopt.replace === 1 ? `a ${brandName} placeholder` : `${brandName} placeholders`}.</li>{/if}
+            {#if adopt.upload}<li><b>{adopt.upload}</b> {adopt.upload === 1 ? "isn’t" : "aren’t"} on your server yet — uploaded.</li>{/if}
+            {#if adopt.conflict}<li><b>{adopt.conflict}</b> {adopt.conflict === 1 ? "differs" : "differ"} from your server — both versions kept (your copy is uploaded as a “conflicted copy”).</li>{/if}
+          </ul>
+          {#if adopt.uploadBytes}<p class="hint">Upload size: {mb(adopt.uploadBytes)}</p>{/if}
+          <div class="addbtns">
+            <button class="primary" onclick={confirmAdopt}>Keep my files</button>
+            <button onclick={askFreshFromAdopt}>Start fresh…</button>
+            <button onclick={cancelAdopt}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    {/if}
+    {#if fresh}
+      <div class="modalback">
+        <div class="addpanel modalbox">
+          <div class="addhead">{fresh.target === "ondemand" ? "Delete the local copies?" : "Clear the folder and re-download?"}</div>
+          {#if fresh.target === "ondemand"}
+            <p class="hint">Everything in <b>{fresh.dir}</b> ({fresh.total.toLocaleString()} files) is removed from this PC and becomes online-only. Your synced-folder setup is cleared too. Your files on the server are untouched and download when you open them.</p>
+            {#if fresh.localOnly}<p class="hint danger"><b>{fresh.localOnly.toLocaleString()}</b> files aren’t on your server yet — deleting them here loses them <b>forever</b>.</p>{/if}
+            {#if fresh.changed}<p class="hint danger"><b>{fresh.changed.toLocaleString()}</b> files have local changes that differ from the server — those changes are discarded.</p>{/if}
+          {:else}
+            <p class="hint">Everything in <b>{fresh.dir}</b> is removed from this PC and your synced-folder setup is cleared — you pick what to sync again afterwards. Your files on the server are untouched.</p>
+            <p class="hint danger">Anything in this folder that never reached the server is lost <b>forever</b>.</p>
+          {/if}
+          <div class="addbtns">
+            <button class="danger" onclick={confirmFresh}>Delete and start fresh</button>
+            <button class="primary" onclick={cancelFresh}>Go back</button>
+          </div>
+        </div>
+      </div>
+    {/if}
+    {#if freshBusy}
+      <div class="modalback">
+        <div class="addpanel modalbox">
+          <div class="addhead">Starting fresh…</div>
+          <p class="hint">Clearing the folder and switching over. This can take a while for large folders — leave {brandName} running.</p>
+        </div>
+      </div>
     {/if}
   </div>
 </div>
