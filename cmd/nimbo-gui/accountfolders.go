@@ -236,14 +236,29 @@ func (a *App) activeAccountID(st account.Store) string {
 	return ""
 }
 
-// folderClashFor checks a folder the user is CHOOSING for the active account
-// against everything the other accounts have claimed.
-func (a *App) folderClashFor(dir string) string {
+// folderClashIn checks a folder the named account is CHOOSING against
+// everything the other accounts have claimed.
+func folderClashIn(d config.Dirs, st account.Store, acctID, dir string) string {
+	return folderClash(dir, otherAccountFolders(d, st, acctID))
+}
+
+// folderClashForAccount is folderClashIn for the stores on disk.
+func (a *App) folderClashForAccount(acctID, dir string) string {
 	d, st, ok := accountsAndDirs()
 	if !ok {
 		return ""
 	}
-	return folderClash(dir, otherAccountFolders(d, st, a.activeAccountID(st)))
+	return folderClashIn(d, st, acctID, dir)
+}
+
+// folderClashFor checks a folder the user is CHOOSING for the active account
+// against everything the other accounts have claimed.
+func (a *App) folderClashFor(dir string) string {
+	_, st, ok := accountsAndDirs()
+	if !ok {
+		return ""
+	}
+	return a.folderClashForAccount(a.activeAccountID(st), dir)
 }
 
 // syncClashFor checks a folder an account is about to SYNC or mount against
