@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"testing"
 
 	"github.com/otherworld/nimbo/internal/account"
@@ -179,5 +180,53 @@ func TestAccountEntryFromStoreWithoutEngine(t *testing.T) {
 	}
 	if e.Route != "" || e.RouteReason != "" {
 		t.Fatalf("route = %q / %q; want empty", e.Route, e.RouteReason)
+	}
+}
+
+func TestForgetAccountFilesKeepsOrClearsData(t *testing.T) {
+	for _, clearData := range []bool{false, true} {
+		d := config.Dirs{Config: t.TempDir(), Data: t.TempDir()}
+		err := account.Update(d.AccountsFile(), func(s *account.Store) error {
+			s.Upsert(account.Account{ID: "a", ServerURL: "https://a.example", LoginName: "a"})
+			s.Upsert(account.Account{ID: "b", ServerURL: "https://b.example", LoginName: "b"})
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		da, db := d.WithAccount("a"), d.WithAccount("b")
+		for _, p := range []string{da.PairsFile(), db.PairsFile(), db.AccountStateFile()} {
+			if err := os.WriteFile(p, []byte("{}"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var deleted []string
+		fakeDel := func(id string) error { deleted = append(deleted, id); return nil }
+		if err := forgetAccountFiles(d, "b", clearData, fakeDel, (&App{}).clearSyncData); err != nil {
+			t.Fatal(err)
+		}
+		st, err := account.LoadStore(d.AccountsFile())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := st.Find("b"); ok {
+			t.Fatalf("clearData=%v: b still in the store", clearData)
+		}
+		if _, ok := st.Find("a"); !ok {
+			t.Fatalf("clearData=%v: a was removed", clearData)
+		}
+		if len(deleted) != 1 || deleted[0] != "b" {
+			t.Fatalf("clearData=%v: deleted secrets %v, want [b]", clearData, deleted)
+		}
+		exists := func(p string) bool { _, err := os.Stat(p); return err == nil }
+		if !exists(da.PairsFile()) {
+			t.Fatalf("clearData=%v: a's pairs file was removed", clearData)
+		}
+		if got := exists(db.PairsFile()); got == clearData {
+			t.Fatalf("clearData=%v: b's pairs file exists=%v", clearData, got)
+		}
+		if got := exists(db.AccountStateFile()); got == clearData {
+			t.Fatalf("clearData=%v: b's account state exists=%v", clearData, got)
+		}
 	}
 }

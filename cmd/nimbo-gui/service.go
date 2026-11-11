@@ -5250,10 +5250,9 @@ func (a *App) SwitchAccount(id string) string {
 // The completed login becomes the active account (see account.Complete).
 func (a *App) AddAccount() { a.showLoginFor("") }
 
-// RemoveAccount disconnects a NON-active account: its keychain secret, account
-// entry, sync-folder setup and local sync state are removed (local files are
-// kept). Removing the active account is SignOut's job — it handles the engine
-// teardown and next-account handover.
+// RemoveAccount disconnects a NON-active account and clears its sync setup and
+// local sync state (local files are kept). Signing out the active account is
+// SignOut's job — it handles the engine teardown and next-account handover.
 func (a *App) RemoveAccount(id string) string {
 	d, err := config.Resolve()
 	if err != nil {
@@ -5266,9 +5265,12 @@ func (a *App) RemoveAccount(id string) string {
 	if cur, ok := st.Default(); ok && cur.ID == id {
 		return "that account is active — use Sign out instead"
 	}
-	if _, ok := st.Find(id); !ok {
-		return "no such account"
-	}
+	return a.SignOut(id, true)
+}
+
+// signOutOther signs out an account that is not the default one: it never
+// touches the default account's engine, mounts or data.
+func (a *App) signOutOther(d config.Dirs, id string, clearData bool) string {
 	// Its virtual-files root goes with it: left registered, it stays in the
 	// Explorer sidebar pointing at a folder nothing syncs (GitHub #10).
 	a.unmountOnDemandFor(id)
@@ -5277,17 +5279,30 @@ func (a *App) RemoveAccount(id string) string {
 	a.acctMu.Lock()
 	delete(a.acctStatus, id)
 	a.acctMu.Unlock()
-	_ = account.DeleteSecret(id)
-	if err := account.Update(d.AccountsFile(), func(s *account.Store) error { s.Remove(id); return nil }); err != nil {
+	if err := forgetAccountFiles(d, id, clearData, account.DeleteSecret, a.clearSyncData); err != nil {
 		return err.Error()
 	}
-	a.clearSyncData(d.WithAccount(id), id)
 	// Folders held back because the removed account used them too can sync
 	// again: re-ask the gate now rather than at the next start. Live mode only;
 	// in on-demand mode an account's pairs must never get live watchers.
 	a.regateAll()
 	a.emit("account")
 	return ""
+}
+
+// forgetAccountFiles drops an account's keychain secret and store entry, and
+// its sync setup and local sync database only when clearData is set. The
+// secret deleter and the data clearer are injected so tests stay off the real
+// keychain.
+func forgetAccountFiles(d config.Dirs, id string, clearData bool, deleteSecret func(string) error, clear func(config.Dirs, string)) error {
+	_ = deleteSecret(id)
+	if err := account.Update(d.AccountsFile(), func(s *account.Store) error { s.Remove(id); return nil }); err != nil {
+		return err
+	}
+	if clearData {
+		clear(d.WithAccount(id), id)
+	}
+	return nil
 }
 
 // SignOut forgets the account (store + keychain), tears down syncing and any
@@ -5300,9 +5315,29 @@ func (a *App) RemoveAccount(id string) string {
 // quick re-login. With clearData true they're wiped too, for a clean reset (and
 // so a fresh login can't mistake a since-deleted local folder for user deletions
 // and propagate them to the server). UI preferences are kept either way.
-func (a *App) SignOut(clearData bool) string {
+//
+// acct names the account to sign out; "" or the default account's id signs out
+// the shown account as described above. Any other configured account is
+// disconnected on its own, leaving the default account's syncing untouched.
+func (a *App) SignOut(acct string, clearData bool) string {
 	if !a.policyNow().AllowSignOut {
 		return "Sign out is disabled by your organisation's policy."
+	}
+	if acct != "" {
+		d, err := config.Resolve()
+		if err != nil {
+			return err.Error()
+		}
+		st, err := account.LoadStore(d.AccountsFile())
+		if err != nil {
+			return err.Error()
+		}
+		if _, ok := st.Find(acct); !ok {
+			return "no such account"
+		}
+		if cur, ok := st.Default(); !ok || cur.ID != acct {
+			return a.signOutOther(d, acct, clearData)
+		}
 	}
 	// Unmount only the account signing out; the others keep their roots
 	// registered (unmounting them too flattened their folders, GitHub #11).
