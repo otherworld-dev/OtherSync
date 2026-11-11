@@ -62,6 +62,14 @@ func TestPairsAndBaseDirFromDisk(t *testing.T) {
 	if g := baseDirFromDisk(d, "b"); g != `C:\B\All` {
 		t.Fatalf("baseDir with whole-account pair = %q", g)
 	}
+	// "/" is the whole account too, as baseDirOf and healedBaseDir read it.
+	_ = d.WithAccount("b").SavePairs([]config.SyncPair{
+		{LocalDir: `C:\B\Docs`, RemoteRoot: "/Docs"},
+		{LocalDir: `C:\B\Root`, RemoteRoot: "/"},
+	})
+	if g := baseDirFromDisk(d, "b"); g != `C:\B\Root` {
+		t.Fatalf(`baseDir with a "/" whole-account pair = %q`, g)
+	}
 }
 
 // A write aimed at an account with no running engine must refuse before it

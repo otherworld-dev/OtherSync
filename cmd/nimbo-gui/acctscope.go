@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/otherworld/nimbo/internal/agent"
 	"github.com/otherworld/nimbo/internal/config"
@@ -70,7 +71,7 @@ func baseDirFromDisk(d config.Dirs, id string) string {
 	ad := d.WithAccount(id)
 	if pairs, err := ad.LoadPairs(); err == nil {
 		for _, p := range pairs {
-			if p.RemoteRoot == "" {
+			if strings.Trim(p.RemoteRoot, "/") == "" {
 				return p.LocalDir
 			}
 		}
