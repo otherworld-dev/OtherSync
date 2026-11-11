@@ -24,7 +24,6 @@
     accounts: AccountEntry[];
     policy: { allowSignOut: boolean };
     brandName: string;
-    brandHelp?: string;
     // File availability is app-wide and owned by the parent; the folder views
     // follow it. folderRefresh is bumped by the parent when a mode switch
     // finishes, which can change the folder list without changing the mode.
@@ -430,7 +429,7 @@
 {#if syncMode === "ondemand"}
   <!-- On-demand mode: the whole account is virtual; the list below pins folders, it doesn't pick what syncs. -->
   <div class="row"><h3>Virtual file system</h3></div>
-  <p class="fhint">Your whole Nextcloud account is in your sync folder. Files stay online-only and download when you open them. To copy chosen folders to this PC as ordinary files instead, switch <b>File availability</b> to <b>Live file system</b> above.</p>
+  <p class="fhint">Your whole Nextcloud account is in your sync folder. Files stay online-only and download when you open them. To copy chosen folders to this PC as ordinary files instead, switch <b>File availability</b> to <b>Live file system</b> on the <b>Sync</b> page.</p>
   <div class="logrow"><button class="primary small" onclick={() => App.OpenFolder(baseDir)} disabled={!baseDir}>Open sync folder</button></div>
 
   {#if !readOnly}

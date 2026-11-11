@@ -5535,6 +5535,7 @@ func (a *App) SaveLocalAddress(acct, addr, pin string) string {
 		if err := eng.ApplyLocalRoute(ctx, nil); err != nil {
 			return err.Error()
 		}
+		a.emit("account") // the Settings page shows the change at once
 		return ""
 	}
 	dto, lr := a.testLocalAddress(ctx, eng, addr, pin)
@@ -5547,6 +5548,7 @@ func (a *App) SaveLocalAddress(acct, addr, pin string) string {
 	if err := eng.ApplyLocalRoute(ctx, lr); err != nil {
 		return err.Error()
 	}
+	a.emit("account")
 	return ""
 }
 
@@ -5936,8 +5938,8 @@ func normalizeServer(s string) string {
 // Kept as-is (a bound method) so the frontend bindings don't need regenerating.
 func (a *App) OpenSettings() { a.openSettingsTab("") }
 
-// openSettingsTab opens (or focuses) the settings window on a specific tab
-// ("folders" | "sync" | "exclusions" | "appearance" | "general"; "" = default).
+// openSettingsTab opens (or focuses) the settings window on a specific page
+// ("sync" | "exclusions" | "appearance" | "general"; "" = the shown account).
 // Internal, NOT a binding — the tab reaches the frontend via the URL-hash query
 // on first open and a "settings-tab" event when the window is already open, so
 // no new App method (and no risky bindings regen) is needed.
@@ -5955,7 +5957,7 @@ func (a *App) openSettingsTab(tab string) {
 		url += "?tab=" + tab
 	}
 	a.settingsWin = a.app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Name: "settings", Title: brand.Current.Name + " — Settings", Width: 720, Height: 600, URL: url,
+		Name: "settings", Title: brand.Current.Name + " — Settings", Width: 880, Height: 640, URL: url,
 	})
 	a.settingsWin.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) { a.settingsWin = nil })
 }

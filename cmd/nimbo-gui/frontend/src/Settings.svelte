@@ -3,7 +3,8 @@
   import { ask, tell } from "./dialogs.svelte";
   import { Events } from "@wailsio/runtime";
   import AccountPage from "./AccountPage.svelte";
-  import type { AccountEntry } from "./accounts";
+  import Icon, { type IconName } from "./Icon.svelte";
+  import { initialSelection, nextSelection, needsAttention, type AccountEntry, type AppPage, type Selection } from "./accounts";
 
   let brandName = $state("OtherSync");
   let brandCompany = $state("Otherworld Dev Ltd");
@@ -25,24 +26,41 @@
     { managed: false, lockServer: false, serverUrl: "", allowSignOut: true, lockBandwidth: false, lockSyncMode: false });
   (async () => { policy = await App.PolicyInfo(); })();
 
-  type SettingsTab = "folders" | "sync" | "exclusions" | "appearance" | "general";
-  const TABS: SettingsTab[] = ["folders", "sync", "exclusions", "appearance", "general"];
+  // The left-hand list: one page per account, then the app-wide pages.
+  const APP_PAGES: { page: AppPage; label: string; icon: IconName }[] = [
+    { page: "sync", label: "Sync", icon: "sync" },
+    { page: "exclusions", label: "Exclusions", icon: "exclude" },
+    { page: "appearance", label: "Appearance", icon: "appearance" },
+    { page: "general", label: "General", icon: "general" },
+  ];
 
   // Deep-link support: a toast (e.g. "update available") opens this window on a
-  // specific tab. First open carries it in the URL hash (/#settings?tab=general);
-  // an already-open window gets a "settings-tab" event instead.
-  function tabFromHash(): SettingsTab | "" {
+  // specific page. First open carries it in the URL hash (/#settings?tab=general);
+  // an already-open window gets a "settings-tab" event instead. Either goes
+  // through initialSelection, which falls back to the shown account for a tab
+  // it doesn't know.
+  function tabFromHash(): string {
     const h = window.location.hash;
     const q = h.indexOf("?");
     if (q < 0) return "";
-    const t = new URLSearchParams(h.slice(q + 1)).get("tab") || "";
-    return (TABS as string[]).includes(t) ? (t as SettingsTab) : "";
+    return new URLSearchParams(h.slice(q + 1)).get("tab") || "";
   }
-  let tab = $state<SettingsTab>(tabFromHash() || "folders");
+  let accounts = $state<AccountEntry[]>([]);
+  // null until the account list has loaded once: picking from the empty list
+  // before then would land on the signed-out view.
+  let sel = $state.raw<Selection | null>(null);
+  let pendingTab = tabFromHash();
   Events.On("settings-tab", (e: any) => {
-    const t = e?.data as string;
-    if ((TABS as string[]).includes(t)) tab = t as SettingsTab;
+    const t = (e?.data as string) || "";
+    if (sel === null) { pendingTab = t; return; }
+    sel = initialSelection(accounts, t);
   });
+  const page = $derived(sel?.kind === "app" ? sel.page : "");
+  // The account page is keyed on this id string, never on the account entry:
+  // the list is refetched every 3 s, and a remount mid-flow would drop an add
+  // or Choose folders in progress.
+  const selAcctId = $derived(sel?.kind === "account" ? sel.id : "");
+  const selAcct = $derived(accounts.find(a => a.id === selAcctId));
 
   // Auto-save feedback: flash a small "Saved ✓" next to the control that just
   // persisted (keyed so several controls don't fight over one indicator).
@@ -154,31 +172,17 @@
   function addAllowed() { const p = newAllowed.trim(); if (!p || allowed.includes(p)) return; allowed = [...allowed, p]; newAllowed = ""; App.SetAllowedFilenames(allowed); }
   function rmAllowed(p: string) { allowed = allowed.filter(x => x !== p); App.SetAllowedFilenames(allowed); }
 
-  // Accounts. Every configured account syncs side by side; the active one is
-  // what the tray shows. Its page (AccountPage) acts on it by id, and is keyed
-  // on that id below, so an active-account change starts a fresh page (no add
-  // flow or staged folder changes carried over from the other account).
-  // Background accounts emit "account" on every status change; the list
-  // refreshes each time, and the 3 s poll below keeps it current too.
-  let accounts = $state<AccountEntry[]>([]);
-  let accountsLoaded = $state(false);
-  const activeAccount = $derived(accounts.find(a => a.active));
-  let acctBusy = $state(false);
-  async function loadAccounts() { accounts = (await App.ListAccounts()) ?? []; accountsLoaded = true; }
+  // Accounts. Every configured account syncs side by side and has its own page
+  // (AccountPage), which acts on it by id. Background accounts emit "account"
+  // on every status change; the list refreshes each time, and the 3 s poll
+  // below keeps it current too. The selection follows the list: an account
+  // that goes away (signed out) hands over to the shown one.
+  async function loadAccounts() {
+    accounts = (await App.ListAccounts()) ?? [];
+    sel = sel === null ? initialSelection(accounts, pendingTab) : nextSelection(accounts, sel);
+  }
   loadAccounts();
   Events.On("account", loadAccounts);
-  async function switchAccount(id: string) {
-    acctBusy = true;
-    const err = await App.SwitchAccount(id);
-    acctBusy = false;
-    if (err) { tell({ title: "Couldn't switch account", message: err }); return; }
-    await loadAccounts();
-  }
-  async function removeAccount(id: string) {
-    const err = await App.RemoveAccount(id);
-    if (err) { tell({ title: "Couldn't remove the account", message: err }); return; }
-    await loadAccounts();
-  }
 
   let autoSupported = $state(false), auto = $state(false);
   (async () => { autoSupported = await App.AutostartSupported(); auto = await App.AutostartEnabled(); })();
@@ -569,24 +573,51 @@
 </script>
 
 <div class="win">
-  <nav>
-    <button class:active={tab==="folders"} onclick={() => tab="folders"}>Folders</button>
-    <button class:active={tab==="sync"} onclick={() => tab="sync"}>Sync</button>
-    <button class:active={tab==="exclusions"} onclick={() => tab="exclusions"}>Exclusions</button>
-    <button class:active={tab==="appearance"} onclick={() => tab="appearance"}>Appearance</button>
-    <button class:active={tab==="general"} onclick={() => tab="general"}>General</button>
+  <nav class="side" aria-label="Settings">
+    <div class="glabel">Accounts</div>
+    {#each accounts as ac (ac.id)}
+      {@const warn = needsAttention(ac)}
+      <button class="srow acctrow" class:sel={selAcctId === ac.id} aria-current={selAcctId === ac.id ? "page" : undefined}
+              title={`${ac.user} on ${ac.server}${ac.status ? " — " + ac.status : ""}`}
+              onclick={() => (sel = { kind: "account", id: ac.id })}>
+        <span class="av" aria-hidden="true">{(ac.user || "?").slice(0, 1).toUpperCase()}<span class="dot" class:warn></span></span>
+        <span class="who">
+          <span class="user">{ac.user}</span>
+          <span class="host">{hostname(ac.server)}</span>
+        </span>
+        {#if warn}<span class="sr">(needs attention)</span>{/if}
+      </button>
+    {/each}
+    <button class="srow addacct" onclick={() => App.AddAccount()}>＋ Add account</button>
+
+    <div class="glabel">App</div>
+    {#each APP_PAGES as ap (ap.page)}
+      <button class="srow" class:sel={page === ap.page} aria-current={page === ap.page ? "page" : undefined}
+              onclick={() => (sel = { kind: "app", page: ap.page })}>
+        <span class="ico"><Icon name={ap.icon} size={15} /></span>{ap.label}
+      </button>
+    {/each}
   </nav>
 
   <div class="body">
     {#if policy.managed}
       <div class="mgbanner">🔒 Some settings are managed by your organisation.</div>
     {/if}
-    {#if tab === "folders"}
+    {#if selAcct}
+      {#key selAcctId}
+        <AccountPage acct={selAcct} {accounts} {policy} {brandName} {syncMode} {folderRefresh} />
+      {/key}
+    {:else if sel?.kind === "signedout"}
+      <!-- A button rather than pointing at "the sign-in window": once that
+           window was closed, nothing here led back to it (GitHub #20). -->
+      <p class="empty">Signed out. <button class="link" onclick={() => App.AddAccount()}>Sign in</button></p>
+
+    {:else if page === "sync"}
       {#if onDemandSupported}
+        <h3>File availability</h3>
         <div class="field">
-          <label>File availability</label>
-          <p class="fhint">Live keeps every file on your disk. Virtual file system shows your whole account as online-only placeholders in your sync folder and downloads each file when you open it. Switching applies to the account and persists across restarts.{#if brandHelp} <button class="link" onclick={() => App.OpenURL(helpPage("file-modes"))}>Which should I pick?</button>{/if}</p>
-          <select bind:value={syncMode} onchange={saveSyncMode} disabled={syncModeBusy || policy.lockSyncMode}>
+          <p class="fhint">Live keeps every file on your disk. Virtual file system shows your whole account as online-only placeholders in its sync folder and downloads each file when you open it. This applies to every account and persists across restarts.{#if brandHelp} <button class="link" onclick={() => App.OpenURL(helpPage("file-modes"))}>Which should I pick?</button>{/if}</p>
+          <select aria-label="File availability" bind:value={syncMode} onchange={saveSyncMode} disabled={syncModeBusy || policy.lockSyncMode}>
             <option value="live">Live file system</option>
             <option value="ondemand">Virtual file system</option>
           </select>
@@ -607,7 +638,7 @@
             {#if revert.folders}
               <p class="hint">Your sync folders are restored automatically.</p>
             {:else}
-              <p class="hint">No sync folder is set up, so nothing will sync after the switch until you add one (Settings → Folders → Add folder).</p>
+              <p class="hint">No sync folder is set up, so nothing will sync after the switch until you add one (pick an account on the left, then Add folder).</p>
             {/if}
             <div class="addbtns">
               <button class="primary" onclick={confirmRevert}>Switch to normal files</button>
@@ -714,21 +745,7 @@
           {#if badgesMsg}<br />{badgesMsg}{/if}
         </p>
       {/if}
-      <!-- The shown account's page, until the account list replaces these
-           tabs. Keyed on the id string, not the entry: the account list is
-           refetched every 3 s, and a remount mid-flow would drop an add or
-           Choose folders in progress. -->
-      {#if activeAccount}
-        {#key activeAccount.id}
-          <AccountPage acct={activeAccount} {accounts} {policy} {brandName} {brandHelp} {syncMode} {folderRefresh} />
-        {/key}
-      {:else if accountsLoaded}
-        <!-- A button rather than pointing at "the sign-in window": once that
-             window was closed, nothing here led back to it (GitHub #20). -->
-        <p class="empty">Signed out. <button class="link" onclick={() => App.AddAccount()}>Sign in</button></p>
-      {/if}
 
-    {:else if tab === "sync"}
       <h3>Bandwidth</h3>
       <div class="field"><label>Upload limit (KiB/s, 0 = unlimited)</label><input type="number" bind:value={up_} onchange={saveLimits} disabled={policy.lockBandwidth} /></div>
       <div class="field"><label>Download limit (KiB/s, 0 = unlimited)</label><input type="number" bind:value={down_} onchange={saveLimits} disabled={policy.lockBandwidth} /></div>
@@ -789,7 +806,8 @@
       <label class="check"><input type="checkbox" checked={lowMem} onchange={toggleLowMem} /> Low memory mode</label>
       <p class="fhint">Keeps {brandName}'s footprint small by reading sync state from disk instead of holding it all in memory. Recommended. Turn off only if you want the fastest possible background re-syncs on a very large account (uses noticeably more RAM); local edits are unaffected either way.</p>
 
-    {:else if tab === "exclusions"}
+
+    {:else if page === "exclusions"}
       <h3>Ignore patterns</h3>
       <p class="fhint">Glob patterns excluded from every sync folder (left untouched on both sides — not synced, not deleted). A name with no slash matches at any depth (<code>node_modules</code>, <code>*.log</code>); a name with a slash matches a full path (<code>build/out</code>). Applies on the next sync.</p>
       <div class="addrow"><input placeholder="*.log or node_modules/" bind:value={newPat} onkeydown={(e) => e.key === "Enter" && addPat()} /><button onclick={addPat}>Add</button></div>
@@ -818,7 +836,7 @@
       {/each}
       {#if !((diag as any)?.escapeExtensions?.length)}<p class="empty">None — server-rejected names stay on this device only.</p>{/if}
 
-    {:else if tab === "appearance"}
+    {:else if page === "appearance"}
       <h3>Panel</h3>
       <p class="fhint">Customise the tray flyout panel — changes apply live.</p>
       <div class="approw"><label>Width</label>
@@ -878,37 +896,7 @@
         <button class="link secadd" onclick={() => toggleSection(k)}>+ Show {sectionLabels[k]}</button>
       {/each}
 
-    {:else}
-      <h3>Account</h3>
-      {#if accountsLoaded && !activeAccount}
-        <!-- A button rather than pointing at "the sign-in window": once that
-             window was closed, nothing here led back to it (GitHub #20). -->
-        <p class="empty">Signed out. <button class="link" onclick={() => App.AddAccount()}>Sign in</button></p>
-      {/if}
-      {#if accounts.length > 1}
-        <p class="fhint">All accounts sync at the same time. The <b>shown</b> account is the one the menus, folder settings, and search use — switch to manage a different one.</p>
-        {#each accounts as ac}
-          <div class="conn">
-            <div class="connmain">
-              <span class="remote">{ac.user}</span>
-              <span class="local" title={ac.server}>{ac.server}</span>
-              {#if ac.active}<span class="tag">✓ shown</span>{/if}
-            </div>
-            <div class="connacts">
-              {#if ac.status === "Sign in again"}
-                <!-- The button says it; the status beside it said it twice. -->
-                <button class="link" onclick={() => App.SignInAgain(ac.id)}>Sign in again</button>
-              {:else if ac.status && !ac.active}<span class="acctstatus" title={ac.status}>{ac.status}</span>{/if}
-              {#if !ac.active}
-                <button class="link" disabled={acctBusy} onclick={() => switchAccount(ac.id)}>Show</button>
-                <button class="link danger" title="Remove this account from this device (its local files are kept)" onclick={() => removeAccount(ac.id)}>Remove</button>
-              {/if}
-            </div>
-          </div>
-        {/each}
-      {/if}
-      <div class="logrow"><button class="primary small" onclick={() => App.AddAccount()}>＋ Add account</button></div>
-
+    {:else if page === "general"}
       <h3>Preferences</h3>
       <div class="field">
         <label>Appearance</label>
@@ -1025,12 +1013,29 @@
 </div>
 
 <style>
-  .win { height: 100%; display: flex; flex-direction: column; background: var(--bg); color: var(--fg); }
-  nav { display: flex; border-bottom: 1px solid var(--border); }
-  nav button { flex: 1; padding: 12px 8px; border: none; background: none; cursor: pointer; font-size: 13px;
-               color: var(--fg2); border-bottom: 2px solid transparent; }
-  nav button:hover { background: var(--panel-2); }
-  nav button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  .win { height: 100%; display: flex; background: var(--bg); color: var(--fg); }
+  /* Left-hand list: accounts, then the app-wide pages. */
+  .side { flex: 0 0 170px; width: 170px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px;
+          padding: 12px 8px; background: var(--panel); border-right: 1px solid var(--border); }
+  .glabel { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+            padding: 0 8px; margin: 4px 0 4px; }
+  .glabel ~ .glabel { margin-top: 14px; }
+  .srow { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: none; border-radius: 6px;
+          background: none; color: var(--fg); cursor: pointer; text-align: left; font-size: 13px; }
+  .srow:hover { background: var(--hover); }
+  .srow.sel { background: var(--tint); color: var(--accent); font-weight: 600; }
+  .srow .ico { flex: 0 0 auto; width: 26px; display: flex; justify-content: center; color: var(--fg2); }
+  .srow.sel .ico { color: var(--accent); }
+  .av { position: relative; flex: 0 0 auto; width: 26px; height: 26px; border-radius: 50%; display: flex;
+        align-items: center; justify-content: center; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; }
+  .dot { position: absolute; right: -2px; bottom: -2px; width: 9px; height: 9px; border-radius: 50%;
+         background: #2e9e44; border: 2px solid var(--panel); }
+  .dot.warn { background: #d08b00; }
+  .who { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+  .who .user, .who .host { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .who .host { font-size: 11px; font-weight: 400; color: var(--muted); }
+  .addacct { color: var(--accent); font-size: 12.5px; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .body { flex: 1; overflow-y: auto; padding: 14px 16px; }
   .hint { color: var(--fg2); font-size: 12px; margin: 0 0 12px; }
   .approw { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0; }
@@ -1073,11 +1078,6 @@
   .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 18px 0 12px; }
   .row:first-child { margin-top: 0; }
   .row h3 { margin: 0; }
-  .conn { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px;
-          border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; background: var(--panel); }
-  .connmain { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; }
-  .connmain .remote { font-weight: 600; color: var(--accent); white-space: nowrap; }
-  .acctstatus { color: var(--muted); font-size: 11px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .saved { color: #2e9e5b; font-size: 12px; font-weight: 600; align-self: center; animation: savedfade 1.5s forwards; }
   .managed { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
   .mgbanner { background: color-mix(in srgb, var(--accent) 12%, var(--panel)); border: 1px solid var(--accent);
@@ -1090,9 +1090,7 @@
                background: var(--bg); color: var(--fg); cursor: pointer; font-size: 12px; }
   .aboutco { color: var(--muted); font-size: 12px; margin: 10px 0 0; }
   .aboutco .link { font-size: 12px; }
-  .connmain .local { color: var(--fg2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .danger { color: #c0392b; }
-  .connacts { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
   .hint code { font-size: 11px; background: var(--bg2, rgba(127,127,127,.12)); padding: 0 3px; border-radius: 3px; }
   .modalback { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex;
                align-items: center; justify-content: center; z-index: 50; }
@@ -1103,7 +1101,6 @@
   .addbtns .primary { padding: 7px 14px; }
   .addbtns button:not(.primary) { padding: 7px 12px; border: 1px solid var(--border-2); border-radius: 6px; background: var(--bg); color: var(--fg); cursor: pointer; }
   .acts { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
-  .tag { font-size: 12px; color: #2e7d32; white-space: nowrap; flex: 0 0 auto; }
   .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; max-width: 340px; }
   .field label { font-size: 12px; color: var(--fg2); }
   .field input { padding: 7px 8px; border: 1px solid var(--border-2); border-radius: 5px; background: var(--bg); color: var(--fg); }
