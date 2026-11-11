@@ -1,7 +1,7 @@
 <script lang="ts">
   // One account's page in the Settings window: its header (status, Sign in
   // again, Sign out), sync folder location, folders, local network address and
-  // Explorer sidebar name. Every App call names this account (acct.id), so the
+  // Explorer sidebar name. Every App call names this account (acctId), so the
   // page never acts on whichever account the tray happens to show. It emits
   // nothing: the backend raises "account" after a change and the parent
   // reloads the account list.
@@ -30,6 +30,13 @@
     syncMode: string;
     folderRefresh?: number;
   } = $props();
+
+  // The account this page acts on, read once. The parent re-creates the page
+  // when the selection changes ({#key}), but acct is a live getter on the
+  // parent's selection: code still running after an await on a page that's
+  // gone would read the NEW account's id and act on it. Every App call uses
+  // acctId; only what's displayed reads acct.
+  const acctId = untrack(() => acct.id);
 
   // An account with no running engine (needs signing in again, or failed to
   // start) shows its folders from disk, read-only.
@@ -80,10 +87,10 @@
   const mPlan = $derived(planChanges(mTarget, mCommitted));
 
   async function loadFolders() {
-    pairs = (await App.GetPairs(acct.id)) ?? [];
-    synced = (await App.SyncedRemotes(acct.id)) ?? [];
-    baseDir = await App.GetBaseDir(acct.id);
-    if (adding && step === "browse") entries = (await App.BrowseRemote(acct.id, cur)) ?? [];
+    pairs = (await App.GetPairs(acctId)) ?? [];
+    synced = (await App.SyncedRemotes(acctId)) ?? [];
+    baseDir = await App.GetBaseDir(acctId);
+    if (adding && step === "browse") entries = (await App.BrowseRemote(acctId, cur)) ?? [];
   }
 
   async function startAdding() {
@@ -148,12 +155,12 @@
     const errs: { rel: string; msg: string }[] = [];
     for (const rel of plan.exclude) {
       try {
-        const err = await App.DeselectFolder(acct.id, dir, rel, deleteLocal);
+        const err = await App.DeselectFolder(acctId, dir, rel, deleteLocal);
         if (err) errs.push({ rel, msg: err });
       } catch (e) { errs.push({ rel, msg: String(e) }); }
     }
     for (const rel of plan.include) {
-      try { await App.RemoveExclude(acct.id, dir, rel); }
+      try { await App.RemoveExclude(acctId, dir, rel); }
       catch (e) { errs.push({ rel, msg: String(e) }); }
     }
     await loadFolders();
@@ -205,7 +212,7 @@
     busy = true; addErr = "";
     if (everything) {
       const dir = parent.trim();
-      const err = !dir ? "Choose a local folder" : await App.AddSyncPair(acct.id, dir, "");
+      const err = !dir ? "Choose a local folder" : await App.AddSyncPair(acctId, dir, "");
       busy = false;
       if (err) { addErr = err; return; }
       exitAdding();
@@ -220,10 +227,10 @@
       // server copy is always kept; the folder simply re-downloads into its new home.
       const cov = coveringPair(r);
       if (cov) {
-        const derr = await App.DeselectFolder(acct.id, cov.localDir, relWithin(r, trim(cov.remoteRoot)), true);
+        const derr = await App.DeselectFolder(acctId, cov.localDir, relWithin(r, trim(cov.remoteRoot)), true);
         if (derr) { errs.push(`/${r}: ${derr}`); continue; }
       }
-      const err = await App.AddSyncPair(acct.id, joinLocal((names[r] || base(r)).trim()), r);
+      const err = await App.AddSyncPair(acctId, joinLocal((names[r] || base(r)).trim()), r);
       if (err) errs.push(`/${r}: ${err}`);
     }
     busy = false;
@@ -232,7 +239,7 @@
     await loadFolders();
   }
   async function removePair(p: Pair) {
-    await App.RemoveSyncFolder(acct.id, trim(p.remoteRoot), false); // keep local files
+    await App.RemoveSyncFolder(acctId, trim(p.remoteRoot), false); // keep local files
     await loadFolders();
   }
 
@@ -247,7 +254,7 @@
   let resumeBusy = $state("");
   async function resumeFrozen(p: Pair) {
     resumeBusy = p.localDir;
-    const err = await App.SetSyncMode("guard-resume:" + acct.id + "\n" + p.localDir);
+    const err = await App.SetSyncMode("guard-resume:" + acctId + "\n" + p.localDir);
     if (err) tell({ title: "Couldn't resume syncing", message: err });
     await loadFolders();
     resumeBusy = "";
@@ -273,7 +280,7 @@
       ok: "Move",
     })) return;
     moveBusy = true;
-    const err = await App.MoveSyncFolder(acct.id, p.localDir, dest);
+    const err = await App.MoveSyncFolder(acctId, p.localDir, dest);
     moveBusy = false;
     if (err) { tell({ title: "Couldn't move the folder", message: err }); return; }
     await loadFolders();
@@ -294,8 +301,8 @@
   // read the folder back rather than assuming it was saved.
   const saveBase = async () => {
     const want = baseDir.trim();
-    await App.SetBaseDir(acct.id, want);
-    baseDir = await App.GetBaseDir(acct.id);
+    await App.SetBaseDir(acctId, want);
+    baseDir = await App.GetBaseDir(acctId);
     if (baseDir === want) flashSaved("base");
   };
 
@@ -304,12 +311,12 @@
   let offCur = $state("");
   let offEntries = $state<OffEntry[]>([]);
   let pinBusy = $state(false);
-  async function loadOffline() { offEntries = (await App.BrowseOffline(acct.id, offCur)) ?? []; }
+  async function loadOffline() { offEntries = (await App.BrowseOffline(acctId, offCur)) ?? []; }
   const offNav = async (rel: string) => { offCur = rel; await loadOffline(); };
   const offUp = () => offNav(offCur.split("/").slice(0, -1).join("/"));
   async function togglePin(e: OffEntry) {
     pinBusy = true;
-    const err = await App.SetOfflinePin(acct.id, e.rel, !e.pinned);
+    const err = await App.SetOfflinePin(acctId, e.rel, !e.pinned);
     pinBusy = false;
     if (err) { tell({ title: "Couldn't change Keep on this PC", message: err }); return; }
     await loadOffline();
@@ -333,7 +340,7 @@
   let signOutOpen = $state(false);
   let clearOnSignOut = $state(false);
   async function signOut() {
-    const err = await App.SignOut(acct.id, clearOnSignOut);
+    const err = await App.SignOut(acctId, clearOnSignOut);
     if (err) { tell({ title: "Couldn't sign out", message: err }); return; }
     signOutOpen = false;
   }
@@ -351,13 +358,13 @@
   $effect(() => { localAddr = savedLocal; });
   async function testLocal(pin = "") {
     localBusy = true; localTest = null; localPin = pin;
-    try { localTest = await App.TestLocalAddress(acct.id, localAddr, pin); }
+    try { localTest = await App.TestLocalAddress(acctId, localAddr, pin); }
     finally { localBusy = false; }
   }
   async function saveLocal() {
     localBusy = true;
     try {
-      const err = await App.SaveLocalAddress(acct.id, localAddr, localPin);
+      const err = await App.SaveLocalAddress(acctId, localAddr, localPin);
       if (err) { tell({ title: "Couldn't save the local address", message: err }); return; }
       localTest = null; localPin = "";
       flashSaved("local");
@@ -366,7 +373,7 @@
   async function clearLocal() {
     localBusy = true;
     try {
-      const err = await App.SaveLocalAddress(acct.id, "", "");
+      const err = await App.SaveLocalAddress(acctId, "", "");
       if (err) { tell({ title: "Couldn't clear the local address", message: err }); return; }
       localTest = null; localPin = ""; localAddr = "";
     } finally { localBusy = false; }
@@ -385,10 +392,10 @@
   let navSupported = $state(false);
   (async () => { navSupported = await App.SidebarSupported(); })();
   async function saveNavName(name: string) {
-    const err = await App.SetAccountSidebarName(acct.id, name);
+    const err = await App.SetAccountSidebarName(acctId, name);
     if (err) tell({ title: "Couldn't rename the sidebar entry", message: err });
   }
-  const navNameClash = $derived(sidebarClashes(accounts).has(acct.id));
+  const navNameClash = $derived(sidebarClashes(accounts).has(acctId));
 </script>
 
 <div class="acct">
@@ -401,7 +408,7 @@
     {/if}
   </div>
   <div class="acctacts">
-    {#if needsAttention(acct)}<button class="link" onclick={() => App.SignInAgain(acct.id)}>Sign in again</button>{/if}
+    {#if needsAttention(acct)}<button class="link" onclick={() => App.SignInAgain(acctId)}>Sign in again</button>{/if}
     {#if policy.allowSignOut}<button class="signout" onclick={() => (signOutOpen = !signOutOpen)}>Sign out</button>{:else}<span class="managed">🔒 Managed by your organisation</span>{/if}
   </div>
 </div>
@@ -420,9 +427,9 @@
   <p class="fhint ronote">This account isn't syncing right now. Sign in again to change its folders.</p>
 {:else}
   <div class="field">
-    <label for={"basedir-" + acct.id}>Sync folder location</label>
+    <label for={"basedir-" + acctId}>Sync folder location</label>
     <p class="fhint">Where newly-added folders are placed by default.</p>
-    <div class="baserow"><input id={"basedir-" + acct.id} bind:value={baseDir} onchange={saveBase} />{#if savedFlash === "base"}<span class="saved">Saved ✓</span>{/if}</div>
+    <div class="baserow"><input id={"basedir-" + acctId} bind:value={baseDir} onchange={saveBase} />{#if savedFlash === "base"}<span class="saved">Saved ✓</span>{/if}</div>
   </div>
 {/if}
 
@@ -521,7 +528,7 @@
   <p class="hint mhint">Untick a folder to stop syncing it, tick it to sync it again. A half-ticked folder has some folders inside it that don’t sync; tick it to sync all of it. Your files on the server are always kept, and nothing changes until you press <b>Apply</b>.</p>
   {#key managePair.localDir}
     <FolderPicker root={managePair.remoteRoot} committed={mCommitted} bind:target={mTarget} bind:sizes={mSizes} disabled={mBusy}
-                  browse={(p) => App.BrowseRemote(acct.id, p)} />
+                  browse={(p) => App.BrowseRemote(acctId, p)} />
   {/key}
   {#if mErrors.length}
     <div class="merrs">
@@ -658,10 +665,10 @@
 
 {#if !readOnly && acct.server.toLowerCase().startsWith("https://")}
   <div class="field localroute">
-    <label for={"localaddr-" + acct.id}>Local network address</label>
+    <label for={"localaddr-" + acctId}>Local network address</label>
     <p class="fhint">Sync directly with your server when you're on the same network; {brandName} uses the internet address whenever the local one isn't reachable. Needs HTTPS on that address — a self-signed certificate is fine. Leave empty if your server isn't on your network. Your local address must serve the same site, including the /push/ws notification socket.</p>
     <div class="baserow">
-      <input id={"localaddr-" + acct.id} placeholder="192.168.1.100" bind:value={localAddr} disabled={localBusy} oninput={() => { localTest = null; localPin = ""; }} onkeydown={(e) => { if (e.key === "Enter" && localAddr.trim()) testLocal(); }} />
+      <input id={"localaddr-" + acctId} placeholder="192.168.1.100" bind:value={localAddr} disabled={localBusy} oninput={() => { localTest = null; localPin = ""; }} onkeydown={(e) => { if (e.key === "Enter" && localAddr.trim()) testLocal(); }} />
       <button class="small" disabled={localBusy || !localAddr.trim()} onclick={() => testLocal()}>{localBusy ? "Testing…" : "Test"}</button>
       {#if acct.localAddress}<button class="link danger" disabled={localBusy} onclick={clearLocal}>Remove</button>{/if}
       {#if savedFlash === "local"}<span class="saved">Saved ✓</span>{/if}
@@ -689,8 +696,8 @@ SHA-256: {localTest.fingerprint}</pre>
 
 {#if navSupported}
   <div class="field navname">
-    <label for={"navname-" + acct.id}>Explorer sidebar name</label>
-    <input id={"navname-" + acct.id} type="text" maxlength="80" placeholder={acct.sidebarAuto} value={acct.sidebarName} onchange={(e) => saveNavName(e.currentTarget.value)} />
+    <label for={"navname-" + acctId}>Explorer sidebar name</label>
+    <input id={"navname-" + acctId} type="text" maxlength="80" placeholder={acct.sidebarAuto} value={acct.sidebarName} onchange={(e) => saveNavName(e.currentTarget.value)} />
     <p class="fhint">Leave it empty to use the name shown in grey.</p>
     {#if navNameClash}<p class="fhint danger">Two accounts have the same sidebar name, so you won't be able to tell their entries apart.</p>{/if}
   </div>
