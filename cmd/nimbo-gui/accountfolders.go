@@ -316,16 +316,14 @@ func (a *App) toastAccount(msg string) {
 	}
 }
 
-// suggestedFolderFor is the default folder to show eng's account (nil = the
-// active account) when it has none of its own yet. It never returns "", so the
-// UI always has a path to show; if nothing is free it falls back to
-// ~/Nextcloud, which every place that actually uses a folder checks before
-// doing so.
+// suggestedFolderFor is the default folder to show eng's account when it has
+// none of its own yet. nil means no running account (signed out): it is never
+// taken as the shown account, and the suggestion keeps clear of every account
+// but the store's default. It never returns "", so the UI always has a path to
+// show; if nothing is free it falls back to ~/Nextcloud, which every place that
+// actually uses a folder checks before doing so.
 func (a *App) suggestedFolderFor(eng *agent.Engine) string {
 	home, _ := os.UserHomeDir()
-	if eng == nil {
-		eng = a.eng
-	}
 	login := ""
 	if eng != nil {
 		login = eng.Account.LoginName
@@ -334,9 +332,11 @@ func (a *App) suggestedFolderFor(eng *agent.Engine) string {
 	var others []accountFolder
 	var usable func(string) bool
 	if ok {
-		id := a.activeAccountID(st)
+		id := ""
 		if eng != nil {
 			id = eng.Account.ID
+		} else if acc, found := st.Default(); found {
+			id = acc.ID
 		}
 		others = otherAccountFolders(d, st, id)
 		// With other accounts on this PC, a folder that already holds files is
