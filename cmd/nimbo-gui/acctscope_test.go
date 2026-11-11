@@ -142,3 +142,24 @@ func TestParseGuardResume(t *testing.T) {
 		}
 	}
 }
+
+// healedBaseDir picks the whole-account pair's folder when the stored baseDir
+// has drifted from it, and leaves everything else alone.
+func TestHealedBaseDir(t *testing.T) {
+	whole := []config.SyncPair{
+		{LocalDir: `C:\B\Docs`, RemoteRoot: "/Docs"},
+		{LocalDir: `D:\B`, RemoteRoot: "/"},
+	}
+	if dir, ok := healedBaseDir(whole, `C:\B`); !ok || dir != `D:\B` {
+		t.Errorf("drifted: got %q, %v; want D:\\B, true", dir, ok)
+	}
+	if dir, ok := healedBaseDir(whole, `D:\B`); ok || dir != "" {
+		t.Errorf("in step: got %q, %v; want no change", dir, ok)
+	}
+	if dir, ok := healedBaseDir(whole[:1], `C:\B`); ok || dir != "" {
+		t.Errorf("no whole-account pair: got %q, %v; want no change", dir, ok)
+	}
+	if dir, ok := healedBaseDir(nil, ""); ok || dir != "" {
+		t.Errorf("no pairs: got %q, %v; want no change", dir, ok)
+	}
+}

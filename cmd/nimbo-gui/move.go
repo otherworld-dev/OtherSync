@@ -60,12 +60,10 @@ func (a *App) MoveSyncFolder(acct, oldLocal, newLocal string) string {
 		return err.Error()
 	}
 
-	// The whole-account pair defines the account root: refresh the stored baseDir
-	// and the Explorer sidebar so "Open folder" and the sidebar follow the move.
-	// Both work on the shown account only.
-	if a.isShown(eng) {
-		a.healBaseDir()
-	}
+	// The whole-account pair defines the account root: refresh this account's
+	// stored baseDir and (shown account only) the Explorer sidebar so "Open
+	// folder" and the sidebar follow the move.
+	a.healBaseDirOf(eng)
 	a.regateAll() // a folder this one held back in another account may sync now
 	if a.isShown(eng) {
 		a.syncSidebar()

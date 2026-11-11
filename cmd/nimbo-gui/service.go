@@ -5974,22 +5974,39 @@ func (a *App) SetBaseDir(acct, dir string) {
 // account root, so persist it. No-op when there's no whole-account pair (e.g.
 // "choose what to sync" mode, where baseDir is the parent of several pairs).
 func (a *App) healBaseDir() {
-	if a.eng == nil {
+	a.healBaseDirOf(a.eng)
+}
+
+// healBaseDirOf is healBaseDir for eng's account: it only ever writes eng's
+// own stored baseDir.
+func (a *App) healBaseDirOf(eng *agent.Engine) {
+	if eng == nil {
 		return
 	}
-	pairs, err := a.eng.Pairs()
+	pairs, err := eng.Pairs()
 	if err != nil {
 		return
 	}
+	cur := eng.BaseDir()
+	if dir, ok := healedBaseDir(pairs, cur); ok {
+		_ = eng.SetBaseDir(dir)
+		slog.Info("healed stale baseDir", "account", eng.Account.ID, "from", cur, "to", dir)
+	}
+}
+
+// healedBaseDir decides whether an account's baseDir cur needs healing: it
+// returns the whole-account pair's local directory and true when there is one
+// and cur differs from it, else "" and false.
+func healedBaseDir(pairs []config.SyncPair, cur string) (string, bool) {
 	for _, p := range pairs {
 		if strings.Trim(p.RemoteRoot, "/") == "" {
-			if cur := a.eng.BaseDir(); cur != p.LocalDir {
-				_ = a.eng.SetBaseDir(p.LocalDir)
-				slog.Info("healed stale baseDir", "from", cur, "to", p.LocalDir)
+			if cur != p.LocalDir {
+				return p.LocalDir, true
 			}
-			return
+			return "", false
 		}
 	}
+	return "", false
 }
 
 // BrowseEntry is a remote folder/file for the folder picker.
