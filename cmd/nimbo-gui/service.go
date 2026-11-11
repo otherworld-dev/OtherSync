@@ -5138,12 +5138,42 @@ type AccountEntryDTO struct {
 	Active bool   `json:"active"`
 	Status string `json:"status"` // latest engine status line ("" if not running)
 	Route  string `json:"route"`  // "local" while syncing over the local network, else "public"
+	// Running is true while the account has a running engine; Syncing while
+	// that engine is mid-sync. RouteReason says why the route is what it is,
+	// LocalAddress/LocalPinned are the saved local network setup (from the
+	// store, so they show for an account that isn't running too).
+	Running      bool   `json:"running"`
+	Syncing      bool   `json:"syncing"`
+	RouteReason  string `json:"routeReason"`
+	LocalAddress string `json:"localAddress"`
+	LocalPinned  bool   `json:"localPinned"`
 	// SidebarName is the name the user chose for the account's Explorer
 	// sidebar entry ("" = automatic), SidebarAuto the automatic one (the
 	// field's placeholder) and SidebarLabel the one actually shown.
 	SidebarName  string `json:"sidebarName"`
 	SidebarAuto  string `json:"sidebarAuto"`
 	SidebarLabel string `json:"sidebarLabel"`
+}
+
+// accountEntry builds one account's list entry. The engine-derived fields
+// (Running, Syncing, Route, RouteReason) are only filled when eng is that
+// account's own running engine; the local address always comes from the store.
+func accountEntry(ac account.Account, all []account.Account, defID, status string, eng *agent.Engine) AccountEntryDTO {
+	e := AccountEntryDTO{
+		ID: ac.ID, User: ac.LoginName, Server: ac.ServerURL,
+		Active: ac.ID == defID, Status: status,
+		SidebarName: ac.Label, SidebarAuto: autoSidebarLabel(ac, all),
+		SidebarLabel: sidebarLabel(ac, all),
+	}
+	if ac.Local != nil {
+		e.LocalAddress, e.LocalPinned = ac.Local.Address, ac.Local.Pin != ""
+	}
+	if eng != nil && eng.Account.ID == ac.ID {
+		e.Running = true
+		e.Syncing = eng.Progress().Active
+		e.Route, e.RouteReason = eng.Route()
+	}
+	return e
 }
 
 // ListAccounts returns every configured account. All of them sync
@@ -5162,17 +5192,8 @@ func (a *App) ListAccounts() []AccountEntryDTO {
 	defer a.acctMu.Unlock()
 	out := make([]AccountEntryDTO, 0, len(st.Accounts))
 	for _, ac := range st.Accounts {
-		route := ""
-		if eng := a.engineFor(ac.ID); eng != nil && eng.Account.ID == ac.ID {
-			route, _ = eng.Route()
-		}
-		out = append(out, AccountEntryDTO{
-			ID: ac.ID, User: ac.LoginName, Server: ac.ServerURL,
-			Active: ac.ID == def.ID, Status: a.acctStatus[ac.ID],
-			Route:       route,
-			SidebarName: ac.Label, SidebarAuto: autoSidebarLabel(ac, st.Accounts),
-			SidebarLabel: sidebarLabel(ac, st.Accounts),
-		})
+		eng, _ := a.acctEngine(ac.ID) // nil (and an error we don't need) when not running
+		out = append(out, accountEntry(ac, st.Accounts, def.ID, a.acctStatus[ac.ID], eng))
 	}
 	return out
 }

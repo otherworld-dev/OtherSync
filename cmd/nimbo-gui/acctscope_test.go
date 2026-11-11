@@ -163,3 +163,21 @@ func TestHealedBaseDir(t *testing.T) {
 		t.Errorf("no pairs: got %q, %v; want no change", dir, ok)
 	}
 }
+
+func TestAccountEntryFromStoreWithoutEngine(t *testing.T) {
+	ac := account.Account{ID: "b", LoginName: "bob", ServerURL: "https://x",
+		Local: &account.LocalRoute{Address: "192.168.0.5", Pin: "ab"}}
+	e := accountEntry(ac, []account.Account{ac}, "a", "Sign in again", nil)
+	if e.Running || e.Active || e.Syncing {
+		t.Fatalf("running/active/syncing = %v/%v/%v; want all false", e.Running, e.Active, e.Syncing)
+	}
+	if e.Status != "Sign in again" {
+		t.Fatalf("Status = %q", e.Status)
+	}
+	if e.LocalAddress != "192.168.0.5" || !e.LocalPinned {
+		t.Fatalf("local = %q pinned %v", e.LocalAddress, e.LocalPinned)
+	}
+	if e.Route != "" || e.RouteReason != "" {
+		t.Fatalf("route = %q / %q; want empty", e.Route, e.RouteReason)
+	}
+}
