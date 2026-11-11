@@ -1509,9 +1509,10 @@ export function SignInTarget() {
  * so a fresh login can't mistake a since-deleted local folder for user deletions
  * and propagate them to the server). UI preferences are kept either way.
  * 
- * acct names the account to sign out; "" or the default account's id signs out
- * the shown account as described above. Any other configured account is
- * disconnected on its own, leaving the default account's syncing untouched.
+ * acct names the account to sign out; "" or the shown account's id signs out
+ * the shown account as described above (see signOutRoute). Any other
+ * configured account is disconnected on its own, leaving the shown account's
+ * syncing untouched.
  * @param {string} acct
  * @param {boolean} clearData
  * @returns {$CancellablePromise<string>}
