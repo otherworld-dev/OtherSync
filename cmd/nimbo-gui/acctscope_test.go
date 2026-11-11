@@ -62,3 +62,83 @@ func TestPairsAndBaseDirFromDisk(t *testing.T) {
 		t.Fatalf("baseDir with whole-account pair = %q", g)
 	}
 }
+
+// A write aimed at an account with no running engine must refuse before it
+// touches any engine. A's engine is a zero value, so reaching it would panic.
+func TestWritesOnNotRunningAccountRefuse(t *testing.T) {
+	a := &App{eng: &agent.Engine{Account: account.Account{ID: "a"}}}
+	want := errAccountNotRunning.Error()
+	for name, got := range map[string]func() string{
+		"AddSyncPair":      func() string { return a.AddSyncPair("b", `C:\x`, "/x") },
+		"DeselectFolder":   func() string { return a.DeselectFolder("b", `C:\x`, "y", false) },
+		"MoveSyncFolder":   func() string { return a.MoveSyncFolder("b", `C:\x`, `C:\y`) },
+		"SaveLocalAddress": func() string { return a.SaveLocalAddress("b", "", "") },
+		"SetOfflinePin":    func() string { return a.SetOfflinePin("b", "x", true) },
+		"resumeFrozen":     func() string { return a.resumeFrozen("b", `C:\x`) },
+	} {
+		if g := got(); g != want {
+			t.Errorf("%s(b) = %q; want %q", name, g, want)
+		}
+	}
+	a.RemoveSyncFolder("b", "/x", false)
+	a.RemoveExclude("b", `C:\x`, "y")
+	a.SetBaseDir("b", `C:\x`)
+}
+
+// Reads for a configured account with no engine come from its saved settings
+// on disk, never from the shown account's engine (a zero value here, which
+// would panic if touched). An id that isn't a configured account reads nothing.
+func TestReadsOnNotRunningAccount(t *testing.T) {
+	t.Setenv("APPDATA", t.TempDir())
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	d, err := config.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedAccounts(t, d,
+		account.Account{ID: "a", ServerURL: "https://one.example.com", LoginName: "adam"},
+		account.Account{ID: "b", ServerURL: "https://two.example.com", LoginName: "bob"},
+	)
+	_ = d.WithAccount("b").SavePairs([]config.SyncPair{{LocalDir: `C:\B\Docs`, RemoteRoot: "/Docs"}})
+	_ = d.WithAccount("b").UpdateAccountState(func(s *config.AccountState) { s.BaseDir = `C:\B` })
+
+	a := &App{eng: &agent.Engine{Account: account.Account{ID: "a"}}}
+	if got := a.GetPairs("b"); len(got) != 1 || got[0].LocalDir != `C:\B\Docs` {
+		t.Errorf("GetPairs(b) = %v", got)
+	}
+	if got := a.SyncedRemotes("b"); len(got) != 1 || got[0] != "Docs" {
+		t.Errorf("SyncedRemotes(b) = %v", got)
+	}
+	if got := a.GetBaseDir("b"); got != `C:\B` {
+		t.Errorf("GetBaseDir(b) = %q", got)
+	}
+	if got := a.GetPairs("zz"); got != nil {
+		t.Errorf("GetPairs(zz) = %v; want nil", got)
+	}
+	if got := a.GetBaseDir("zz"); got != "" {
+		t.Errorf("GetBaseDir(zz) = %q; want empty", got)
+	}
+	if got := a.BrowseRemote("b", "/"); got != nil {
+		t.Errorf("BrowseRemote(b) = %v; want nil", got)
+	}
+	if got := a.BrowseOffline("b", ""); got != nil {
+		t.Errorf("BrowseOffline(b) = %v; want nil", got)
+	}
+	if got := a.TestLocalAddress("b", "nc.lan", ""); got.Result != "error" || got.Message != errAccountNotRunning.Error() {
+		t.Errorf("TestLocalAddress(b) = %+v", got)
+	}
+}
+
+func TestParseGuardResume(t *testing.T) {
+	for _, c := range []struct{ in, acct, dir string }{
+		{`C:\Users\x\Nimbo`, "", `C:\Users\x\Nimbo`},
+		{"b\n" + `C:\B\Docs`, "b", `C:\B\Docs`},
+		{"\n" + `C:\A`, "", `C:\A`},
+	} {
+		if acct, dir := parseGuardResume(c.in); acct != c.acct || dir != c.dir {
+			t.Errorf("parseGuardResume(%q) = %q, %q; want %q, %q", c.in, acct, dir, c.acct, c.dir)
+		}
+	}
+}

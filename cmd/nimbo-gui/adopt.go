@@ -69,7 +69,7 @@ func (a *App) scanAdopt() string {
 	if !cfapi.Supported() {
 		return adoptError("Virtual files aren't supported on this system.")
 	}
-	dir := a.GetBaseDir()
+	dir := a.baseDirOf(a.eng)
 	if dir == "" {
 		return adoptError("No folder is configured yet.")
 	}
@@ -176,7 +176,7 @@ func (a *App) adoptAndSwitch() string {
 	// This switch was scanned afresh, so an older resume record describes a
 	// folder state that no longer exists; the new plan records its own.
 	clearAdoptResume(a.eng.Account.ID)
-	if pending != nil && pending.dir == a.GetBaseDir() && len(pending.plan.Entries) > 0 {
+	if pending != nil && pending.dir == a.baseDirOf(a.eng) && len(pending.plan.Entries) > 0 {
 		a.preMountAdopt = pending
 	}
 	msg := a.SetSyncMode("ondemand")

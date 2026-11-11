@@ -106,7 +106,7 @@ func (a *App) scanRevert() string {
 	if a.eng == nil {
 		return revertError("Not signed in.")
 	}
-	dir := a.GetBaseDir()
+	dir := a.baseDirOf(a.eng)
 	if a.mount(dir) == nil {
 		// Nothing mounted: a plain switch is all that's needed.
 		return revertError("")
@@ -141,7 +141,7 @@ func (a *App) revertAndSwitch() string {
 	}
 	pending := a.pendingRevert
 	a.pendingRevert = nil
-	dir := a.GetBaseDir()
+	dir := a.baseDirOf(a.eng)
 	m := a.mount(dir)
 	mounted := m != nil
 	// Mark BEFORE switching either way: the first live pass must not read an

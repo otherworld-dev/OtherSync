@@ -17,10 +17,11 @@ import (
 // Explorer / restored a backup) it just re-keys the sync state; otherwise it
 // relocates the folder there first — an instant rename on the same drive, or a
 // recursive copy-then-delete across drives. Returns "" on success, else a
-// human-readable error.
-func (a *App) MoveSyncFolder(oldLocal, newLocal string) string {
-	if a.eng == nil {
-		return "Not signed in."
+// human-readable error. acct "" means the shown account.
+func (a *App) MoveSyncFolder(acct, oldLocal, newLocal string) string {
+	eng, err := a.acctEngine(acct)
+	if err != nil {
+		return err.Error()
 	}
 	oldLocal = filepath.Clean(strings.TrimSpace(oldLocal))
 	newLocal = filepath.Clean(strings.TrimSpace(newLocal))
@@ -30,12 +31,12 @@ func (a *App) MoveSyncFolder(oldLocal, newLocal string) string {
 	if strings.EqualFold(oldLocal, newLocal) {
 		return "" // same place — nothing to do
 	}
-	if msg := a.folderClashFor(newLocal); msg != "" {
+	if msg := a.folderClashForAccount(eng.Account.ID, newLocal); msg != "" {
 		return msg
 	}
 	// Moving a folder another account also uses would carry that account's
 	// files away with it (GitHub #11). Re-adding it elsewhere is safe.
-	if msg := a.folderClashFor(oldLocal); msg != "" {
+	if msg := a.folderClashForAccount(eng.Account.ID, oldLocal); msg != "" {
 		return "This folder is also used by another account, so moving it would take that account's files with it. Remove it here and add it again in a new folder instead."
 	}
 	// v1: on-demand (virtual files) folders need cloud-files sync-root
@@ -55,17 +56,22 @@ func (a *App) MoveSyncFolder(oldLocal, newLocal string) string {
 		}
 		return nil
 	}
-	if err := a.eng.MoveSyncPair(oldLocal, newLocal, relocate); err != nil {
+	if err := eng.MoveSyncPair(oldLocal, newLocal, relocate); err != nil {
 		return err.Error()
 	}
 
 	// The whole-account pair defines the account root: refresh the stored baseDir
 	// and the Explorer sidebar so "Open folder" and the sidebar follow the move.
-	a.healBaseDir()
+	// Both work on the shown account only.
+	if a.isShown(eng) {
+		a.healBaseDir()
+	}
 	a.regateAll() // a folder this one held back in another account may sync now
-	a.syncSidebar()
+	if a.isShown(eng) {
+		a.syncSidebar()
+	}
 	a.rebuildTrayMenu()
-	a.eng.TriggerSync() // a confirming pass; should be a no-op (everything already in sync)
+	eng.TriggerSync() // a confirming pass; should be a no-op (everything already in sync)
 	return ""
 }
 

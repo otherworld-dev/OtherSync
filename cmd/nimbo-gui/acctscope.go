@@ -27,6 +27,24 @@ func (a *App) acctEngine(id string) (*agent.Engine, error) {
 	return nil, errAccountNotRunning
 }
 
+// notRunningDirs gives the dirs to read a named account's saved settings from
+// when acctEngine found no engine for it (err is errAccountNotRunning). It
+// refuses the shown account ("") and an id that isn't a configured account, so
+// a read never falls back to anyone else's state.
+func notRunningDirs(acct string, err error) (config.Dirs, bool) {
+	if acct == "" || !errors.Is(err, errAccountNotRunning) {
+		return config.Dirs{}, false
+	}
+	d, st, ok := accountsAndDirs()
+	if !ok {
+		return config.Dirs{}, false
+	}
+	if _, found := st.Find(acct); !found {
+		return config.Dirs{}, false
+	}
+	return d, true
+}
+
 // isShown reports whether eng is the shown (primary) engine.
 func (a *App) isShown(eng *agent.Engine) bool {
 	return eng != nil && eng == a.eng
