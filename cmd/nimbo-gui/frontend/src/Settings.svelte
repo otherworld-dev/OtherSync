@@ -178,7 +178,12 @@
   // below keeps it current too. The selection follows the list: an account
   // that goes away (signed out) hands over to the shown one.
   async function loadAccounts() {
-    accounts = (await App.ListAccounts()) ?? [];
+    // null means the account store couldn't be read (no accounts is []). Keep
+    // the list and selection as they are, so a passing read error doesn't
+    // move an open account page to another account; the next refresh retries.
+    const list = await App.ListAccounts();
+    if (!list) return;
+    accounts = list;
     sel = sel === null ? initialSelection(accounts, pendingTab) : nextSelection(accounts, sel);
   }
   loadAccounts();
@@ -806,7 +811,7 @@
         <p class="fhint">Windows 11's new right-click menu shows {brandName} either way; this covers the classic one (Show more options).</p>
       {/if}
       {#if navSupported}
-        <label class="check"><input type="checkbox" checked={navOn} disabled={navBusy} onchange={toggleNav} /> Show {brandName} in the Explorer sidebar (points at your default sync location)</label>
+        <label class="check"><input type="checkbox" checked={navOn} disabled={navBusy} onchange={toggleNav} /> Show {brandName} in the Explorer sidebar (points at the shown account's sync folder)</label>
       {/if}
 
       <div class="row"><h3>Troubleshooting</h3>{#if brandHelp}<button class="link" onclick={() => App.OpenURL(helpPage("troubleshooting"))}>Troubleshooting guide</button>{/if}</div>
