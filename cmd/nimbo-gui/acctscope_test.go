@@ -238,3 +238,78 @@ func TestForgetAccountFilesKeepsOrClearsData(t *testing.T) {
 		}
 	}
 }
+
+// Which account a sign-out acts on: "" and the shown account take the full
+// teardown; any other configured account is signed out on its own, even the
+// store default while another account's engine is the shown one.
+func TestSignOutRoute(t *testing.T) {
+	st := &account.Store{DefaultID: "a", Accounts: []account.Account{{ID: "a"}, {ID: "b"}, {ID: "c"}}}
+	for _, c := range []struct {
+		shownID, acct string
+		target        string
+		shown         bool
+		errMsg        string
+	}{
+		{"a", "", "a", true, ""},
+		{"a", "a", "a", true, ""},
+		{"a", "b", "b", false, ""},
+		{"a", "zz", "", false, "no such account"},
+		{"b", "b", "b", true, ""},  // shown but not (yet) the default: still the shown path
+		{"b", "", "b", true, ""},   // "" is the shown engine's account
+		{"b", "a", "a", false, ""}, // the default, but another engine is shown: leave that one alone
+		{"", "", "a", true, ""},    // nothing running: the default goes
+		{"", "a", "a", true, ""},
+		{"", "b", "b", false, ""},
+	} {
+		target, shown, errMsg := signOutRoute(st, c.shownID, c.acct)
+		if target != c.target || shown != c.shown || errMsg != c.errMsg {
+			t.Errorf("signOutRoute(shown %q, acct %q) = %q, %v, %q; want %q, %v, %q",
+				c.shownID, c.acct, target, shown, errMsg, c.target, c.shown, c.errMsg)
+		}
+	}
+	if target, shown, errMsg := signOutRoute(&account.Store{}, "", ""); target != "" || !shown || errMsg != "" {
+		t.Errorf("empty store: %q, %v, %q; want the plain teardown", target, shown, errMsg)
+	}
+}
+
+// RemoveAccount is for an account that isn't the shown one: no id, an unknown
+// id, the default and the shown account are all refused.
+func TestRemoveAccountRefusal(t *testing.T) {
+	st := &account.Store{DefaultID: "a", Accounts: []account.Account{{ID: "a"}, {ID: "b"}, {ID: "c"}}}
+	active := "that account is active — use Sign out instead"
+	for _, c := range []struct{ shownID, id, want string }{
+		{"a", "", "no such account"},
+		{"a", "zz", "no such account"},
+		{"a", "a", active},
+		{"b", "b", active},
+		{"b", "a", active},
+		{"a", "c", ""},
+	} {
+		if got := removeAccountRefusal(st, c.shownID, c.id); got != c.want {
+			t.Errorf("removeAccountRefusal(shown %q, %q) = %q; want %q", c.shownID, c.id, got, c.want)
+		}
+	}
+}
+
+// signOutOther must never act on the shown engine's account: it would clear
+// state from under a running engine. A refusal leaves the store untouched.
+func TestSignOutOtherRefusesShownAccount(t *testing.T) {
+	d := config.Dirs{Config: t.TempDir(), Data: t.TempDir()}
+	if err := account.Update(d.AccountsFile(), func(s *account.Store) error {
+		s.Upsert(account.Account{ID: "a", ServerURL: "https://a.example", LoginName: "a"})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a := &App{eng: &agent.Engine{Account: account.Account{ID: "a"}}}
+	if got := a.signOutOther(d, "a", true); got == "" {
+		t.Fatal("signOutOther on the shown account succeeded; want a refusal")
+	}
+	st, err := account.LoadStore(d.AccountsFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st.Find("a"); !ok {
+		t.Fatal("the shown account was removed from the store")
+	}
+}

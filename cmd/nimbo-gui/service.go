@@ -5262,15 +5262,72 @@ func (a *App) RemoveAccount(id string) string {
 	if err != nil {
 		return err.Error()
 	}
-	if cur, ok := st.Default(); ok && cur.ID == id {
-		return "that account is active — use Sign out instead"
+	if msg := removeAccountRefusal(st, a.shownID(), id); msg != "" {
+		return msg
 	}
 	return a.SignOut(id, true)
 }
 
-// signOutOther signs out an account that is not the default one: it never
-// touches the default account's engine, mounts or data.
+// shownID is the shown engine's account id, "" when nothing is shown.
+func (a *App) shownID() string {
+	if a.eng == nil {
+		return ""
+	}
+	return a.eng.Account.ID
+}
+
+// removeAccountRefusal says why RemoveAccount may not remove id, "" if it may.
+// It takes only an account that is configured and is neither the default nor
+// the shown one; an empty id never means "the shown account" here.
+func removeAccountRefusal(st *account.Store, shownID, id string) string {
+	if id == "" {
+		return "no such account"
+	}
+	if _, ok := st.Find(id); !ok {
+		return "no such account"
+	}
+	if cur, ok := st.Default(); (ok && cur.ID == id) || id == shownID {
+		return "that account is active — use Sign out instead"
+	}
+	return ""
+}
+
+// signOutRoute decides which account a sign-out acts on. acct "" means the
+// shown account (the store default when nothing is shown). shown reports
+// whether target takes the full teardown (stop the shown engine, hand over to
+// the next account); otherwise target is signed out on its own. The default
+// account goes the shown way only when it is the shown one or nothing is
+// shown: while another account's engine is shown, stopping that engine would
+// act on the wrong account. errMsg is set when nothing may happen.
+func signOutRoute(st *account.Store, shownID, acct string) (target string, shown bool, errMsg string) {
+	if acct == "" {
+		if shownID != "" {
+			return shownID, true, ""
+		}
+		if cur, ok := st.Default(); ok {
+			return cur.ID, true, ""
+		}
+		return "", true, ""
+	}
+	if _, ok := st.Find(acct); !ok {
+		return "", false, "no such account"
+	}
+	if acct == shownID {
+		return acct, true, ""
+	}
+	if cur, ok := st.Default(); ok && cur.ID == acct && shownID == "" {
+		return acct, true, ""
+	}
+	return acct, false, ""
+}
+
+// signOutOther signs out an account that is not the shown one: it never
+// touches the shown account's engine, mounts or data.
 func (a *App) signOutOther(d config.Dirs, id string, clearData bool) string {
+	// Its sync state would be cleared from under a running engine.
+	if id == a.shownID() {
+		return "that account is shown — it can't be signed out on its own"
+	}
 	// Its virtual-files root goes with it: left registered, it stays in the
 	// Explorer sidebar pointing at a folder nothing syncs (GitHub #10).
 	a.unmountOnDemandFor(id)
@@ -5316,55 +5373,53 @@ func forgetAccountFiles(d config.Dirs, id string, clearData bool, deleteSecret f
 // so a fresh login can't mistake a since-deleted local folder for user deletions
 // and propagate them to the server). UI preferences are kept either way.
 //
-// acct names the account to sign out; "" or the default account's id signs out
-// the shown account as described above. Any other configured account is
-// disconnected on its own, leaving the default account's syncing untouched.
+// acct names the account to sign out; "" or the shown account's id signs out
+// the shown account as described above (see signOutRoute). Any other
+// configured account is disconnected on its own, leaving the shown account's
+// syncing untouched.
 func (a *App) SignOut(acct string, clearData bool) string {
 	if !a.policyNow().AllowSignOut {
 		return "Sign out is disabled by your organisation's policy."
 	}
-	if acct != "" {
-		d, err := config.Resolve()
-		if err != nil {
-			return err.Error()
-		}
-		st, err := account.LoadStore(d.AccountsFile())
-		if err != nil {
-			return err.Error()
-		}
-		if _, ok := st.Find(acct); !ok {
-			return "no such account"
-		}
-		if cur, ok := st.Default(); !ok || cur.ID != acct {
-			return a.signOutOther(d, acct, clearData)
-		}
+	d, err := config.Resolve()
+	if err != nil {
+		return err.Error()
+	}
+	st, err := account.LoadStore(d.AccountsFile())
+	if err != nil {
+		return err.Error()
+	}
+	target, shown, msg := signOutRoute(st, a.shownID(), acct)
+	if msg != "" {
+		return msg
+	}
+	if !shown {
+		return a.signOutOther(d, target, clearData)
 	}
 	// Unmount only the account signing out; the others keep their roots
 	// registered (unmounting them too flattened their folders, GitHub #11).
-	if a.eng != nil {
-		a.unmountOnDemandFor(a.eng.Account.ID)
+	if target != "" {
+		a.unmountOnDemandFor(target)
 	}
 	a.disconnectAllOnDemand()
 	a.stopEngine()
 	a.setShowOnSignIn("")
 	moreAccounts := false
-	if d, err := config.Resolve(); err == nil {
-		var accID string
-		_ = account.Update(d.AccountsFile(), func(st *account.Store) error {
-			if acc, ok := st.Default(); ok {
-				accID = acc.ID
-				_ = account.DeleteSecret(acc.ID)
-				st.Remove(acc.ID)
-			}
-			moreAccounts = len(st.Accounts) > 0
-			return nil
-		})
-		if accID != "" {
-			// Its root, if its engine wasn't running to unmount it above.
-			a.unregisterRecordedRoot(accID)
+	// Remove the account resolved above by its id, not whatever is the default
+	// by now: a switch in between would otherwise sign out the wrong account.
+	_ = account.Update(d.AccountsFile(), func(st *account.Store) error {
+		if _, ok := st.Find(target); ok {
+			_ = account.DeleteSecret(target)
+			st.Remove(target)
 		}
+		moreAccounts = len(st.Accounts) > 0
+		return nil
+	})
+	if target != "" {
+		// Its root, if its engine wasn't running to unmount it above.
+		a.unregisterRecordedRoot(target)
 		if clearData {
-			a.clearSyncData(d.WithAccount(accID), accID)
+			a.clearSyncData(d.WithAccount(target), target)
 		}
 	}
 	// No account left: the live-mode sidebar entry has nothing to point at.
