@@ -3,6 +3,54 @@
 All notable changes to OtherSync (formerly Nimbo) are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] - 2026-11-13
+
+### Added
+
+- Settings has a list down the left with a page for each account, its folders,
+  sync folder, local network address, Explorer sidebar name and sign out, kept
+  separate from whichever account the tray panel is showing. The settings for the
+  whole app (Sync, Exclusions, Appearance, General) sit underneath, and File
+  availability has moved to the Sync page as it applies to every account (#11).
+- White-label builds can set the server address in brand.json and lock it, so
+  users only need to sign in.
+- Status → Right now shows the short pause before a full folder check.
+
+### Changed
+
+- A first sync and the one-off folder check are paced so they can't overload the
+  server: listings go through one pacer per account and slow down when the server
+  takes over a second to answer, each starts after a random wait of 2 to 90
+  seconds, and setting up virtual files only lists the server folders that hold
+  local files (#1001, #1003).
+- Downloads are capped per account, so a first sync on a new computer can't tie
+  up every worker on the server (#1055).
+- Android: every tab's ⋮ menu ends the same way and Sign out has moved into
+  Settings (#957).
+
+### Fixed
+
+- A first sync carries on through a network blip or a restart instead of
+  listing everything again.
+- A first sync no longer sends whole-tree listings to the server, and taking
+  over an existing folder keeps both copies of a file that differs from the
+  server (#1004).
+- Files a download has just written are no longer checked again with the
+  server straight afterwards (#1011), and the push notification for your own
+  upload no longer starts another sync round (#32).
+- The status no longer asks you to sign in when the server just can't be
+  reached, shows "Can't reach the server" sooner when it stops answering (#29),
+  and says when another account needs signing in again (#28).
+- Activity labels a failed row with what failed rather than "Uploaded" (#27),
+  and a file that syncs after retries no longer shows its failed rows.
+- The log names the file when a conflict starts or stops waiting (#31).
+- Loading a large folder's sync state is quicker (#30).
+- A sign-in that can't start says why in plain words.
+- The Explorer menu setting is remembered, and its log no longer grows forever.
+- Explorer badges install under Program Files\OtherSync and register reliably.
+- Android: the dark launch screen and the system bars use the OtherSync colours
+  (#960).
+
 ## [0.3.0] - 2026-11-01
 
 ### Added
