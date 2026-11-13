@@ -34,7 +34,7 @@ func (a *App) freshOndemand() string {
 	if a.eng == nil {
 		return "Not signed in."
 	}
-	base := a.GetBaseDir()
+	base := a.baseDirOf(a.eng)
 	if err := a.resetPairStatesUnder(base); err != nil {
 		return "Couldn't reset the sync state: " + err.Error()
 	}
@@ -55,7 +55,7 @@ func (a *App) freshLive() string {
 	if a.eng == nil {
 		return "Not signed in."
 	}
-	base := a.GetBaseDir()
+	base := a.baseDirOf(a.eng)
 	if err := a.resetPairStatesUnder(base); err != nil {
 		return "Couldn't reset the sync state: " + err.Error()
 	}

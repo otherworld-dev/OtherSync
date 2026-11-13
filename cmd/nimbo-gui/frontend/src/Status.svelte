@@ -113,7 +113,7 @@
   async function pickGo(path: string) {
     pickCur = trimSlash(path);
     pickLoading = true;
-    pickEntries = (((await App.BrowseRemote(pickCur)) ?? []) as Entry[]).filter(e => e.isDir);
+    pickEntries = (((await App.BrowseRemote("", pickCur)) ?? []) as Entry[]).filter(e => e.isDir);
     pickLoading = false;
   }
   function openPick(c: CloneRun) {

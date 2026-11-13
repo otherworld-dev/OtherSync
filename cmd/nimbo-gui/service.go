@@ -1075,7 +1075,7 @@ func (a *App) SetSyncMode(mode string) string {
 	// frozen folder impossible to resume.
 	switch {
 	case strings.HasPrefix(mode, "guard-resume:"):
-		return a.resumeFrozen(strings.TrimPrefix(mode, "guard-resume:"))
+		return a.resumeFrozen(parseGuardResume(strings.TrimPrefix(mode, "guard-resume:")))
 	case strings.HasPrefix(mode, cloneFirstPrefix):
 		// The order a running first sync downloads in: not a file-availability
 		// mode either, so the policy below has no say over it.
@@ -1320,19 +1320,31 @@ func (a *App) clearLivePairs() {
 
 // resumeFrozen clears a folder's damage-guard freeze after the user has
 // reviewed it. Returns "" or a message for the user. Rides SetSyncMode's
-// string argument (as "guard-resume:<localDir>") so nothing new is bound and
-// the bindings are untouched.
-func (a *App) resumeFrozen(localDir string) string {
-	if a.eng == nil {
-		return "not signed in"
+// string argument (as "guard-resume:<acct>\n<localDir>", or the older
+// "guard-resume:<localDir>" for the shown account) so nothing new is bound.
+// acct "" means the shown account.
+func (a *App) resumeFrozen(acct, localDir string) string {
+	eng, err := a.acctEngine(acct)
+	if err != nil {
+		return err.Error()
 	}
-	if err := a.eng.ClearFreeze(localDir); err != nil {
+	if err := eng.ClearFreeze(localDir); err != nil {
 		return err.Error()
 	}
 	// Run the pass the user just approved. The pause itself counted as a failed
 	// pass, so a plain trigger would be dropped by the backoff that started.
-	a.eng.TriggerUserSync()
+	eng.TriggerUserSync()
 	return ""
+}
+
+// parseGuardResume splits the argument of a "guard-resume:" sentinel into the
+// account and the folder. Without a newline it is the older form, a folder of
+// the shown account (a Windows path can't hold a newline).
+func parseGuardResume(arg string) (acct, localDir string) {
+	if i := strings.IndexByte(arg, '\n'); i >= 0 {
+		return arg[:i], arg[i+1:]
+	}
+	return "", arg
 }
 
 // --- On-demand (virtual files): one account-level mount ---
@@ -2085,15 +2097,16 @@ type OfflineEntry struct {
 	Pinned bool   `json:"pinned"`
 }
 
-// BrowseOffline lists the shown account's virtual-root folders at rel ("" =
-// root) with their pin state, for the available-offline panel. Only folders
-// that already exist locally as placeholders appear (the tree populates as
-// it's browsed).
-func (a *App) BrowseOffline(rel string) []OfflineEntry {
-	if a.eng == nil || !cfapi.Supported() {
+// BrowseOffline lists an account's virtual-root folders at rel ("" = root)
+// with their pin state, for the available-offline panel. acct "" means the
+// shown account. Only folders that already exist locally as placeholders
+// appear (the tree populates as it's browsed).
+func (a *App) BrowseOffline(acct, rel string) []OfflineEntry {
+	eng, err := a.acctEngine(acct)
+	if err != nil || !cfapi.Supported() {
 		return nil
 	}
-	dir := a.GetBaseDir()
+	dir := a.baseDirOf(eng)
 	if rel != "" {
 		dir = filepath.Join(dir, filepath.FromSlash(rel))
 	}
@@ -2122,12 +2135,14 @@ func (a *App) BrowseOffline(rel string) []OfflineEntry {
 // SetOfflinePin pins (always keep on this device — the watcher downloads any
 // online-only content once it hears the attribute change or meets it during
 // reconcile, and keeps it current) or unpins (back to online-only preference)
-// a folder subtree in the shown account's virtual root.
-func (a *App) SetOfflinePin(rel string, pinned bool) string {
-	if a.eng == nil {
-		return "not signed in"
+// a folder subtree in an account's virtual root. acct "" means the shown
+// account.
+func (a *App) SetOfflinePin(acct, rel string, pinned bool) string {
+	eng, err := a.acctEngine(acct)
+	if err != nil {
+		return err.Error()
 	}
-	p := filepath.Join(a.GetBaseDir(), filepath.FromSlash(rel))
+	p := filepath.Join(a.baseDirOf(eng), filepath.FromSlash(rel))
 	if err := cfapi.SetPinState(p, pinned, true); err != nil {
 		return err.Error()
 	}
@@ -2886,7 +2901,7 @@ func (a *App) OpenFolder(localDir string) { openPath(localDir) }
 
 // OpenSyncFolder opens the account's sync folder (base dir) in Explorer.
 func (a *App) OpenSyncFolder() {
-	dir := a.GetBaseDir()
+	dir := a.baseDirOf(a.eng)
 	_ = os.MkdirAll(dir, 0o755)
 	openPath(dir)
 }
@@ -4666,7 +4681,7 @@ func (a *App) SidebarEnabled() bool { return a.sidebarWanted() }
 
 func (a *App) sidebarWanted() bool {
 	recorded, _, _ := sidebarChoice()
-	cloudRoot := a.GetSyncMode() == "ondemand" || cfapi.ShellSyncRootRegistered(a.GetBaseDir())
+	cloudRoot := a.GetSyncMode() == "ondemand" || cfapi.ShellSyncRootRegistered(a.baseDirOf(a.eng))
 	return sidebarWantedFrom(recorded, cloudRoot, shellns.Enabled())
 }
 
@@ -4736,7 +4751,7 @@ func rememberSidebarEntry(target, name string) {
 // beside a sync root was already stood down, so in on-demand mode it changed
 // nothing on screen whichever way it was set (issue #7).
 func (a *App) SetSidebar(on bool) string {
-	target := a.GetBaseDir()
+	target := a.baseDirOf(a.eng)
 	if a.GetSyncMode() == "ondemand" || cfapi.ShellSyncRootRegistered(target) {
 		if err := shellns.Unregister(); err != nil {
 			return err.Error()
@@ -4801,7 +4816,7 @@ func (a *App) syncSidebar() {
 	if !shellns.Supported() {
 		return
 	}
-	target := a.GetBaseDir()
+	target := a.baseDirOf(a.eng)
 	if target == "" {
 		return
 	}
@@ -5123,12 +5138,42 @@ type AccountEntryDTO struct {
 	Active bool   `json:"active"`
 	Status string `json:"status"` // latest engine status line ("" if not running)
 	Route  string `json:"route"`  // "local" while syncing over the local network, else "public"
+	// Running is true while the account has a running engine; Syncing while
+	// that engine is mid-sync. RouteReason says why the route is what it is,
+	// LocalAddress/LocalPinned are the saved local network setup (from the
+	// store, so they show for an account that isn't running too).
+	Running      bool   `json:"running"`
+	Syncing      bool   `json:"syncing"`
+	RouteReason  string `json:"routeReason"`
+	LocalAddress string `json:"localAddress"`
+	LocalPinned  bool   `json:"localPinned"`
 	// SidebarName is the name the user chose for the account's Explorer
 	// sidebar entry ("" = automatic), SidebarAuto the automatic one (the
 	// field's placeholder) and SidebarLabel the one actually shown.
 	SidebarName  string `json:"sidebarName"`
 	SidebarAuto  string `json:"sidebarAuto"`
 	SidebarLabel string `json:"sidebarLabel"`
+}
+
+// accountEntry builds one account's list entry. The engine-derived fields
+// (Running, Syncing, Route, RouteReason) are only filled when eng is that
+// account's own running engine; the local address always comes from the store.
+func accountEntry(ac account.Account, all []account.Account, defID, status string, eng *agent.Engine) AccountEntryDTO {
+	e := AccountEntryDTO{
+		ID: ac.ID, User: ac.LoginName, Server: ac.ServerURL,
+		Active: ac.ID == defID, Status: status,
+		SidebarName: ac.Label, SidebarAuto: autoSidebarLabel(ac, all),
+		SidebarLabel: sidebarLabel(ac, all),
+	}
+	if ac.Local != nil {
+		e.LocalAddress, e.LocalPinned = ac.Local.Address, ac.Local.Pin != ""
+	}
+	if eng != nil && eng.Account.ID == ac.ID {
+		e.Running = true
+		e.Syncing = eng.Progress().Active
+		e.Route, e.RouteReason = eng.Route()
+	}
+	return e
 }
 
 // ListAccounts returns every configured account. All of them sync
@@ -5147,17 +5192,8 @@ func (a *App) ListAccounts() []AccountEntryDTO {
 	defer a.acctMu.Unlock()
 	out := make([]AccountEntryDTO, 0, len(st.Accounts))
 	for _, ac := range st.Accounts {
-		route := ""
-		if eng := a.engineFor(ac.ID); eng != nil && eng.Account.ID == ac.ID {
-			route, _ = eng.Route()
-		}
-		out = append(out, AccountEntryDTO{
-			ID: ac.ID, User: ac.LoginName, Server: ac.ServerURL,
-			Active: ac.ID == def.ID, Status: a.acctStatus[ac.ID],
-			Route:       route,
-			SidebarName: ac.Label, SidebarAuto: autoSidebarLabel(ac, st.Accounts),
-			SidebarLabel: sidebarLabel(ac, st.Accounts),
-		})
+		eng, _ := a.acctEngine(ac.ID) // nil (and an error we don't need) when not running
+		out = append(out, accountEntry(ac, st.Accounts, def.ID, a.acctStatus[ac.ID], eng))
 	}
 	return out
 }
@@ -5214,10 +5250,9 @@ func (a *App) SwitchAccount(id string) string {
 // The completed login becomes the active account (see account.Complete).
 func (a *App) AddAccount() { a.showLoginFor("") }
 
-// RemoveAccount disconnects a NON-active account: its keychain secret, account
-// entry, sync-folder setup and local sync state are removed (local files are
-// kept). Removing the active account is SignOut's job — it handles the engine
-// teardown and next-account handover.
+// RemoveAccount disconnects a NON-active account and clears its sync setup and
+// local sync state (local files are kept). Signing out the active account is
+// SignOut's job — it handles the engine teardown and next-account handover.
 func (a *App) RemoveAccount(id string) string {
 	d, err := config.Resolve()
 	if err != nil {
@@ -5227,11 +5262,71 @@ func (a *App) RemoveAccount(id string) string {
 	if err != nil {
 		return err.Error()
 	}
-	if cur, ok := st.Default(); ok && cur.ID == id {
-		return "that account is active — use Sign out instead"
+	if msg := removeAccountRefusal(st, a.shownID(), id); msg != "" {
+		return msg
+	}
+	return a.SignOut(id, true)
+}
+
+// shownID is the shown engine's account id, "" when nothing is shown.
+func (a *App) shownID() string {
+	if a.eng == nil {
+		return ""
+	}
+	return a.eng.Account.ID
+}
+
+// removeAccountRefusal says why RemoveAccount may not remove id, "" if it may.
+// It takes only an account that is configured and is neither the default nor
+// the shown one; an empty id never means "the shown account" here.
+func removeAccountRefusal(st *account.Store, shownID, id string) string {
+	if id == "" {
+		return "no such account"
 	}
 	if _, ok := st.Find(id); !ok {
 		return "no such account"
+	}
+	if cur, ok := st.Default(); (ok && cur.ID == id) || id == shownID {
+		return "that account is active — use Sign out instead"
+	}
+	return ""
+}
+
+// signOutRoute decides which account a sign-out acts on. acct "" means the
+// shown account (the store default when nothing is shown). shown reports
+// whether target takes the full teardown (stop the shown engine, hand over to
+// the next account); otherwise target is signed out on its own. The default
+// account goes the shown way only when it is the shown one or nothing is
+// shown: while another account's engine is shown, stopping that engine would
+// act on the wrong account. errMsg is set when nothing may happen.
+func signOutRoute(st *account.Store, shownID, acct string) (target string, shown bool, errMsg string) {
+	if acct == "" {
+		if shownID != "" {
+			return shownID, true, ""
+		}
+		if cur, ok := st.Default(); ok {
+			return cur.ID, true, ""
+		}
+		return "", true, ""
+	}
+	if _, ok := st.Find(acct); !ok {
+		return "", false, "no such account"
+	}
+	if acct == shownID {
+		return acct, true, ""
+	}
+	if cur, ok := st.Default(); ok && cur.ID == acct && shownID == "" {
+		return acct, true, ""
+	}
+	return acct, false, ""
+}
+
+// signOutOther signs out an account that is not the shown one: it never
+// touches the shown account's engine, mounts or data.
+func (a *App) signOutOther(d config.Dirs, id string, clearData bool) string {
+	// Its sync state would be cleared from under a running engine.
+	if id == a.shownID() {
+		return "that account is shown — it can't be signed out on its own"
 	}
 	// Its virtual-files root goes with it: left registered, it stays in the
 	// Explorer sidebar pointing at a folder nothing syncs (GitHub #10).
@@ -5241,17 +5336,30 @@ func (a *App) RemoveAccount(id string) string {
 	a.acctMu.Lock()
 	delete(a.acctStatus, id)
 	a.acctMu.Unlock()
-	_ = account.DeleteSecret(id)
-	if err := account.Update(d.AccountsFile(), func(s *account.Store) error { s.Remove(id); return nil }); err != nil {
+	if err := forgetAccountFiles(d, id, clearData, account.DeleteSecret, a.clearSyncData); err != nil {
 		return err.Error()
 	}
-	a.clearSyncData(d.WithAccount(id), id)
 	// Folders held back because the removed account used them too can sync
 	// again: re-ask the gate now rather than at the next start. Live mode only;
 	// in on-demand mode an account's pairs must never get live watchers.
 	a.regateAll()
 	a.emit("account")
 	return ""
+}
+
+// forgetAccountFiles drops an account's keychain secret and store entry, and
+// its sync setup and local sync database only when clearData is set. The
+// secret deleter and the data clearer are injected so tests stay off the real
+// keychain.
+func forgetAccountFiles(d config.Dirs, id string, clearData bool, deleteSecret func(string) error, clear func(config.Dirs, string)) error {
+	_ = deleteSecret(id)
+	if err := account.Update(d.AccountsFile(), func(s *account.Store) error { s.Remove(id); return nil }); err != nil {
+		return err
+	}
+	if clearData {
+		clear(d.WithAccount(id), id)
+	}
+	return nil
 }
 
 // SignOut forgets the account (store + keychain), tears down syncing and any
@@ -5264,36 +5372,54 @@ func (a *App) RemoveAccount(id string) string {
 // quick re-login. With clearData true they're wiped too, for a clean reset (and
 // so a fresh login can't mistake a since-deleted local folder for user deletions
 // and propagate them to the server). UI preferences are kept either way.
-func (a *App) SignOut(clearData bool) string {
+//
+// acct names the account to sign out; "" or the shown account's id signs out
+// the shown account as described above (see signOutRoute). Any other
+// configured account is disconnected on its own, leaving the shown account's
+// syncing untouched.
+func (a *App) SignOut(acct string, clearData bool) string {
 	if !a.policyNow().AllowSignOut {
 		return "Sign out is disabled by your organisation's policy."
 	}
+	d, err := config.Resolve()
+	if err != nil {
+		return err.Error()
+	}
+	st, err := account.LoadStore(d.AccountsFile())
+	if err != nil {
+		return err.Error()
+	}
+	target, shown, msg := signOutRoute(st, a.shownID(), acct)
+	if msg != "" {
+		return msg
+	}
+	if !shown {
+		return a.signOutOther(d, target, clearData)
+	}
 	// Unmount only the account signing out; the others keep their roots
 	// registered (unmounting them too flattened their folders, GitHub #11).
-	if a.eng != nil {
-		a.unmountOnDemandFor(a.eng.Account.ID)
+	if target != "" {
+		a.unmountOnDemandFor(target)
 	}
 	a.disconnectAllOnDemand()
 	a.stopEngine()
 	a.setShowOnSignIn("")
 	moreAccounts := false
-	if d, err := config.Resolve(); err == nil {
-		var accID string
-		_ = account.Update(d.AccountsFile(), func(st *account.Store) error {
-			if acc, ok := st.Default(); ok {
-				accID = acc.ID
-				_ = account.DeleteSecret(acc.ID)
-				st.Remove(acc.ID)
-			}
-			moreAccounts = len(st.Accounts) > 0
-			return nil
-		})
-		if accID != "" {
-			// Its root, if its engine wasn't running to unmount it above.
-			a.unregisterRecordedRoot(accID)
+	// Remove the account resolved above by its id, not whatever is the default
+	// by now: a switch in between would otherwise sign out the wrong account.
+	_ = account.Update(d.AccountsFile(), func(st *account.Store) error {
+		if _, ok := st.Find(target); ok {
+			_ = account.DeleteSecret(target)
+			st.Remove(target)
 		}
+		moreAccounts = len(st.Accounts) > 0
+		return nil
+	})
+	if target != "" {
+		// Its root, if its engine wasn't running to unmount it above.
+		a.unregisterRecordedRoot(target)
 		if clearData {
-			a.clearSyncData(d.WithAccount(accID), accID)
+			a.clearSyncData(d.WithAccount(target), target)
 		}
 	}
 	// No account left: the live-mode sidebar entry has nothing to point at.
@@ -5340,11 +5466,10 @@ type LocalTestDTO struct {
 	Address     string `json:"address"`
 }
 
-// testLocalAddress runs the whole setup check for the SHOWN account: validate,
+// testLocalAddress runs the whole setup check for eng's account: validate,
 // bare TLS handshake (no request, no credentials), then the same-server
 // comparison. The second value is the route to store, non-nil only on "ok".
-func (a *App) testLocalAddress(ctx context.Context, addr, pin string) (LocalTestDTO, *account.LocalRoute) {
-	eng := a.eng
+func (a *App) testLocalAddress(ctx context.Context, eng *agent.Engine, addr, pin string) (LocalTestDTO, *account.LocalRoute) {
 	if eng == nil {
 		return LocalTestDTO{Result: "error", Message: "Not signed in."}, nil
 	}
@@ -5422,24 +5547,28 @@ func (a *App) testLocalAddress(ctx context.Context, addr, pin string) (LocalTest
 	return dto, &account.LocalRoute{Address: canon, Pin: usePin, RootID: rootID}
 }
 
-// TestLocalAddress checks a candidate local network address for the shown
-// account without saving anything. pin is "" or a SHA-256 fingerprint the user
-// chose to trust from a previous "untrusted" result.
-func (a *App) TestLocalAddress(addr, pin string) LocalTestDTO {
+// TestLocalAddress checks a candidate local network address for an account
+// (acct "" = the shown one) without saving anything. pin is "" or a SHA-256
+// fingerprint the user chose to trust from a previous "untrusted" result.
+func (a *App) TestLocalAddress(acct, addr, pin string) LocalTestDTO {
+	eng, err := a.acctEngine(acct)
+	if err != nil {
+		return LocalTestDTO{Result: "error", Message: err.Error()}
+	}
 	ctx, cancel := context.WithTimeout(a.ctx, 25*time.Second)
 	defer cancel()
-	dto, _ := a.testLocalAddress(ctx, addr, pin)
+	dto, _ := a.testLocalAddress(ctx, eng, addr, pin)
 	return dto
 }
 
 // SaveLocalAddress re-runs the check in Go (never trusting what the frontend
-// passes back), stores the route on the shown account and applies it to that
-// account's running engine. An empty addr removes the route. Returns "" or a
-// user-facing error.
-func (a *App) SaveLocalAddress(addr, pin string) string {
-	eng := a.eng
-	if eng == nil {
-		return "Not signed in."
+// passes back), stores the route on an account (acct "" = the shown one) and
+// applies it to that account's running engine. An empty addr removes the
+// route. Returns "" or a user-facing error.
+func (a *App) SaveLocalAddress(acct, addr, pin string) string {
+	eng, err := a.acctEngine(acct)
+	if err != nil {
+		return err.Error()
 	}
 	d, err := config.Resolve()
 	if err != nil {
@@ -5461,9 +5590,10 @@ func (a *App) SaveLocalAddress(addr, pin string) string {
 		if err := eng.ApplyLocalRoute(ctx, nil); err != nil {
 			return err.Error()
 		}
+		a.emit("account") // the Settings page shows the change at once
 		return ""
 	}
-	dto, lr := a.testLocalAddress(ctx, addr, pin)
+	dto, lr := a.testLocalAddress(ctx, eng, addr, pin)
 	if lr == nil {
 		return dto.Message
 	}
@@ -5473,6 +5603,7 @@ func (a *App) SaveLocalAddress(addr, pin string) string {
 	if err := eng.ApplyLocalRoute(ctx, lr); err != nil {
 		return err.Error()
 	}
+	a.emit("account")
 	return ""
 }
 
@@ -5743,7 +5874,7 @@ type SetupInfo struct {
 
 // GetSetupInfo returns account + storage details for the setup screen.
 func (a *App) GetSetupInfo() SetupInfo {
-	si := SetupInfo{DefaultDir: a.GetBaseDir(), OnDemandSupport: cfapi.Supported()}
+	si := SetupInfo{DefaultDir: a.baseDirOf(a.eng), OnDemandSupport: cfapi.Supported()}
 	if a.eng != nil {
 		si.User = a.eng.Account.LoginName
 		si.Server = a.eng.Account.ServerURL
@@ -5804,7 +5935,7 @@ func (a *App) completeSetup(localDir, mode string) string {
 			return msg
 		}
 		_ = a.eng.SetBaseDir(localDir)
-		return a.addSyncPair(localDir, "", first)
+		return a.addSyncPair(a.eng, localDir, "", first)
 	case "choose":
 		_ = a.eng.SetBaseDir(localDir)
 		return a.SetSyncMode("live")
@@ -5862,8 +5993,8 @@ func normalizeServer(s string) string {
 // Kept as-is (a bound method) so the frontend bindings don't need regenerating.
 func (a *App) OpenSettings() { a.openSettingsTab("") }
 
-// openSettingsTab opens (or focuses) the settings window on a specific tab
-// ("folders" | "sync" | "exclusions" | "appearance" | "general"; "" = default).
+// openSettingsTab opens (or focuses) the settings window on a specific page
+// ("sync" | "exclusions" | "appearance" | "general"; "" = the shown account).
 // Internal, NOT a binding — the tab reaches the frontend via the URL-hash query
 // on first open and a "settings-tab" event when the window is already open, so
 // no new App method (and no risky bindings regen) is needed.
@@ -5881,20 +6012,37 @@ func (a *App) openSettingsTab(tab string) {
 		url += "?tab=" + tab
 	}
 	a.settingsWin = a.app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Name: "settings", Title: brand.Current.Name + " — Settings", Width: 720, Height: 600, URL: url,
+		Name: "settings", Title: brand.Current.Name + " — Settings", Width: 880, Height: 640, URL: url,
 	})
 	a.settingsWin.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) { a.settingsWin = nil })
 }
 
 // GetBaseDir / SetBaseDir manage the local root for newly-synced folders.
-func (a *App) GetBaseDir() string {
+// acct "" means the shown account. An account that isn't running is read from
+// its saved settings on disk.
+func (a *App) GetBaseDir(acct string) string {
+	if acct == "" {
+		return a.baseDirOf(a.eng)
+	}
+	eng, err := a.acctEngine(acct)
+	if err != nil {
+		if d, ok := notRunningDirs(acct, err); ok {
+			return baseDirFromDisk(d, acct)
+		}
+		return ""
+	}
+	return a.baseDirOf(eng)
+}
+
+// baseDirOf is eng's account folder (nil eng = signed out, so a suggestion).
+func (a *App) baseDirOf(eng *agent.Engine) string {
 	// When the whole account is synced (a pair with an empty remoteRoot), that
 	// pair's local directory IS the account root — prefer it over the stored
 	// baseDir, which can go stale if the pair is created or re-pointed without
 	// updating it (it would otherwise send "Open sync folder", the Explorer
 	// sidebar entry and reveal-in-folder to the wrong place).
-	if a.eng != nil {
-		if pairs, err := a.eng.Pairs(); err == nil {
+	if eng != nil {
+		if pairs, err := eng.Pairs(); err == nil {
 			for _, p := range pairs {
 				if strings.Trim(p.RemoteRoot, "/") == "" {
 					return p.LocalDir
@@ -5904,30 +6052,32 @@ func (a *App) GetBaseDir() string {
 	}
 	// The account's own folder. Per account: a single global one handed a new
 	// account the first account's folder (GitHub #11).
-	if a.eng != nil {
-		if dir := a.eng.StoredBaseDir(); dir != "" {
+	if eng != nil {
+		if dir := eng.StoredBaseDir(); dir != "" {
 			return dir
 		}
 	}
 	// None chosen yet: a default no other account uses.
-	return a.suggestedFolder()
+	return a.suggestedFolderFor(eng)
 }
 
-// SetBaseDir sets the active account's folder. It refuses a folder another
-// account uses; the refusal is shown as a dialog because this binding returns
-// nothing (changing that would mean regenerating the Wails bindings).
-func (a *App) SetBaseDir(dir string) {
-	if a.eng == nil {
+// SetBaseDir sets an account's folder (acct "" = the shown one). It refuses a
+// folder another account uses; the refusal is shown as a dialog because this
+// binding returns nothing (changing that would mean regenerating the Wails
+// bindings). An account that isn't running is left alone.
+func (a *App) SetBaseDir(acct, dir string) {
+	eng, err := a.acctEngine(acct)
+	if err != nil {
 		return
 	}
-	if msg := a.folderClashFor(dir); msg != "" {
+	if msg := a.folderClashForAccount(eng.Account.ID, dir); msg != "" {
 		slog.Warn("refused an account folder that another account uses", "dir", dir)
 		if a.app != nil {
 			a.app.Dialog.Warning().SetTitle("Folder already in use").SetMessage(msg).Show()
 		}
 		return
 	}
-	_ = a.eng.SetBaseDir(dir)
+	_ = eng.SetBaseDir(dir)
 	a.regateAll()
 }
 
@@ -5937,22 +6087,39 @@ func (a *App) SetBaseDir(dir string) {
 // account root, so persist it. No-op when there's no whole-account pair (e.g.
 // "choose what to sync" mode, where baseDir is the parent of several pairs).
 func (a *App) healBaseDir() {
-	if a.eng == nil {
+	a.healBaseDirOf(a.eng)
+}
+
+// healBaseDirOf is healBaseDir for eng's account: it only ever writes eng's
+// own stored baseDir.
+func (a *App) healBaseDirOf(eng *agent.Engine) {
+	if eng == nil {
 		return
 	}
-	pairs, err := a.eng.Pairs()
+	pairs, err := eng.Pairs()
 	if err != nil {
 		return
 	}
+	cur := eng.BaseDir()
+	if dir, ok := healedBaseDir(pairs, cur); ok {
+		_ = eng.SetBaseDir(dir)
+		slog.Info("healed stale baseDir", "account", eng.Account.ID, "from", cur, "to", dir)
+	}
+}
+
+// healedBaseDir decides whether an account's baseDir cur needs healing: it
+// returns the whole-account pair's local directory and true when there is one
+// and cur differs from it, else "" and false.
+func healedBaseDir(pairs []config.SyncPair, cur string) (string, bool) {
 	for _, p := range pairs {
 		if strings.Trim(p.RemoteRoot, "/") == "" {
-			if cur := a.eng.BaseDir(); cur != p.LocalDir {
-				_ = a.eng.SetBaseDir(p.LocalDir)
-				slog.Info("healed stale baseDir", "from", cur, "to", p.LocalDir)
+			if cur != p.LocalDir {
+				return p.LocalDir, true
 			}
-			return
+			return "", false
 		}
 	}
+	return "", false
 }
 
 // BrowseEntry is a remote folder/file for the folder picker.
@@ -5965,19 +6132,21 @@ type BrowseEntry struct {
 	Size int64 `json:"size"`
 }
 
-// BrowseRemote lists a remote directory (one level), excluding the dir itself
-// and anything the account's ignore rules exclude; folders first, then A-Z.
-func (a *App) BrowseRemote(path string) []BrowseEntry {
-	if a.eng == nil {
+// BrowseRemote lists a remote directory of an account (acct "" = the shown
+// one), one level, excluding the dir itself and anything the account's ignore
+// rules exclude; folders first, then A-Z.
+func (a *App) BrowseRemote(acct, path string) []BrowseEntry {
+	eng, err := a.acctEngine(acct)
+	if err != nil {
 		return nil
 	}
-	entries, err := a.eng.Browse(a.ctx, path)
+	entries, err := eng.Browse(a.ctx, path)
 	if err != nil {
 		slog.Warn("browse failed", "path", path, "err", err)
 		return nil
 	}
-	pairs, _ := a.eng.Pairs()
-	return browseEntries(path, entries, pairRelFunc(pairs), a.eng.GlobalIgnoreMatcher())
+	pairs, _ := eng.Pairs()
+	return browseEntries(path, entries, pairRelFunc(pairs), eng.GlobalIgnoreMatcher())
 }
 
 // PairDTO describes a configured sync pair.
@@ -6000,16 +6169,22 @@ type PairDTO struct {
 	HeldReason string `json:"heldReason,omitempty"`
 }
 
-// GetPairs returns configured sync pairs.
-func (a *App) GetPairs() []PairDTO {
-	if a.eng == nil {
+// GetPairs returns an account's configured sync pairs (acct "" = the shown
+// one). An account that isn't running is read from disk, without freeze or
+// hold state.
+func (a *App) GetPairs(acct string) []PairDTO {
+	eng, err := a.acctEngine(acct)
+	if err != nil {
+		if d, ok := notRunningDirs(acct, err); ok {
+			return pairsFromDisk(d, acct)
+		}
 		return nil
 	}
-	pairs, _ := a.eng.Pairs()
-	views := a.eng.FrozenViews()
+	pairs, _ := eng.Pairs()
+	views := eng.FrozenViews()
 	out := make([]PairDTO, 0, len(pairs))
 	for _, p := range pairs {
-		d := PairDTO{LocalDir: p.LocalDir, RemoteRoot: p.RemoteRoot, Excludes: p.Excludes, HeldReason: a.eng.HeldReason(p.LocalDir)}
+		d := PairDTO{LocalDir: p.LocalDir, RemoteRoot: p.RemoteRoot, Excludes: p.Excludes, HeldReason: eng.HeldReason(p.LocalDir)}
 		if v, ok := views[p.LocalDir]; ok {
 			d.Frozen = v.Frozen
 			d.FreezeReason = v.FreezeReason
@@ -6020,12 +6195,23 @@ func (a *App) GetPairs() []PairDTO {
 	return out
 }
 
-// SyncedRemotes returns the remote paths currently configured as sync pairs.
-func (a *App) SyncedRemotes() []string {
-	if a.eng == nil {
-		return nil
+// SyncedRemotes returns the remote paths an account (acct "" = the shown one)
+// has configured as sync pairs. An account that isn't running is read from
+// disk.
+func (a *App) SyncedRemotes(acct string) []string {
+	eng, err := a.acctEngine(acct)
+	if err != nil {
+		d, ok := notRunningDirs(acct, err)
+		if !ok {
+			return nil
+		}
+		var out []string
+		for _, p := range pairsFromDisk(d, acct) {
+			out = append(out, strings.Trim(p.RemoteRoot, "/"))
+		}
+		return out
 	}
-	m := a.eng.SyncedRemotes()
+	m := eng.SyncedRemotes()
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)
@@ -6050,29 +6236,34 @@ func (a *App) AddSyncFolder(remotePath string) {
 	}
 }
 
-// AddSyncPair sets up a sync connection from a remote folder to an explicit
-// local directory. Returns "" on success or an error message for the UI.
-func (a *App) AddSyncPair(localDir, remotePath string) string {
-	return a.addSyncPair(localDir, remotePath, nil)
+// AddSyncPair sets up a sync connection for an account (acct "" = the shown
+// one) from a remote folder to an explicit local directory. Returns "" on
+// success or an error message for the UI.
+func (a *App) AddSyncPair(acct, localDir, remotePath string) string {
+	eng, err := a.acctEngine(acct)
+	if err != nil {
+		return err.Error()
+	}
+	return a.addSyncPair(eng, localDir, remotePath, nil)
 }
 
-// addSyncPair is AddSyncPair with folders for the first sync to download
-// first (setup's "Download these first").
-func (a *App) addSyncPair(localDir, remotePath string, first []string) string {
-	if a.eng == nil {
+// addSyncPair is AddSyncPair on eng's account, with folders for the first sync
+// to download first (setup's "Download these first").
+func (a *App) addSyncPair(eng *agent.Engine, localDir, remotePath string, first []string) string {
+	if eng == nil {
 		return "not signed in"
 	}
-	if msg := a.folderClashFor(localDir); msg != "" {
+	if msg := a.folderClashForAccount(eng.Account.ID, localDir); msg != "" {
 		return msg
 	}
-	if err := a.eng.AddSyncPairFirst(localDir, remotePath, first); err != nil {
+	if err := eng.AddSyncPairFirst(localDir, remotePath, first); err != nil {
 		return err.Error()
 	}
 	// A whole-account pair (empty remote root) defines the account root; keep the
 	// stored baseDir in step so the Explorer sidebar and "Open sync folder"
 	// resolve to it rather than drifting to the default.
 	if strings.Trim(remotePath, "/") == "" {
-		_ = a.eng.SetBaseDir(localDir)
+		_ = eng.SetBaseDir(localDir)
 	}
 	a.regateAll()
 	a.rebuildTrayMenu()
@@ -6144,8 +6335,12 @@ func pickFolderFallback(start string) string {
 	}
 	return strings.TrimSpace(string(out))
 }
-func (a *App) RemoveSyncFolder(remotePath string, deleteLocal bool) {
-	if a.eng == nil {
+
+// RemoveSyncFolder acts on acct's account ("" = the shown one); an account
+// that isn't running is left alone.
+func (a *App) RemoveSyncFolder(acct, remotePath string, deleteLocal bool) {
+	eng, err := a.acctEngine(acct)
+	if err != nil {
 		return
 	}
 	// A connection the user removes takes its backup setting with it — otherwise
@@ -6160,7 +6355,7 @@ func (a *App) RemoveSyncFolder(remotePath string, deleteLocal bool) {
 	// Look the pair up BEFORE it goes: its local dir's status root should not
 	// outlive the pair.
 	var localDir string
-	if pairs, err := a.eng.Pairs(); err == nil {
+	if pairs, err := eng.Pairs(); err == nil {
 		for _, p := range pairs {
 			if p.RemoteRoot == remotePath {
 				localDir = p.LocalDir
@@ -6168,17 +6363,17 @@ func (a *App) RemoveSyncFolder(remotePath string, deleteLocal bool) {
 			}
 		}
 	}
-	if msg := localDeleteBlocked(a.eng, localDir, deleteLocal); msg != "" {
+	if msg := localDeleteBlocked(eng, localDir, deleteLocal); msg != "" {
 		slog.Warn("refused deleting the files of a folder another account uses", "dir", localDir)
 		if a.app != nil {
 			a.app.Dialog.Warning().SetTitle("Files not deleted").SetMessage(msg).Show()
 		}
 		return
 	}
-	if err := a.eng.ForgetSyncFolder(remotePath, deleteLocal); err != nil {
+	if err := eng.ForgetSyncFolder(remotePath, deleteLocal); err != nil {
 		slog.Warn("could not remove the sync folder", "remote", remotePath, "err", err)
 	} else if localDir != "" {
-		a.eng.DisableStatusIcons(localDir)
+		eng.DisableStatusIcons(localDir)
 	}
 	a.regateAll() // another account's folder held back by this one may sync now
 	a.rebuildTrayMenu()
@@ -6191,24 +6386,28 @@ func (a *App) AddExclude(localDir, rel string) {
 		a.eng.TriggerSync()
 	}
 }
-func (a *App) RemoveExclude(localDir, rel string) {
-	if a.eng != nil {
-		_ = a.eng.RemoveExclude(localDir, rel)
-		a.eng.TriggerSync()
+func (a *App) RemoveExclude(acct, localDir, rel string) {
+	eng, err := a.acctEngine(acct)
+	if err != nil {
+		return
 	}
+	_ = eng.RemoveExclude(localDir, rel)
+	eng.TriggerSync()
 }
 
-// DeselectFolder stops syncing rel within the pair at localDir. The server copy is
-// always kept; deleteLocal also removes the downloaded local copy to free space.
-// Returns "" on success or an error string.
-func (a *App) DeselectFolder(localDir, rel string, deleteLocal bool) string {
-	if a.eng == nil {
-		return "not signed in"
+// DeselectFolder stops syncing rel within acct's pair at localDir (acct "" =
+// the shown account). The server copy is always kept; deleteLocal also removes
+// the downloaded local copy to free space. Returns "" on success or an error
+// string.
+func (a *App) DeselectFolder(acct, localDir, rel string, deleteLocal bool) string {
+	eng, err := a.acctEngine(acct)
+	if err != nil {
+		return err.Error()
 	}
-	if msg := localDeleteBlocked(a.eng, localDir, deleteLocal); msg != "" {
+	if msg := localDeleteBlocked(eng, localDir, deleteLocal); msg != "" {
 		return msg
 	}
-	if err := a.eng.DeselectFolder(localDir, rel, deleteLocal); err != nil {
+	if err := eng.DeselectFolder(localDir, rel, deleteLocal); err != nil {
 		return err.Error()
 	}
 	return ""

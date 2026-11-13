@@ -121,6 +121,45 @@ export class AccountEntryDTO {
              */
             this["route"] = "";
         }
+        if (!("running" in $$source)) {
+            /**
+             * Running is true while the account has a running engine; Syncing while
+             * that engine is mid-sync. RouteReason says why the route is what it is,
+             * LocalAddress/LocalPinned are the saved local network setup (from the
+             * store, so they show for an account that isn't running too).
+             * @member
+             * @type {boolean}
+             */
+            this["running"] = false;
+        }
+        if (!("syncing" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["syncing"] = false;
+        }
+        if (!("routeReason" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["routeReason"] = "";
+        }
+        if (!("localAddress" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["localAddress"] = "";
+        }
+        if (!("localPinned" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["localPinned"] = false;
+        }
         if (!("sidebarName" in $$source)) {
             /**
              * SidebarName is the name the user chose for the account's Explorer

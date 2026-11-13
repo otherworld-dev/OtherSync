@@ -69,14 +69,16 @@ export function AddSyncFolder(remotePath) {
 }
 
 /**
- * AddSyncPair sets up a sync connection from a remote folder to an explicit
- * local directory. Returns "" on success or an error message for the UI.
+ * AddSyncPair sets up a sync connection for an account (acct "" = the shown
+ * one) from a remote folder to an explicit local directory. Returns "" on
+ * success or an error message for the UI.
+ * @param {string} acct
  * @param {string} localDir
  * @param {string} remotePath
  * @returns {$CancellablePromise<string>}
  */
-export function AddSyncPair(localDir, remotePath) {
-    return $Call.ByID(3205509215, localDir, remotePath);
+export function AddSyncPair(acct, localDir, remotePath) {
+    return $Call.ByID(3205509215, acct, localDir, remotePath);
 }
 
 /**
@@ -189,27 +191,30 @@ export function Brand() {
 }
 
 /**
- * BrowseOffline lists the shown account's virtual-root folders at rel ("" =
- * root) with their pin state, for the available-offline panel. Only folders
- * that already exist locally as placeholders appear (the tree populates as
- * it's browsed).
+ * BrowseOffline lists an account's virtual-root folders at rel ("" = root)
+ * with their pin state, for the available-offline panel. acct "" means the
+ * shown account. Only folders that already exist locally as placeholders
+ * appear (the tree populates as it's browsed).
+ * @param {string} acct
  * @param {string} rel
  * @returns {$CancellablePromise<$models.OfflineEntry[]>}
  */
-export function BrowseOffline(rel) {
-    return $Call.ByID(1230839982, rel).then(/** @type {($result: any) => any} */(($result) => {
+export function BrowseOffline(acct, rel) {
+    return $Call.ByID(1230839982, acct, rel).then(/** @type {($result: any) => any} */(($result) => {
         return $$createType8($result);
     }));
 }
 
 /**
- * BrowseRemote lists a remote directory (one level), excluding the dir itself
- * and anything the account's ignore rules exclude; folders first, then A-Z.
+ * BrowseRemote lists a remote directory of an account (acct "" = the shown
+ * one), one level, excluding the dir itself and anything the account's ignore
+ * rules exclude; folders first, then A-Z.
+ * @param {string} acct
  * @param {string} path
  * @returns {$CancellablePromise<$models.BrowseEntry[]>}
  */
-export function BrowseRemote(path) {
-    return $Call.ByID(2062198093, path).then(/** @type {($result: any) => any} */(($result) => {
+export function BrowseRemote(acct, path) {
+    return $Call.ByID(2062198093, acct, path).then(/** @type {($result: any) => any} */(($result) => {
         return $$createType10($result);
     }));
 }
@@ -369,16 +374,18 @@ export function DeleteTrash(href) {
 }
 
 /**
- * DeselectFolder stops syncing rel within the pair at localDir. The server copy is
- * always kept; deleteLocal also removes the downloaded local copy to free space.
- * Returns "" on success or an error string.
+ * DeselectFolder stops syncing rel within acct's pair at localDir (acct "" =
+ * the shown account). The server copy is always kept; deleteLocal also removes
+ * the downloaded local copy to free space. Returns "" on success or an error
+ * string.
+ * @param {string} acct
  * @param {string} localDir
  * @param {string} rel
  * @param {boolean} deleteLocal
  * @returns {$CancellablePromise<string>}
  */
-export function DeselectFolder(localDir, rel, deleteLocal) {
-    return $Call.ByID(1961239194, localDir, rel, deleteLocal);
+export function DeselectFolder(acct, localDir, rel, deleteLocal) {
+    return $Call.ByID(1961239194, acct, localDir, rel, deleteLocal);
 }
 
 /**
@@ -482,10 +489,13 @@ export function GetAllowedFilenames() {
 
 /**
  * GetBaseDir / SetBaseDir manage the local root for newly-synced folders.
+ * acct "" means the shown account. An account that isn't running is read from
+ * its saved settings on disk.
+ * @param {string} acct
  * @returns {$CancellablePromise<string>}
  */
-export function GetBaseDir() {
-    return $Call.ByID(1204833849);
+export function GetBaseDir(acct) {
+    return $Call.ByID(1204833849, acct);
 }
 
 /**
@@ -527,11 +537,14 @@ export function GetLimits() {
 }
 
 /**
- * GetPairs returns configured sync pairs.
+ * GetPairs returns an account's configured sync pairs (acct "" = the shown
+ * one). An account that isn't running is read from disk, without freeze or
+ * hold state.
+ * @param {string} acct
  * @returns {$CancellablePromise<$models.PairDTO[]>}
  */
-export function GetPairs() {
-    return $Call.ByID(1028120708).then(/** @type {($result: any) => any} */(($result) => {
+export function GetPairs(acct) {
+    return $Call.ByID(1028120708, acct).then(/** @type {($result: any) => any} */(($result) => {
         return $$createType24($result);
     }));
 }
@@ -676,13 +689,14 @@ export function LowMemoryMode() {
  * Explorer / restored a backup) it just re-keys the sync state; otherwise it
  * relocates the folder there first — an instant rename on the same drive, or a
  * recursive copy-then-delete across drives. Returns "" on success, else a
- * human-readable error.
+ * human-readable error. acct "" means the shown account.
+ * @param {string} acct
  * @param {string} oldLocal
  * @param {string} newLocal
  * @returns {$CancellablePromise<string>}
  */
-export function MoveSyncFolder(oldLocal, newLocal) {
-    return $Call.ByID(2122683691, oldLocal, newLocal);
+export function MoveSyncFolder(acct, oldLocal, newLocal) {
+    return $Call.ByID(2122683691, acct, oldLocal, newLocal);
 }
 
 /**
@@ -953,10 +967,9 @@ export function RecentActivity() {
 }
 
 /**
- * RemoveAccount disconnects a NON-active account: its keychain secret, account
- * entry, sync-folder setup and local sync state are removed (local files are
- * kept). Removing the active account is SignOut's job — it handles the engine
- * teardown and next-account handover.
+ * RemoveAccount disconnects a NON-active account and clears its sync setup and
+ * local sync state (local files are kept). Signing out the active account is
+ * SignOut's job — it handles the engine teardown and next-account handover.
  * @param {string} id
  * @returns {$CancellablePromise<string>}
  */
@@ -965,12 +978,13 @@ export function RemoveAccount(id) {
 }
 
 /**
+ * @param {string} acct
  * @param {string} localDir
  * @param {string} rel
  * @returns {$CancellablePromise<void>}
  */
-export function RemoveExclude(localDir, rel) {
-    return $Call.ByID(1972269193, localDir, rel);
+export function RemoveExclude(acct, localDir, rel) {
+    return $Call.ByID(1972269193, acct, localDir, rel);
 }
 
 /**
@@ -982,12 +996,15 @@ export function RemoveLicence() {
 }
 
 /**
+ * RemoveSyncFolder acts on acct's account ("" = the shown one); an account
+ * that isn't running is left alone.
+ * @param {string} acct
  * @param {string} remotePath
  * @param {boolean} deleteLocal
  * @returns {$CancellablePromise<void>}
  */
-export function RemoveSyncFolder(remotePath, deleteLocal) {
-    return $Call.ByID(2181427266, remotePath, deleteLocal);
+export function RemoveSyncFolder(acct, remotePath, deleteLocal) {
+    return $Call.ByID(2181427266, acct, remotePath, deleteLocal);
 }
 
 /**
@@ -1092,15 +1109,16 @@ export function RevealPath(path) {
 
 /**
  * SaveLocalAddress re-runs the check in Go (never trusting what the frontend
- * passes back), stores the route on the shown account and applies it to that
- * account's running engine. An empty addr removes the route. Returns "" or a
- * user-facing error.
+ * passes back), stores the route on an account (acct "" = the shown one) and
+ * applies it to that account's running engine. An empty addr removes the
+ * route. Returns "" or a user-facing error.
+ * @param {string} acct
  * @param {string} addr
  * @param {string} pin
  * @returns {$CancellablePromise<string>}
  */
-export function SaveLocalAddress(addr, pin) {
-    return $Call.ByID(1068667433, addr, pin);
+export function SaveLocalAddress(acct, addr, pin) {
+    return $Call.ByID(1068667433, acct, addr, pin);
 }
 
 /**
@@ -1156,14 +1174,16 @@ export function SetAutostart(on) {
 }
 
 /**
- * SetBaseDir sets the active account's folder. It refuses a folder another
- * account uses; the refusal is shown as a dialog because this binding returns
- * nothing (changing that would mean regenerating the Wails bindings).
+ * SetBaseDir sets an account's folder (acct "" = the shown one). It refuses a
+ * folder another account uses; the refusal is shown as a dialog because this
+ * binding returns nothing (changing that would mean regenerating the Wails
+ * bindings). An account that isn't running is left alone.
+ * @param {string} acct
  * @param {string} dir
  * @returns {$CancellablePromise<void>}
  */
-export function SetBaseDir(dir) {
-    return $Call.ByID(1736883101, dir);
+export function SetBaseDir(acct, dir) {
+    return $Call.ByID(1736883101, acct, dir);
 }
 
 /**
@@ -1248,13 +1268,15 @@ export function SetNotifications(on) {
  * SetOfflinePin pins (always keep on this device — the watcher downloads any
  * online-only content once it hears the attribute change or meets it during
  * reconcile, and keeps it current) or unpins (back to online-only preference)
- * a folder subtree in the shown account's virtual root.
+ * a folder subtree in an account's virtual root. acct "" means the shown
+ * account.
+ * @param {string} acct
  * @param {string} rel
  * @param {boolean} pinned
  * @returns {$CancellablePromise<string>}
  */
-export function SetOfflinePin(rel, pinned) {
-    return $Call.ByID(2108331737, rel, pinned);
+export function SetOfflinePin(acct, rel, pinned) {
+    return $Call.ByID(2108331737, acct, rel, pinned);
 }
 
 /**
@@ -1486,11 +1508,17 @@ export function SignInTarget() {
  * quick re-login. With clearData true they're wiped too, for a clean reset (and
  * so a fresh login can't mistake a since-deleted local folder for user deletions
  * and propagate them to the server). UI preferences are kept either way.
+ * 
+ * acct names the account to sign out; "" or the shown account's id signs out
+ * the shown account as described above (see signOutRoute). Any other
+ * configured account is disconnected on its own, leaving the shown account's
+ * syncing untouched.
+ * @param {string} acct
  * @param {boolean} clearData
  * @returns {$CancellablePromise<string>}
  */
-export function SignOut(clearData) {
-    return $Call.ByID(578162832, clearData);
+export function SignOut(acct, clearData) {
+    return $Call.ByID(578162832, acct, clearData);
 }
 
 /**
@@ -1522,11 +1550,14 @@ export function SyncNow() {
 }
 
 /**
- * SyncedRemotes returns the remote paths currently configured as sync pairs.
+ * SyncedRemotes returns the remote paths an account (acct "" = the shown one)
+ * has configured as sync pairs. An account that isn't running is read from
+ * disk.
+ * @param {string} acct
  * @returns {$CancellablePromise<string[]>}
  */
-export function SyncedRemotes() {
-    return $Call.ByID(1824770878).then(/** @type {($result: any) => any} */(($result) => {
+export function SyncedRemotes(acct) {
+    return $Call.ByID(1824770878, acct).then(/** @type {($result: any) => any} */(($result) => {
         return $$createType21($result);
     }));
 }
@@ -1540,15 +1571,16 @@ export function TailLog() {
 }
 
 /**
- * TestLocalAddress checks a candidate local network address for the shown
- * account without saving anything. pin is "" or a SHA-256 fingerprint the user
- * chose to trust from a previous "untrusted" result.
+ * TestLocalAddress checks a candidate local network address for an account
+ * (acct "" = the shown one) without saving anything. pin is "" or a SHA-256
+ * fingerprint the user chose to trust from a previous "untrusted" result.
+ * @param {string} acct
  * @param {string} addr
  * @param {string} pin
  * @returns {$CancellablePromise<$models.LocalTestDTO>}
  */
-export function TestLocalAddress(addr, pin) {
-    return $Call.ByID(176774928, addr, pin).then(/** @type {($result: any) => any} */(($result) => {
+export function TestLocalAddress(acct, addr, pin) {
+    return $Call.ByID(176774928, acct, addr, pin).then(/** @type {($result: any) => any} */(($result) => {
         return $$createType48($result);
     }));
 }

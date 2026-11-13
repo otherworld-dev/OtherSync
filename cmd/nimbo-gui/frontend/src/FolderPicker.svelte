@@ -19,7 +19,7 @@
     target = $bindable(),
     sizes = $bindable({}),
     disabled = false,
-    browse = (p: string) => App.BrowseRemote(p) as Promise<Entry[] | null>,
+    browse = (p: string) => App.BrowseRemote("", p) as Promise<Entry[] | null>,
   }: {
     root: string;                        // server folder the paths are relative to ("" = whole account)
     committed: string[];                 // unticked folders as saved now

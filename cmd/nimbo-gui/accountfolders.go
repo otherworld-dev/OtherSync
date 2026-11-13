@@ -236,14 +236,29 @@ func (a *App) activeAccountID(st account.Store) string {
 	return ""
 }
 
-// folderClashFor checks a folder the user is CHOOSING for the active account
-// against everything the other accounts have claimed.
-func (a *App) folderClashFor(dir string) string {
+// folderClashIn checks a folder the named account is CHOOSING against
+// everything the other accounts have claimed.
+func folderClashIn(d config.Dirs, st account.Store, acctID, dir string) string {
+	return folderClash(dir, otherAccountFolders(d, st, acctID))
+}
+
+// folderClashForAccount is folderClashIn for the stores on disk.
+func (a *App) folderClashForAccount(acctID, dir string) string {
 	d, st, ok := accountsAndDirs()
 	if !ok {
 		return ""
 	}
-	return folderClash(dir, otherAccountFolders(d, st, a.activeAccountID(st)))
+	return folderClashIn(d, st, acctID, dir)
+}
+
+// folderClashFor checks a folder the user is CHOOSING for the active account
+// against everything the other accounts have claimed.
+func (a *App) folderClashFor(dir string) string {
+	_, st, ok := accountsAndDirs()
+	if !ok {
+		return ""
+	}
+	return a.folderClashForAccount(a.activeAccountID(st), dir)
 }
 
 // syncClashFor checks a folder an account is about to SYNC or mount against
@@ -301,21 +316,29 @@ func (a *App) toastAccount(msg string) {
 	}
 }
 
-// suggestedFolder is the default folder to show the active account when it
-// has none of its own yet. It never returns "", so the UI always has a path to
+// suggestedFolderFor is the default folder to show eng's account when it has
+// none of its own yet. nil means no running account (signed out): it is never
+// taken as the shown account, and the suggestion keeps clear of every account
+// but the store's default. It never returns "", so the UI always has a path to
 // show; if nothing is free it falls back to ~/Nextcloud, which every place that
 // actually uses a folder checks before doing so.
-func (a *App) suggestedFolder() string {
+func (a *App) suggestedFolderFor(eng *agent.Engine) string {
 	home, _ := os.UserHomeDir()
 	login := ""
-	if a.eng != nil {
-		login = a.eng.Account.LoginName
+	if eng != nil {
+		login = eng.Account.LoginName
 	}
 	d, st, ok := accountsAndDirs()
 	var others []accountFolder
 	var usable func(string) bool
 	if ok {
-		others = otherAccountFolders(d, st, a.activeAccountID(st))
+		id := ""
+		if eng != nil {
+			id = eng.Account.ID
+		} else if acc, found := st.Default(); found {
+			id = acc.ID
+		}
+		others = otherAccountFolders(d, st, id)
 		// With other accounts on this PC, a folder that already holds files is
 		// most likely one of theirs (or left over from one), and keeping its
 		// files would upload them to this account's server. Only the first
