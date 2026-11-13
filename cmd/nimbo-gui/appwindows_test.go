@@ -103,3 +103,16 @@ func TestResolveServerHref(t *testing.T) {
 		}
 	}
 }
+
+// Offline, an account that is signed in has no engine either; it must not be
+// told to sign in (10 Nov 2026: the laptop said "Sign in first" with no network).
+func TestNoEngineMessage(t *testing.T) {
+	const signIn = "Sign in first."
+	if got := noEngineMessage(true, signIn); got != signIn {
+		t.Errorf("needs login: got %q, want %q", got, signIn)
+	}
+	got := noEngineMessage(false, signIn)
+	if got == signIn || got == "" {
+		t.Errorf("signed in but no engine: got %q, want the can't-reach message", got)
+	}
+}

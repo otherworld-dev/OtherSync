@@ -280,6 +280,15 @@ if ($Store) {
     # Element form only (Properties>DisplayName) - the VisualElements DisplayName is an
     # attribute and deliberately untouched, so Start menu / taskbar keep showing "OtherSync".
     $manifest = $manifest -replace '<DisplayName>[^<]*</DisplayName>', "<DisplayName>$StoreDisplayName</DisplayName>"
+    # The Store refuses unvirtualizedResources (policy 10.6.3, 0.2.0.0 rejected
+    # 2026-10-19), so the Store package drops it and the Start-menu folder
+    # exclusion that needs it. Store installs are back to the pre-#16 behaviour
+    # for app-window shortcuts; the direct download keeps both.
+    $manifest = [regex]::Replace($manifest, '\s*<virtualization:FileSystemWriteVirtualization>.*?</virtualization:FileSystemWriteVirtualization>', '', 'Singleline')
+    $manifest = [regex]::Replace($manifest, '\s*<!-- Only for the Start-menu folder excluded under Properties\. -->\s*<rescap:Capability Name="unvirtualizedResources" />', '')
+    if ($manifest -match '<rescap:Capability Name="unvirtualizedResources"|<virtualization:FileSystemWriteVirtualization') {
+        throw "Store manifest still declares unvirtualizedResources; the Store rejects it"
+    }
 }
 [System.IO.File]::WriteAllText(
     (Join-Path $stage "AppxManifest.xml"), $manifest, (New-Object System.Text.UTF8Encoding($false)))

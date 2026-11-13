@@ -26,13 +26,21 @@ static HINSTANCE g_hInst = nullptr;
 static LONG g_objs = 0;
 
 // --- debug log (%TEMP%\nimbo-ctxmenu.log) ------------------------------------
+// Written on every menu open from inside explorer.exe, so it is capped: once
+// it passes kMaxLog it starts again from empty (Deck d951).
+static const LONGLONG kMaxLog = 256 * 1024;
 static void dbg(const wchar_t* msg) {
     wchar_t path[MAX_PATH];
     DWORD n = GetTempPathW(MAX_PATH, path);
     lstrcpynW(path + n, L"nimbo-ctxmenu.log", (int)(MAX_PATH - n));
-    HANDLE h = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
+    HANDLE h = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
                            nullptr, OPEN_ALWAYS, 0, nullptr);
     if (h == INVALID_HANDLE_VALUE) return;
+    LARGE_INTEGER size;
+    if (GetFileSizeEx(h, &size) && size.QuadPart > kMaxLog) {
+        SetEndOfFile(h); // the pointer is still at 0: empties the file
+    }
+    SetFilePointer(h, 0, nullptr, FILE_END);
     char out[2048];
     int c = WideCharToMultiByte(CP_UTF8, 0, msg, -1, out, sizeof(out) - 2, nullptr, nullptr);
     if (c > 0) {
@@ -264,6 +272,7 @@ HRESULT STDMETHODCALLTYPE Command::EnumSubCommands(IEnumExplorerCommand** ppEnum
 class Factory : public IClassFactory {
 public:
     Factory() : m_ref(1) {}
+    virtual ~Factory() = default; // Release deletes through this type
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
         if (riid == IID_IUnknown || riid == IID_IClassFactory) {
             *ppv = static_cast<IClassFactory*>(this);

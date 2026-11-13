@@ -350,6 +350,57 @@ func TestASuccessfulChangeSyncLiftsTheBackoff(t *testing.T) {
 	}
 }
 
+// A change that syncs fine does not lift the backoff when the failed pass was
+// the server answering with an error of its own: the server was reachable all
+// along, so a small upload getting through says nothing about the heavy pass.
+// Lifting it there held the retries at five minutes for a day, because the
+// desktop wrote a small file every few minutes, while each retry of its first
+// sync put the server's PHP at its memory limit (Deck #1004).
+func TestAChangeSyncDoesNotLiftTheBackoffForAServerFault(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events := make(chan string, 1)
+	ext := make(chan struct{}, 1)
+	fault := errors.New("server returned 500 Internal Server Error")
+	var pushes atomic.Int32
+	onPush := func(context.Context) error {
+		pushes.Add(1)
+		return fault
+	}
+	changed := make(chan struct{}, 1)
+	syncFn := func(_ context.Context, c []string) error {
+		if c != nil {
+			changed <- struct{}{}
+		}
+		return nil
+	}
+	go func() {
+		_ = runLoop(ctx, Options{Root: t.TempDir(), Debounce: 10 * time.Millisecond, PollInterval: time.Hour,
+			OnPush: onPush, External: ext, ServerFault: func(err error) bool { return errors.Is(err, fault) }},
+			syncFn, events)
+	}()
+	ext <- struct{}{} // the push fails with the server's own error: a one-hour hold
+	deadline := time.After(2 * time.Second)
+	for pushes.Load() < 1 {
+		select {
+		case <-deadline:
+			t.Fatal("the first push never ran")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	events <- `C:\Sync\edited.txt` // a small change gets through
+	select {
+	case <-changed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the change never synced")
+	}
+	ext <- struct{}{}
+	time.Sleep(200 * time.Millisecond)
+	if n := pushes.Load(); n != 1 {
+		t.Fatalf("pushes = %d: a change sync lifted the backoff from a server fault", n)
+	}
+}
+
 // A sync the user asked for (Sync now, Resume after a paused folder was
 // reviewed) is not one of the retries the backoff spaces out: it lifts the
 // backoff and runs. Sent down External like a server push, it was dropped
@@ -445,5 +496,48 @@ func TestNudgedPathsSyncDuringTheBackoff(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("the nudged paths were held back by the backoff")
+	}
+}
+
+// A push that only reported our own upload is skipped; one that reported
+// anything else runs, and a sync the user asked for runs without asking
+// (Deck d1103).
+func TestAPushOfOurOwnUploadIsSkipped(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ext := make(chan struct{}, 1)
+	user := make(chan struct{}, 1)
+	var pushes, asked atomic.Int32
+	var own atomic.Bool
+	go func() {
+		_ = runLoop(ctx, Options{Root: t.TempDir(), Debounce: 10 * time.Millisecond, PollInterval: time.Hour,
+			OnPush:    func(context.Context) error { pushes.Add(1); return nil },
+			PushIsOwn: func(context.Context) bool { asked.Add(1); return own.Load() },
+			External:  ext, UserSync: user}, func(context.Context, []string) error { return nil }, make(chan string))
+	}()
+	settle := func() { time.Sleep(100 * time.Millisecond) }
+
+	own.Store(true)
+	ext <- struct{}{}
+	settle()
+	if pushes.Load() != 0 || asked.Load() != 1 {
+		t.Fatalf("own push: %d rounds, asked %d; want 0 rounds, asked once", pushes.Load(), asked.Load())
+	}
+
+	own.Store(false)
+	ext <- struct{}{}
+	settle()
+	if pushes.Load() != 1 {
+		t.Fatalf("someone else's change: %d rounds, want 1", pushes.Load())
+	}
+
+	own.Store(true)
+	user <- struct{}{}
+	settle()
+	if pushes.Load() != 2 {
+		t.Fatalf("user sync: %d rounds, want 2", pushes.Load())
+	}
+	if asked.Load() != 2 {
+		t.Fatalf("PushIsOwn asked %d times, want 2 (never for the user's sync)", asked.Load())
 	}
 }

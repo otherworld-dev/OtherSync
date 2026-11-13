@@ -46,6 +46,15 @@ $formerName = (Get-Content $brandSrc -Raw | ConvertFrom-Json).formerName
 if ($formerName -and $formerName -ne $cfg.renamedFrom) {
     throw "brand.json sets formerName '$formerName', which is the stock build's. Remove it from the partner's brand.json, or, if this partner really renamed its product from '$formerName', add `"renamedFrom`": `"$formerName`" to partner.json."
 }
+# serverUrl / lockServer: the app drops a preset it can't use (and its lock),
+# which would ship a partner build that signs in anywhere. Refuse it here.
+$brandCfg = Get-Content $brandSrc -Raw | ConvertFrom-Json
+if ($brandCfg.lockServer -and -not $brandCfg.serverUrl) {
+    throw "brand.json sets lockServer but no serverUrl."
+}
+if ($brandCfg.serverUrl -and $brandCfg.serverUrl -notmatch '^https://[^/\s]+') {
+    throw "brand.json serverUrl '$($brandCfg.serverUrl)' must be an https:// address."
+}
 
 # Make Go + windres reachable even if not on PATH.
 function Ensure-Tool($exe, $candidates) {

@@ -30,7 +30,10 @@ import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -275,6 +278,27 @@ fun NotificationBell(count: Int, onClick: () -> Unit) {
             )
         }
     }
+}
+
+/**
+ * The end of every tab's ⋮ menu: Settings, then Diagnostics.
+ *
+ * A tab's own items go above it, then a divider, so the same entries sit in the
+ * same place whichever tab you are on; sharing them keeps the tabs from
+ * drifting apart again. Each callback should close the menu as well.
+ */
+@Composable
+fun CommonMenuItems(onOpenSettings: () -> Unit, onOpenDiagnostics: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text("Settings") },
+        leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null) },
+        onClick = onOpenSettings,
+    )
+    DropdownMenuItem(
+        text = { Text("Diagnostics") },
+        leadingIcon = { Icon(Icons.Outlined.Info, contentDescription = null) },
+        onClick = onOpenDiagnostics,
+    )
 }
 
 /* ------------------------------------------------------------------ */

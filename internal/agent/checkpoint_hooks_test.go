@@ -60,6 +60,8 @@ type fakeDAV struct {
 	mu      sync.Mutex
 	nodes   map[string]davNode
 	failPF  map[string]int    // dir -> status served instead of its listing
+	failInf map[string]int    // dir -> status served instead of its Depth: infinity listing only
+	infN    map[string]int    // Depth: infinity PROPFINDs seen per dir, failures included
 	failGET map[string]int    // file -> status served instead of its body
 	pfCalls map[string]int    // PROPFINDs seen per dir, failures included
 	puts    map[string]string // file -> body of the last PUT accepted
@@ -71,12 +73,17 @@ type fakeDAV struct {
 	// onGET, when set, runs before a GET is served and outside the lock, so a
 	// test can hold one download while it changes something.
 	onGET func(rel string)
+	// onPROPFIND, likewise, runs before a PROPFIND is served and outside the
+	// lock, so a test can add latency or time the requests (Deck #1001).
+	onPROPFIND func(rel string)
 }
 
 func newFakeDAV(nodes map[string]davNode) *fakeDAV {
 	return &fakeDAV{
 		nodes:   nodes,
 		failPF:  map[string]int{},
+		failInf: map[string]int{},
+		infN:    map[string]int{},
 		failGET: map[string]int{},
 		pfCalls: map[string]int{},
 		puts:    map[string]string{},
@@ -105,10 +112,12 @@ func (f *fakeDAV) putBody(p string) string {
 	return f.puts[p]
 }
 
-func (f *fakeDAV) setNode(p string, n davNode)    { f.mu.Lock(); f.nodes[p] = n; f.mu.Unlock() }
-func (f *fakeDAV) delNode(p string)               { f.mu.Lock(); delete(f.nodes, p); f.mu.Unlock() }
-func (f *fakeDAV) setFailPF(dir string, code int) { f.mu.Lock(); f.failPF[dir] = code; f.mu.Unlock() }
-func (f *fakeDAV) clearFailPF(dir string)         { f.mu.Lock(); delete(f.failPF, dir); f.mu.Unlock() }
+func (f *fakeDAV) setNode(p string, n davNode)     { f.mu.Lock(); f.nodes[p] = n; f.mu.Unlock() }
+func (f *fakeDAV) delNode(p string)                { f.mu.Lock(); delete(f.nodes, p); f.mu.Unlock() }
+func (f *fakeDAV) setFailPF(dir string, code int)  { f.mu.Lock(); f.failPF[dir] = code; f.mu.Unlock() }
+func (f *fakeDAV) clearFailPF(dir string)          { f.mu.Lock(); delete(f.failPF, dir); f.mu.Unlock() }
+func (f *fakeDAV) setFailInf(dir string, code int) { f.mu.Lock(); f.failInf[dir] = code; f.mu.Unlock() }
+func (f *fakeDAV) infCount(dir string) int         { f.mu.Lock(); defer f.mu.Unlock(); return f.infN[dir] }
 func (f *fakeDAV) setFailGET(file string, code int) {
 	f.mu.Lock()
 	f.failGET[file] = code
@@ -153,6 +162,9 @@ func (f *fakeDAV) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" && f.onGET != nil {
 		f.onGET(rel)
 	}
+	if r.Method == "PROPFIND" && f.onPROPFIND != nil {
+		f.onPROPFIND(rel)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	switch r.Method {
@@ -161,6 +173,13 @@ func (f *fakeDAV) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if code, ok := f.failPF[rel]; ok {
 			w.WriteHeader(code)
 			return
+		}
+		if r.Header.Get("Depth") == "infinity" {
+			f.infN[rel]++
+			if code, ok := f.failInf[rel]; ok {
+				w.WriteHeader(code)
+				return
+			}
 		}
 		// A FILE answers too, with a single self row — that is what a depth-0
 		// PROPFIND is, and transport.Client.Stat is built on it, so the whole

@@ -19,6 +19,9 @@ import (
 // and 16 workers cold-crawling a large tree drove a small Nextcloud host to
 // exhaustion (MariaDB pinned, then "server has gone away" aborting the scan).
 // 4 keeps a cold crawl parallel while leaving the server room to breathe.
+// Concurrency alone does not bound the request RATE, though (4 workers against
+// a quick server ran ~50 PROPFINDs/s, Deck #1001): that is the account's
+// listing pacer's job (package pace, via pacedPropFinder below).
 const scanWorkers = 4
 
 // parseChecksumSHA1 extracts the SHA1 hex digest from an oc:checksums value such
@@ -37,6 +40,16 @@ func parseChecksumSHA1(checksums string) string {
 // server. *transport.Client satisfies it unchanged.
 type PropFinder interface {
 	PropFind(ctx context.Context, path string, depth int) ([]transport.Entry, error)
+}
+
+// pacedPropFinder is a PropFinder that can also list through its account's
+// shared listing pacer (Deck #1001). *transport.Client is one, so every
+// RemoteScan caller — full and delta scans, the relist, the on-demand adopt
+// crawl, the escape sweep — is rate-limited and backs off under server strain
+// without each call site having to remember to. Test fakes that implement only
+// PropFind crawl unpaced.
+type pacedPropFinder interface {
+	PacedPropFind(ctx context.Context, path string, depth int) ([]transport.Entry, error)
 }
 
 // ScanOpts bundles RemoteScan's optional inputs; the zero value is a plain raw
@@ -71,6 +84,21 @@ type ScanOpts struct {
 	// as "can't sync" instead of letting them go missing (Deck #984). Called
 	// from worker goroutines.
 	OnUnholdable func(dir string, items []Unholdable)
+	// Descend, when non-nil, is consulted with each child directory's
+	// root-relative path before it is queued for listing; false leaves its
+	// subtree unlisted. The directory's own entry is still recorded (it came
+	// from its parent's listing), and a subtree the baseline can reproduce is
+	// still reproduced (that costs no request). The on-demand adopt scan uses
+	// it to list only the server folders that hold local files: everything
+	// else is populated lazily by the cloud filter (Deck #1003).
+	Descend func(rel string) bool
+	// OnListed, when non-nil, is called with the root-relative path of every
+	// directory whose children are now completely in the result: after a
+	// successful listing (cached or fetched) and for every directory
+	// reproduced from the baseline. "" is the root. A directory never
+	// reported was not enumerated, so what it holds is UNKNOWN, not absent.
+	// Called from worker goroutines; must be safe for concurrent use.
+	OnListed func(rel string)
 }
 
 // Unholdable is a server item a scan skipped because this OS cannot hold its
@@ -154,6 +182,10 @@ func RemoteScan(ctx context.Context, c PropFinder, root string, opts ScanOpts) (
 	)
 
 	cp := opts.Checkpoint
+	list := c.PropFind
+	if pc, ok := c.(pacedPropFinder); ok {
+		list = pc.PacedPropFind // checkpoint hits below never touch it: only real requests are paced
+	}
 	var listed atomic.Int64 // directories listed so far, for the Progress heartbeat
 
 	// process lists one directory (from cache when the checkpoint validates,
@@ -170,13 +202,16 @@ func RemoteScan(ctx context.Context, c PropFinder, root string, opts ScanOpts) (
 			entries, cached = cp.Load(it.dir, it.etag)
 		}
 		if !cached {
-			entries, err = c.PropFind(ctx, it.dir, 1)
+			entries, err = list(ctx, it.dir, 1)
 			if err == nil && cp != nil && !it.noCache && it.etag != "" {
 				cp.Save(it.dir, it.etag, childrenOnly(entries, it.dir))
 			}
 		}
 		if err == nil && opts.Progress != nil {
 			opts.Progress(int(listed.Add(1)))
+		}
+		if err == nil && opts.OnListed != nil {
+			opts.OnListed(relTo(it.dir, root))
 		}
 		if err == nil && opts.OnUnholdable != nil {
 			var bad []Unholdable
@@ -255,6 +290,11 @@ func RemoteScan(ctx context.Context, c PropFinder, root string, opts ScanOpts) (
 			}
 			if b, ok := base[rel]; ok && b.IsDir && b.RemoteETag == e.ETag {
 				addBaselineSubtree(out, base, childrenOf, rel) // unchanged subtree — reuse baseline
+				if opts.OnListed != nil {
+					reportBaselineDirs(opts.OnListed, base, childrenOf, rel)
+				}
+			} else if opts.Descend != nil && !opts.Descend(rel) {
+				continue // not needed: recorded, but its subtree stays unlisted
 			} else {
 				queue = append(queue, scanItem{
 					dir:          full,
@@ -346,6 +386,17 @@ func parentOf(rel string) string {
 		return rel[:i]
 	}
 	return ""
+}
+
+// reportBaselineDirs reports prefix and every directory beneath it in the
+// baseline as listed: addBaselineSubtree put all their children in the result.
+func reportBaselineDirs(onListed func(string), base map[string]BaselineState, childrenOf map[string][]string, prefix string) {
+	onListed(prefix)
+	for _, child := range childrenOf[prefix] {
+		if base[child].IsDir {
+			reportBaselineDirs(onListed, base, childrenOf, child)
+		}
+	}
 }
 
 // addBaselineSubtree copies every baseline descendant of prefix into out,

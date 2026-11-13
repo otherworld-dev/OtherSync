@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/otherworld/nimbo/internal/account"
 	"github.com/otherworld/nimbo/internal/agent"
 	"github.com/otherworld/nimbo/internal/brand"
 )
@@ -40,6 +41,10 @@ type NowCheckDTO struct {
 	AccountID string `json:"-"`      // as NowJobDTO.AccountID
 	Folder    string `json:"folder"` // the folder being listed now, "" when unknown
 	Dirs      int    `json:"dirs"`   // folders listed so far
+	// StartsIn > 0: not checking yet, but about to list every folder in this
+	// many seconds (the random pause before a first sync or the one-off
+	// folder check, Deck #1001).
+	StartsIn int `json:"startsIn"`
 }
 
 // NowStatusDTO is the composed status line and the detail behind it.
@@ -88,6 +93,11 @@ type nowInput struct {
 	// OtherProblem: its sync stopped or failed.
 	OtherOffline bool
 	OtherProblem bool
+	// SignIn lists the other accounts the server turned down, by login, and
+	// SignInID is the first one's ID: their engines are stopped, so nothing
+	// else on the line would mention them (Deck #1130).
+	SignIn   []string
+	SignInID string
 
 	// revealIn is how long until something kept off the line by the quiet
 	// period would show (0 = nothing waiting), so NowStatus can look again
@@ -110,12 +120,25 @@ func composeNow(in nowInput, brandName string) NowStatusDTO {
 		out.LastCheck = in.LastCheck.Format(time.RFC3339)
 	}
 
-	// Needs you: every account counts (as the tray warning always has).
+	// Needs you: every account counts (as the tray warning always has). An
+	// account to sign in again comes first: nothing of it syncs until then.
 	at := in.Attention
-	if n := at.Conflicts + at.Blocked + at.Detached; n > 0 {
+	if n := at.Conflicts + at.Blocked + at.Detached; n > 0 || len(in.SignIn) > 0 {
 		out.State = "attention"
 		out.Main = plural(n, "item needs you", "items need you")
 		var parts []string
+		if len(in.SignIn) > 0 {
+			if len(in.SignIn) == 1 {
+				out.Main = in.SignIn[0] + " needs signing in again"
+			} else {
+				out.Main = plural(len(in.SignIn), "account needs signing in again", "accounts need signing in again")
+			}
+			if n > 0 {
+				out.Sub = plural(n, "item needs you", "items need you")
+			}
+			out.Tab = signInTab + in.SignInID
+			return out
+		}
 		if at.Blocked > 0 {
 			parts = append(parts, thousands(at.Blocked)+" can't sync")
 		}
@@ -182,12 +205,17 @@ func composeNow(in nowInput, brandName string) NowStatusDTO {
 			downs++
 		}
 	}
-	dirs, checking := 0, false
+	dirs, checking, starting := 0, false, false
 	for _, c := range in.Checking {
-		if c.AccountID == in.ShownAccount {
-			checking = true
-			dirs += c.Dirs
+		if c.AccountID != in.ShownAccount {
+			continue
 		}
+		if c.StartsIn > 0 {
+			starting = true
+			continue
+		}
+		checking = true
+		dirs += c.Dirs
 	}
 
 	var extras []string
@@ -205,7 +233,7 @@ func composeNow(in nowInput, brandName string) NowStatusDTO {
 		extras = append(extras, plural(in.LargeAside, "large file set aside", "large files set aside"))
 	}
 
-	if len(running) > 0 || checking || in.Working != "" {
+	if len(running) > 0 || checking || starting || in.Working != "" {
 		out.State = "busy"
 		var parts []string
 		if s := transferSummary(ups, downs); s != "" {
@@ -228,6 +256,8 @@ func composeNow(in nowInput, brandName string) NowStatusDTO {
 			if dirs > 0 {
 				out.Main += " " + thousands(dirs)
 			}
+		} else if starting {
+			out.Main = "Starting shortly…"
 		} else {
 			out.Main = in.Working
 		}
@@ -629,7 +659,7 @@ type nowEngine struct {
 	status string
 	since  time.Time           // when status last changed
 	mounts map[string]*odMount // this account's on-demand mounts by local dir
-	down   bool                // one of its mounts can't list the server's root
+	down   bool                // its server isn't answering, or a mount can't list its root
 }
 
 // gatherNow collects every account's jobs and checks, deduped by local path,
@@ -710,6 +740,13 @@ func (a *App) gatherNow(shown *agent.Engine, att AttentionInfo, now time.Time) n
 			h.Account, h.AccountID, h.Path = ne.login, ne.id, shownPath
 			add(mountLocal(ne.mounts, shownPath), h)
 		}
+		// The server stopped answering requests: say so without waiting for
+		// a listing of the root to fail (Deck #1128).
+		if c := ne.eng.Client(); c != nil {
+			down, wait := c.Unreachable(now)
+			ne.down = ne.down || down
+			soonest(&in.revealIn, wait)
+		}
 		var incomplete, haveCheck bool
 		var oldest time.Time // the least recent mount's last full check (zero = one never finished)
 		for _, m := range ne.mounts {
@@ -742,6 +779,13 @@ func (a *App) gatherNow(shown *agent.Engine, att AttentionInfo, now time.Time) n
 			}
 		}
 		sn := ne.eng.ScanNow()
+		// The pause before a whole-tree crawl shows at once (it is a wait the
+		// user should see explained) and counts down, so look again each second.
+		if left := sn.StartsAt.Sub(now); !sn.StartsAt.IsZero() && left > 0 {
+			in.Checking = append(in.Checking, NowCheckDTO{Account: ne.login, AccountID: ne.id,
+				StartsIn: int((left + time.Second - 1) / time.Second)})
+			soonest(&in.revealIn, time.Second)
+		}
 		if shown, wait := checkShown(sn.Active, sn.Since, now); shown {
 			c := NowCheckDTO{Account: ne.login, AccountID: ne.id, Folder: sn.Folder}
 			if sn.Phase == "server" {
@@ -773,6 +817,18 @@ func (a *App) gatherNow(shown *agent.Engine, att AttentionInfo, now time.Time) n
 		}
 		if j.Kind == "upload" && (j.State == "waiting" || j.State == "paused") {
 			in.Waiting++
+		}
+	}
+
+	a.acctMu.Lock()
+	lost := make(map[string]bool, len(a.authLostIDs))
+	for id, l := range a.authLostIDs {
+		lost[id] = l
+	}
+	a.acctMu.Unlock()
+	if len(lost) > 0 { // the accounts file is read only while one is signed out
+		if _, st, ok := accountsAndDirs(); ok {
+			in.SignIn, in.SignInID = signedOutOthers(st.Accounts, lost, in.ShownAccount)
 		}
 	}
 
@@ -810,6 +866,25 @@ func (a *App) gatherNow(shown *agent.Engine, att AttentionInfo, now time.Time) n
 		}
 	}
 	return in
+}
+
+// signInTab is the line's Tab for an account to sign in again: OpenStatusTab
+// opens that account's sign-in window instead of a Status tab.
+const signInTab = "signin:"
+
+// signedOutOthers lists, in the accounts file's order, the logins of the
+// accounts other than shown that need signing in again, and the first one's ID.
+func signedOutOthers(accounts []account.Account, lost map[string]bool, shown string) (logins []string, firstID string) {
+	for _, ac := range accounts {
+		if ac.ID == shown || !lost[ac.ID] {
+			continue
+		}
+		if firstID == "" {
+			firstID = ac.ID
+		}
+		logins = append(logins, ac.LoginName)
+	}
+	return logins, firstID
 }
 
 // classifyStatus reads an engine status line: the server unreachable, sync

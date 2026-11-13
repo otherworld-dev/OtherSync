@@ -217,7 +217,7 @@ func (a *App) openAppWindow(id string) {
 		return
 	}
 	if a.eng == nil {
-		notify.Toast(brand.Current.Name, "Sign in first — apps open from your Nextcloud account.", "")
+		notify.Toast(brand.Current.Name, noEngineMessage(a.NeedsLogin(), "Sign in first — apps open from your Nextcloud account."), "")
 		return
 	}
 
@@ -426,6 +426,17 @@ func (a *App) saveAppWindowSize(id string, w, h int) {
 	}
 }
 
+// noEngineMessage is what a request that needs the server says when no engine
+// is running. No engine doesn't mean signed out: an account whose server can't
+// be reached has none either, and it was told to sign in (10 Nov 2026, the
+// laptop with no network). signIn is the message for a real sign-in.
+func noEngineMessage(needsLogin bool, signIn string) string {
+	if needsLogin {
+		return signIn
+	}
+	return "Can't reach your server right now. Try again once you're back online."
+}
+
 // shortcutFileFor resolves the .lnk filename for an app: the recorded one if a
 // shortcut was created (id-keyed, so a server-side display-name change can't
 // orphan it), else the filename a new shortcut would get.
@@ -443,7 +454,7 @@ func (a *App) toggleAppShortcut(id string) {
 		return // never let an unvetted id near a shortcut's argv (see appIDRe)
 	}
 	if a.eng == nil {
-		notify.Toast(brand.Current.Name, "Sign in first.", "")
+		notify.Toast(brand.Current.Name, noEngineMessage(a.NeedsLogin(), "Sign in first."), "")
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

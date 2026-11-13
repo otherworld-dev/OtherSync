@@ -48,7 +48,9 @@ func DownloadProgress(ctx context.Context, c *transport.Client, remotePath, loca
 		return FileResult{}, err
 	}
 
-	body, hdr, status, err := c.GetFrom(ctx, remotePath, offset)
+	// Through the account's download gate (Deck #1055): the slot is held until
+	// body is closed, so a first sync can't take every PHP worker the server has.
+	body, hdr, status, err := c.PacedGetFrom(ctx, remotePath, offset)
 	if err != nil {
 		return FileResult{}, err
 	}

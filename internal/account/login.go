@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -65,12 +66,14 @@ func InitLogin(ctx context.Context, serverURL string) (*Flow, error) {
 	hc := &http.Client{Timeout: 30 * time.Second}
 	resp, err := hc.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("start login flow: %w", err)
+		slog.Warn("start login flow failed", "server", serverURL, "err", err)
+		return nil, explainLoginStart(serverURL, fmt.Errorf("start login flow: %w", err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<12))
-		return nil, fmt.Errorf("start login flow: server returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		slog.Warn("start login flow refused", "server", serverURL, "status", resp.Status, "body", strings.TrimSpace(string(body)))
+		return nil, explainLoginStatus(serverURL, resp.StatusCode, resp.Status, strings.TrimSpace(string(body)))
 	}
 
 	var out struct {
@@ -81,10 +84,12 @@ func InitLogin(ctx context.Context, serverURL string) (*Flow, error) {
 		Login string `json:"login"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("decode login flow response: %w", err)
+		slog.Warn("start login flow: not a login-flow answer", "server", serverURL, "err", err)
+		return nil, notNextcloud(serverURL, fmt.Errorf("decode login flow response: %w", err))
 	}
 	if out.Login == "" || out.Poll.Token == "" || out.Poll.Endpoint == "" {
-		return nil, fmt.Errorf("start login flow: incomplete response from server")
+		slog.Warn("start login flow: incomplete answer", "server", serverURL)
+		return nil, notNextcloud(serverURL, errors.New("start login flow: incomplete response from server"))
 	}
 
 	return &Flow{

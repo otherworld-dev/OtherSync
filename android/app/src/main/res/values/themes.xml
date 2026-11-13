@@ -5,6 +5,10 @@
     look. The parent is a *framework* theme on purpose: com.google.android.material
     is not in the pinned dependency set, so Theme.MaterialComponents.* and
     Theme.AppCompat.* are not available here.
+
+    The bar colours here only last as long as that first frame: MainActivity
+    turns on edge-to-edge and colours the system bars from the resolved theme.
+    The dark variant is values-night/themes.xml.
 -->
 <resources>
 

@@ -18,16 +18,29 @@
   let different = $state(false);
   const again = $derived(!!target && !different);
 
+  // A server preset (admin policy, or a partner build's brand.json) fills the
+  // address in; a locked one also stops it being changed, since sign-in goes
+  // to that server whatever is typed (Deck d1010).
+  let preset = $state("");
+  let locked = $state(false);
+
   async function loadTarget() {
     const t = await App.SignInTarget();
     target = t?.id ? t : null;
     different = false;
     if (!busy) {
-      server = target ? target.server : "";
+      server = target ? target.server : preset;
       msg = target ? "" : startMsg;
     }
   }
   loadTarget();
+  (async () => {
+    const p = await App.PolicyInfo();
+    if (!p?.serverUrl) return;
+    preset = p.serverUrl;
+    locked = p.lockServer;
+    if (!busy && !target && (locked || !server)) server = preset;
+  })();
   Events.On("login:target", loadTarget);
 
   Events.On("login:error", (e: any) => { if (!busy) return; msg = "Sign-in failed: " + e.data; busy = false; });
@@ -48,7 +61,7 @@
     busy = true;
     msg = "Connecting…";
     const url = await App.BeginLogin(server);
-    if (url.startsWith("error:")) { msg = url; busy = false; return; }
+    if (url.startsWith("error:")) { msg = "Sign-in failed: " + url.slice(6).trim(); busy = false; return; }
     // The window minimises itself meanwhile (it covered the browser's Grant
     // access button) and comes back for setup or an error.
     msg = "Finish signing in in the browser that just opened. This window steps aside until you have.";
@@ -65,7 +78,7 @@
   function signInSomeoneElse() {
     App.SignInSomeoneElse(); // the grant may now be for any account
     different = true;
-    server = "";
+    server = preset;
     msg = startMsg;
   }
 </script>
@@ -83,7 +96,8 @@
       <button class="primary" onclick={login} disabled={busy}>Sign in again</button>
     {:else}
       <h1>Sign in to Nextcloud</h1>
-      <input placeholder="https://cloud.example.com" bind:value={server} disabled={busy}
+      <input placeholder="https://cloud.example.com" bind:value={server} disabled={busy || locked}
+             title={locked ? "This server is set for you" : ""}
              onkeydown={(e) => e.key === "Enter" && login()} />
       <button class="primary" onclick={login} disabled={busy}>Log in</button>
     {/if}

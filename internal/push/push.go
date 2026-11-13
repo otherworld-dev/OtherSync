@@ -12,6 +12,7 @@ package push
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -23,8 +24,25 @@ import (
 
 // Event is a single message received from the push server.
 type Event struct {
-	Type string // e.g. "notify_file", "notify_notification", "notify_activity"
+	Type string // e.g. "notify_file", "notify_file_id", "notify_notification", "notify_activity"
 	Body string // any text after the type (usually empty)
+}
+
+// listenFileIDs opts in to "notify_file_id [1,2]" in place of "notify_file"
+// whenever the server knows which files changed.
+const listenFileIDs = "listen notify_file_id"
+
+// FileIDs parses a notify_file_id body (a JSON array of file ids). ok is false
+// for anything else, which callers treat as a plain notify_file: something
+// changed, but not saying what.
+func (ev Event) FileIDs() (ids []uint64, ok bool) {
+	if ev.Type != "notify_file_id" {
+		return nil, false
+	}
+	if err := json.Unmarshal([]byte(ev.Body), &ids); err != nil || len(ids) == 0 {
+		return nil, false
+	}
+	return ids, true
 }
 
 // defaultKeepalivePing is how often we ping the server to keep the WebSocket (and
@@ -153,6 +171,12 @@ func (c *Client) session(ctx context.Context, onEvent func(Event)) error {
 		case msg == "authenticated":
 			slog.Info("push connected")
 			c.status(true)
+			// Ask for the changed files' ids (notify_push 0.4+), so a notice
+			// for an upload of our own can be told apart (Deck d1103). An
+			// older server ignores it and keeps sending plain notify_file.
+			if err := conn.Write(rctx, websocket.MessageText, []byte(listenFileIDs)); err != nil {
+				return err
+			}
 			continue
 		case strings.HasPrefix(msg, "err"):
 			return fmt.Errorf("push auth failed: %s", msg)

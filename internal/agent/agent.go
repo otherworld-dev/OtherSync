@@ -143,6 +143,8 @@ type Engine struct {
 	lockedSubs []chan struct{}
 	lockToast  map[string]time.Time // path+owner -> last toast, to survive a flapping lock
 
+	own ownPush // our recent uploads, to skip the push round they bring (ownpush.go, Deck d1103)
+
 	// statusIcons registers live sync folders as cloud sync roots so Explorer
 	// draws native sync-state icons on them — the only route that works for a
 	// packaged build (see statusroot_windows.go).
@@ -220,6 +222,15 @@ type Engine struct {
 	// cloneTestPools narrows the clone's listing and download pools ({listers,
 	// downloaders}) so a test can see a deterministic order; zero = normal.
 	cloneTestPools [2]int
+	// wholeListRefused holds the folders (pair key + NUL + server path) the
+	// server failed to list in one Depth: infinity request this run, so a
+	// retried first sync lists them folder by folder straight away (Deck #1004).
+	wholeListRefused sync.Map
+	// askedByName holds the absolute paths handed to a pair's watcher by name
+	// (Sync this first, a conflict choice, a file another program let go), so
+	// the quick pass that follows syncs them even when they look unchanged
+	// locally: those passes exist to fetch or settle the server's side (#1011).
+	askedByName sync.Map
 
 	onToast      func(title, message, link string) // desktop toasts (GUI sets this)
 	encMu        sync.Mutex
@@ -376,6 +387,7 @@ func NewEngineFor(ctx context.Context, accountID string) (*Engine, error) {
 		locked:    make(map[string][]LockedFile),
 		lockToast: make(map[string]time.Time),
 	}
+	client.SetWroteFunc(eng.noteOwnWrite)
 	eng.lockMgr = newLockMgr(client, d, acc.LoginName)
 	eng.lockWarn = newLockWarner(d, func() string { return acc.LoginName })
 	eng.statusIcons = newStatusRoots()
@@ -1372,6 +1384,7 @@ func (e *Engine) ResolveConflict(ctx context.Context, item ConflictItem, choice 
 // nudgePath asks the pair's watcher to sync abs as if it had seen it change.
 // Best effort: with no watcher, or its queue full, the next pass finds it.
 func (e *Engine) nudgePath(localDir, remoteRoot, abs string) {
+	e.askedByName.Store(filepath.Clean(abs), struct{}{})
 	e.watchMu.Lock()
 	ch := e.nudges[PairKey(localDir, remoteRoot)]
 	e.watchMu.Unlock()
@@ -1405,16 +1418,26 @@ func (e *Engine) setConflicts(p Pair, infos []transfer.ConflictInfo) {
 	e.conflictMu.Unlock()
 	notifyAll(subs)
 
-	// Toast conflicts that weren't already pending for this pair.
-	if e.onToast != nil {
-		seen := make(map[string]bool, len(old))
-		for _, c := range old {
-			seen[c.Path] = true
-		}
-		for _, c := range items {
-			if !seen[c.Path] {
+	seen := make(map[string]bool, len(old))
+	for _, c := range old {
+		seen[c.Path] = true
+	}
+	// Log each conflict once when it starts and stops waiting. A waiting conflict
+	// keeps its folders re-listed on every poll, and without these lines the log
+	// showed only the repeating pass, never which file it was for (Deck d1150).
+	now := make(map[string]bool, len(items))
+	for _, c := range items {
+		now[c.Path] = true
+		if !seen[c.Path] {
+			slog.Info("conflict waiting for a decision", "path", c.Path, "kind", c.Kind)
+			if e.onToast != nil {
 				e.toast("Sync conflict", filepath.Base(c.Path)+" needs your decision", "action=conflicts")
 			}
+		}
+	}
+	for _, c := range old {
+		if !now[c.Path] {
+			slog.Info("conflict no longer waiting", "path", c.Path)
 		}
 	}
 }
@@ -1426,6 +1449,8 @@ func (e *Engine) removeConflict(localDir, rel string) {
 	for _, c := range list {
 		if c.Path != rel {
 			kept = append(kept, c)
+		} else {
+			slog.Info("conflict no longer waiting", "path", rel)
 		}
 	}
 	if len(kept) == 0 {
@@ -1440,9 +1465,13 @@ func (e *Engine) removeConflict(localDir, rel string) {
 
 // --- Browser, sharing, settings, ignore (GUI pass-throughs) ---
 
-// Browse lists a remote directory (one level) for the file browser.
+// Browse lists a remote directory (one level) for the file browser, and for
+// on-demand folder population and reconcile, whose walks over every populated
+// folder are recursive listings in all but name, so it goes through the
+// account's listing pacer (Deck #1001). A lone listing fits in the pacer's
+// burst and is not slowed.
 func (e *Engine) Browse(ctx context.Context, remotePath string) ([]transport.Entry, error) {
-	return e.client.PropFind(ctx, remotePath, 1)
+	return e.client.PacedPropFind(ctx, remotePath, 1)
 }
 
 // Escaper returns the current name-escaping translator (nil-safe to use: a
@@ -1460,10 +1489,23 @@ func (e *Engine) GlobalIgnoreMatcher() func(rel string) bool {
 	return engine.NewIgnore(gi).Match
 }
 
-// RemoteTree walks the whole remote subtree under root and returns its current
-// state keyed by root-relative path. Used by the on-demand adopt scan, which
-// must classify every pre-existing local file against the server before it can
-// show the user a summary.
+// RemoteTree lists the remote subtree under root for the on-demand adopt scan,
+// which must classify every pre-existing local file against the server before
+// it can show the user a summary.
+//
+// With a localDir the listing is LOCAL-GUIDED (Deck #1003): only the server
+// folders holding at least one non-ignored local file somewhere beneath them
+// are listed (localFolderNeeds). The adopt plan never looks at a server-only
+// path — reconcile and the cloud filter's lazy population (FETCH_PLACEHOLDERS)
+// create those placeholders — so crawling them was pure cost: 46,076 PROPFINDs
+// on a real account for a set-up into an empty folder, enough to take the
+// server down twice. An empty folder now costs one PROPFIND, the root.
+// localDir == "" crawls everything, as before.
+//
+// The result says which folders were enumerated (RemoteListing.Listed). A path
+// under one that was not is UNKNOWN, never absent: RemoteListing.Lookup draws
+// that line, and the adopt scan leaves unknown files alone. End-to-end
+// encrypted folders are reported as Opaque for the same reason.
 //
 // Names are reported RAW — no escaper decoding — because the on-demand world
 // (placeholder identities, reconcile, write-back) works in raw server names,
@@ -1491,8 +1533,31 @@ func (e *Engine) GlobalIgnoreMatcher() func(rel string) bool {
 // cost no PROPFINDs. progress (optional) receives the running count of
 // directories listed — the heartbeat a UI needs to distinguish a long crawl
 // from a hang.
-func (e *Engine) RemoteTree(ctx context.Context, localDir, root string, skip func(string) bool, progress func(int)) (map[string]engine.RemoteState, error) {
+func (e *Engine) RemoteTree(ctx context.Context, localDir, root string, skip func(string) bool, progress func(int)) (engine.RemoteListing, error) {
 	opts := engine.ScanOpts{Skip: skip, Progress: progress}
+	var (
+		mu     sync.Mutex
+		listed map[string]bool // nil: full crawl, every folder listed
+		opaque = map[string]bool{}
+	)
+	opts.OnEncrypted = func(rel string) {
+		mu.Lock()
+		opaque[rel] = true
+		mu.Unlock()
+	}
+	if localDir != "" {
+		need, err := localFolderNeeds(localDir, skip)
+		if err != nil {
+			return engine.RemoteListing{}, err
+		}
+		listed = map[string]bool{}
+		opts.Descend = func(rel string) bool { return need[strings.ToLower(rel)] }
+		opts.OnListed = func(rel string) {
+			mu.Lock()
+			listed[rel] = true
+			mu.Unlock()
+		}
+	}
 	var cp *scanCheckpoint
 	if st, err := e.getStore(); err == nil {
 		cp = newScanCheckpoint(st, "vfs-adopt:"+strings.Trim(root, "/"))
@@ -1504,12 +1569,16 @@ func (e *Engine) RemoteTree(ctx context.Context, localDir, root string, skip fun
 		cp.logSummary()
 	}
 	if err != nil {
-		return remote, err
+		return engine.RemoteListing{Entries: remote}, err
 	}
 	if opts.Base != nil {
 		settleRebuilt(remote, opts.Base, skip)
 	}
-	return remote, nil
+	if listed != nil {
+		slog.Info("adopt scan: listed only the server folders holding local files",
+			"foldersListed", len(listed), "entries", len(remote))
+	}
+	return engine.RemoteListing{Entries: remote, Listed: listed, Opaque: opaque}, nil
 }
 
 // adoptBaseline returns the live baseline the adopt scan may prune with, or
@@ -2545,9 +2614,13 @@ func syncErrKind(err error) string {
 	switch {
 	case code == 401 || errors.Is(err, transport.ErrUnauthorized):
 		return "auth"
+	case errors.Is(err, transport.ErrRetriesExhausted):
+		// Before the code: a request that got a 5xx on every try carries that
+		// status now (Deck #1004), and a server down for every retry is offline.
+		return "offline"
 	case code != 0:
 		return "error" // the server answered, so it is reachable
-	case errors.Is(err, transport.ErrRetriesExhausted) || errors.Is(err, context.DeadlineExceeded) ||
+	case errors.Is(err, context.DeadlineExceeded) ||
 		errors.Is(err, io.ErrUnexpectedEOF) || errors.As(err, &opErr) || errors.As(err, &dnsErr) ||
 		(errors.As(err, &urlErr) && urlErr.Timeout()):
 		return "offline" // the network, or a server down for every retry
@@ -3056,6 +3129,12 @@ func (e *Engine) pauseChanged() {
 // TriggerSync requests an immediate sync of all watched pairs (used by the
 // tray's "Sync now"). It is a no-op until Run has started.
 func (e *Engine) TriggerSync() {
+	e.notePushed(nil) // not a notice of our own upload: the round must run
+	e.sendTriggers()
+}
+
+// sendTriggers wakes every watched pair's push trigger.
+func (e *Engine) sendTriggers() {
 	e.watchMu.Lock()
 	chans := make([]chan struct{}, 0, len(e.triggers))
 	for _, ch := range e.triggers {
@@ -3493,6 +3572,11 @@ func (e *Engine) SyncOnce(ctx context.Context, p Pair) (stats transfer.Stats, er
 
 	// Before the scan, and so before the baseline it prunes against is read.
 	relisting := e.relistBegin(st, pk, p)
+	if relisting {
+		if err := e.staggerCrawl(ctx, "one-off folder check"); err != nil {
+			return transfer.Stats{}, err
+		}
+	}
 
 	// A full pass scans both trees before any transfer; on a large sync the
 	// discovery alone takes minutes, so surface it rather than looking idle.
@@ -3510,15 +3594,20 @@ func (e *Engine) SyncOnce(ctx context.Context, p Pair) (stats transfer.Stats, er
 }
 
 // cloneEnumConcurrency bounds concurrent recursive PROPFINDs while the tree is
-// being counted; cloneDownloadConcurrency x cloneFileWorkers is how many files
-// download at once (32: 64 gave no gain, the path caps ~5 MB/s, not the
-// client). Enumeration runs ahead of (and independently of) downloading so the
-// progress total is known in minutes instead of being chained to the slow
-// downloads.
+// being counted; cloneDownloaders is how many workers take files off the
+// download queue. Enumeration runs ahead of (and independently of)
+// downloading so the progress total is known in minutes instead of being
+// chained to the slow downloads.
+//
+// How many files actually download at once is the account's download gate
+// (transport.PacedGetFrom, 6 at most, fewer when the server is slow; Deck
+// #1055). This was 32 workers with nothing above them, and on 3 Nov 2026 a
+// laptop's first sync held every PHP worker a 16-worker server had, so the
+// web UI and every other client stalled for minutes. Eight workers keep the
+// gate's slots busy while a finished file is hashed and recorded.
 const (
-	cloneEnumConcurrency     = 6
-	cloneDownloadConcurrency = 4
-	cloneFileWorkers         = 8
+	cloneEnumConcurrency = 6
+	cloneDownloaders     = 8
 )
 
 // cloneRemote performs a resumable initial sync. It enumerates the tree in bulk
@@ -3532,6 +3621,9 @@ const (
 // fully-synced pair.
 func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (transfer.Stats, error) {
 	pk := PairKey(p.LocalDir, p.RemoteRoot)
+	if err := e.staggerCrawl(ctx, "first sync"); err != nil {
+		return transfer.Stats{}, err
+	}
 	// Takeover: a first-ever clone (no prior status) into a folder that ALREADY has
 	// files — e.g. migrating from the official Nextcloud client. We adopt files that
 	// match the server (size+mtime) instead of re-downloading, and crucially never
@@ -3541,14 +3633,36 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 	// download to refetch.
 	priorStatus, _ := st.CloneStatus(pk)
 	_ = st.SetCloneStatus(pk, "started")
-	// Entering (or resuming) a clone: any checkpoint rows are from a pre-clone
-	// life of this pair — there is no baseline worth chaining against, so drop
-	// them rather than let stale rescue rows linger for the age-out.
-	e.clearCheckpoint(st, pk)
+	// Entering a clone: any checkpoint rows are from a pre-clone life of this
+	// pair — there is no baseline worth chaining against, so drop them rather
+	// than let stale rescue rows linger for the age-out. A resumed clone keeps
+	// them: they are the folders its last try listed, which this one reuses
+	// while their etags still match (Deck #1111).
+	if priorStatus != "started" {
+		e.clearCheckpoint(st, pk)
+	}
+	cp := newScanCheckpoint(st, pk)
+	e.markCheckpointDirty(pk) // the first clean pass after the clone clears what it saved
+	defer cp.logSummary()
 	if err := os.MkdirAll(p.LocalDir, 0o755); err != nil {
 		return transfer.Stats{}, err
 	}
 	takeover := priorStatus == "" && !localRootVanished(p.LocalDir)
+	switch priorStatus {
+	case "":
+		_ = st.SetPairMeta(pk, cloneTakeoverMeta, map[bool]string{true: "1", false: "0"}[takeover])
+	case "started":
+		// A retry keeps the first try's rules. Read afresh, the folder now holds
+		// the files the first try fetched, and a takeover retried as a plain
+		// resume took a local file of a different size for its own unfinished
+		// download and fetched the server's copy over the user's (Deck #1004).
+		// A download is written aside and renamed into place, so a half-finished
+		// one never sits at the real path for a takeover to leave alone. No
+		// record (a first sync begun by an older build) counts as a takeover:
+		// that loses nothing.
+		v, _ := st.PairMeta(pk, cloneTakeoverMeta)
+		takeover = v != "0"
+	}
 	if takeover {
 		slog.Info("takeover: adopting matching local files, conflicting the rest", "local", p.LocalDir)
 	}
@@ -3660,18 +3774,24 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 			case cloneSkip:
 				// Takeover: differs from the server — leave it untouched with no
 				// baseline; the first normal sync surfaces it as a conflict (keep both).
+				// Its folders are dirtied after the downloads (below), or that sync
+				// skips them as unchanged and uploads the file over the server's.
+				unfinishedMu.Lock()
+				unfinished = append(unfinished, rel)
+				unfinishedMu.Unlock()
 			}
 		}
 		return
 	}
 
 	// Root: one Depth:1 listing for the account-root files + the top-level folders.
-	rootEntries, err := e.client.PropFind(ctx, root, 1)
+	rootEntries, err := e.client.PacedPropFind(ctx, root, 1)
 	if err != nil {
 		return stats, err
 	}
 	rootRemote := make(map[string]engine.RemoteState)
 	var topDirs []string
+	topRows := make(map[string]transport.Entry) // a top-level folder's own row, for its listing
 	rootOnMount, rootKnown := listingSelf(rootEntries, root)
 	for _, en := range rootEntries {
 		full := strings.Trim(en.Path, "/")
@@ -3682,6 +3802,7 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 		rootRemote[rel] = cloneRemoteState(rel, en, rootOnMount, rootKnown)
 		if en.IsDir {
 			topDirs = append(topDirs, full)
+			topRows[full] = en
 		}
 	}
 	rootActions, rootFiles, rootBytes := plan(rootRemote) // filters rootRemote in place
@@ -3712,14 +3833,78 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 	cloneMkdirs(ctx, newExec(rootRemote), rootActions, note)
 	sched.queueDownloads(downloadsOf(rootActions), rootRemote)
 
-	// list makes one recursive listing and queues what it finds. A folder
-	// carved out of it is left to its own listing, except the carved folder's
-	// own row: that is planned here, where its parent is known (so its share
-	// flag is right), while its contents are the carve's. A carved folder that
-	// is no longer on the server has nothing to download.
+	// list makes one recursive listing and queues what it finds, a batch at a
+	// time: the whole subtree when the server lists it in one go, else each
+	// folder as it is listed, so its files download while the rest is still
+	// being listed (Deck #1111). A folder carved out of it is left to its own
+	// listing, except the carved folder's own row: that is planned here, where
+	// its parent is known (so its share flag is right), while its contents are
+	// the carve's. A carved folder that is no longer on the server has nothing
+	// to download. The carves are fixed when the listing starts; one chosen
+	// later still comes first, as its downloads are ranked as they queue.
+	excluded := func(full string) bool { return ig.Match(relOf(full, true)) }
 	list := func(l *cloneListing) {
-		entries, perr := e.client.PropFindRecursive(ctx, l.full)
-		if perr != nil {
+		carved := sched.seal(l)
+		var self *transport.Entry
+		if row, ok := topRows[l.full]; ok && !l.carved {
+			self = &row
+		}
+		// The folder-by-folder listing does not go into a carved folder
+		// either: its own listing lists it.
+		skip := func(full string) bool {
+			if excluded(full) {
+				return true
+			}
+			rel := relOf(full, true)
+			for _, c := range carved {
+				if rel == c {
+					return true
+				}
+			}
+			return false
+		}
+		// Every ancestor of an entry comes in an earlier batch of the same
+		// listing (or this one), except the listed folder's own parent: the
+		// pair root, read above, for a top-level folder; for a carved one its
+		// own row is planned elsewhere.
+		onMount := make(map[string]bool)
+		visit := func(entries []transport.Entry) {
+			dirs := 0
+			for _, en := range entries {
+				if en.IsDir {
+					onMount[strings.Trim(en.Path, "/")] = en.OnMount()
+					dirs++
+				}
+			}
+			e.scanTickCountFor(pk, "server", int(listed.Add(int64(dirs))), l.rel)
+			sub := make(map[string]engine.RemoteState, len(entries))
+		entry:
+			for _, en := range entries {
+				full := strings.Trim(en.Path, "/")
+				rel := relOf(full, en.IsDir)
+				if rel == "" || (l.carved && rel == l.rel) {
+					continue
+				}
+				for _, c := range carved {
+					if rel == c {
+						sched.sawRow(c)
+					}
+					if strings.HasPrefix(rel, c+"/") {
+						continue entry
+					}
+				}
+				parentOnMount, parentKnown := rootOnMount, rootKnown
+				if parent := dirParent(full); parent != root {
+					parentOnMount, parentKnown = onMount[parent]
+				}
+				sub[rel] = cloneRemoteState(rel, en, parentOnMount, parentKnown)
+			}
+			actions, dlF, dlB := plan(sub)
+			cloneMkdirs(ctx, newExec(sub), actions, note)
+			e.progAddTotal(dlF, dlB)
+			sched.queueDownloads(downloadsOf(actions), sub)
+		}
+		if perr := e.listCloneFolder(ctx, st, cp, pk, l.full, self, skip, visit); perr != nil {
 			notFound := errors.Is(perr, transport.ErrNotFound)
 			sched.failedListing(l, notFound)
 			// A carved folder's 404 is only a failure if the listing holding
@@ -3728,46 +3913,10 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 			if !(l.carved && notFound) {
 				note(transfer.Stats{}, perr)
 			}
-			return
 		}
-		e.scanTickCountFor(pk, "server", int(listed.Add(1)), l.rel)
-		carved := sched.seal(l)
-		sub := make(map[string]engine.RemoteState, len(entries))
-		// Every ancestor of an entry is in the same recursive listing, except
-		// the listed folder's own parent: the pair root, read above, for a
-		// top-level folder; for a carved one its own row is planned elsewhere.
-		onMount := make(map[string]bool, len(entries))
-		for _, en := range entries {
-			onMount[strings.Trim(en.Path, "/")] = en.OnMount()
-		}
-	entry:
-		for _, en := range entries {
-			full := strings.Trim(en.Path, "/")
-			rel := relOf(full, en.IsDir)
-			if rel == "" || (l.carved && rel == l.rel) {
-				continue
-			}
-			for _, c := range carved {
-				if rel == c {
-					sched.sawRow(c)
-				}
-				if strings.HasPrefix(rel, c+"/") {
-					continue entry
-				}
-			}
-			parentOnMount, parentKnown := rootOnMount, rootKnown
-			if parent := dirParent(full); parent != root {
-				parentOnMount, parentKnown = onMount[parent]
-			}
-			sub[rel] = cloneRemoteState(rel, en, parentOnMount, parentKnown)
-		}
-		actions, dlF, dlB := plan(sub)
-		cloneMkdirs(ctx, newExec(sub), actions, note)
-		e.progAddTotal(dlF, dlB)
-		sched.queueDownloads(downloadsOf(actions), sub)
 	}
 
-	listers, downloaders := cloneEnumConcurrency, cloneDownloadConcurrency*cloneFileWorkers
+	listers, downloaders := cloneEnumConcurrency, cloneDownloaders
 	if e.cloneTestPools[0] > 0 {
 		listers, downloaders = e.cloneTestPools[0], e.cloneTestPools[1]
 	}
@@ -3828,6 +3977,9 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 	// VM after the server answered 423, with the status "Up to date"). Dirty
 	// the folders above every failed path, as later passes do, so the next
 	// scan lists them again, and ask for that pass now rather than at the poll.
+	// A takeover's skipped files are in the list too: with their folder pruned
+	// the next pass saw only the local file and uploaded it over the server's
+	// copy, where it should keep both (Deck #1004).
 	unfinishedMu.Lock()
 	retry := append([]string(nil), unfinished...)
 	unfinishedMu.Unlock()
@@ -3851,6 +4003,179 @@ func (e *Engine) cloneRemote(ctx context.Context, st *state.Store, p Pair) (tran
 	e.markPairSynced(pk)
 	e.status("Up to date")
 	return stats, nil
+}
+
+// cloneTakeoverMeta records whether a first sync began as a takeover (a folder
+// that already held files), so every retry of it keeps the same rules.
+const cloneTakeoverMeta = "clone-takeover"
+
+// cloneWholeRefusedMeta, followed by a server path, marks a folder the server
+// would not list in one Depth: infinity request. Kept with the pair, so a
+// first sync tried again after a restart does not ask again either.
+const cloneWholeRefusedMeta = "clone-whole-refused:"
+
+// listCloneFolder lists a folder and everything under it for the first sync,
+// handing what it finds to visit: in one Depth: infinity request when the
+// server will, else folder by folder (walkFolders). On a big folder the server
+// builds the whole answer in memory and can run out doing so; the desktop's
+// first sync got a 500 for Projects and To Sort every few minutes for a day,
+// each one a PHP worker at its memory limit, until the server's host killed
+// PHP (Deck #1004). A refusal is remembered with the pair, so a retry does not
+// ask again, even after a restart. self is the folder's own row from its
+// parent's listing (nil when not known).
+func (e *Engine) listCloneFolder(ctx context.Context, st *state.Store, cp *scanCheckpoint, pk, full string, self *transport.Entry, excluded func(full string) bool, visit func([]transport.Entry)) error {
+	key := pk + "\x00" + full
+	_, refused := e.wholeListRefused.Load(key)
+	if !refused {
+		if v, _ := st.PairMeta(pk, cloneWholeRefusedMeta+full); v != "" {
+			refused = true
+			e.wholeListRefused.Store(key, struct{}{})
+		}
+	}
+	if !refused {
+		entries, err := e.client.PacedPropFindRecursive(ctx, full)
+		if err == nil {
+			visit(entries)
+			return nil
+		}
+		if errors.Is(err, transport.ErrNotFound) || ctx.Err() != nil {
+			return err
+		}
+		slog.Warn("the server would not list a folder in one go; listing it one folder at a time", "folder", full, "err", err)
+		e.wholeListRefused.Store(key, struct{}{})
+		_ = st.SetPairMeta(pk, cloneWholeRefusedMeta+full, "1")
+	}
+	return walkFolders(ctx, e.client, cp, firstWalkItem(full, self), self, excluded, visit)
+}
+
+// walkItem is one folder waiting its turn in walkFolders.
+type walkItem struct {
+	dir     string
+	etag    string // as its parent's listing gave it; "" = unknown, so never from the checkpoint
+	noCache bool   // a mount, or under one: its etag says nothing of what is inside
+}
+
+// firstWalkItem is the folder a walk starts from, with its own row's etag
+// when its parent's listing gave one.
+func firstWalkItem(dir string, self *transport.Entry) walkItem {
+	it := walkItem{dir: dir}
+	if self != nil {
+		it.etag = self.ETag
+		it.noCache = strings.Contains(self.Permissions, "M")
+	}
+	return it
+}
+
+// walkFolders lists a folder and everything under it with one Depth: 1
+// PROPFIND per folder, one at a time and through the account's pacer (Deck
+// #1001), giving the same entries a Depth: infinity listing would: the folder's
+// own row first, then every descendant once. Each folder's entries go to visit
+// as soon as it is listed, so its files can download while the walk goes on.
+// It does not go into a folder excluded says to leave out (that folder's own
+// row is kept; the caller filters it). A folder gone by the time its turn
+// comes is skipped.
+//
+// A big walk takes hours (tens of thousands of folders at the listing pace),
+// so it has to survive what happens in that time (Deck #1111). Each folder's
+// listing is saved to the scan checkpoint under the etag its parent gave it,
+// and a walk tried again (after a failure or a restart) reads a folder from
+// there while that etag still matches; any change below a folder changes its
+// etag, so only the changed branch is listed again. And a listing that fails
+// for longer than the transport's retries, as a laptop's wifi dropping for a
+// moment does, is tried again a little later instead of failing the walk.
+func walkFolders(ctx context.Context, c *transport.Client, cp *scanCheckpoint, first walkItem, self *transport.Entry, excluded func(full string) bool, visit func([]transport.Entry)) error {
+	queue := []walkItem{first}
+	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		it := queue[0]
+		queue = queue[1:]
+		children, own, err := listWalkFolder(ctx, c, cp, it)
+		if err != nil {
+			if it.dir != first.dir && errors.Is(err, transport.ErrNotFound) {
+				continue
+			}
+			return err
+		}
+		batch := children
+		if it.dir == first.dir {
+			// Its own row, once, as an infinity listing gives it: fresh when
+			// the folder was listed, else the one its parent's listing gave.
+			if own == nil {
+				own = self
+			}
+			if own != nil {
+				batch = append([]transport.Entry{*own}, children...)
+			}
+		}
+		visit(batch)
+		for _, en := range children {
+			full := strings.Trim(en.Path, "/")
+			if en.IsDir && !excluded(full) {
+				queue = append(queue, walkItem{
+					dir:     full,
+					etag:    en.ETag,
+					noCache: it.noCache || strings.Contains(en.Permissions, "M"),
+				})
+			}
+		}
+	}
+	return nil
+}
+
+// listWalkFolder lists one folder of a walk: its children, and its own row
+// when it came from the server rather than the checkpoint.
+func listWalkFolder(ctx context.Context, c *transport.Client, cp *scanCheckpoint, it walkItem) (children []transport.Entry, own *transport.Entry, err error) {
+	useCP := cp != nil && it.etag != "" && !it.noCache
+	if useCP {
+		if cached, ok := cp.Load(it.dir, it.etag); ok {
+			return cached, nil, nil
+		}
+	}
+	entries, err := listPatiently(ctx, c, it.dir)
+	if err != nil {
+		return nil, nil, err
+	}
+	for i := range entries {
+		if strings.Trim(entries[i].Path, "/") == it.dir {
+			own = &entries[i]
+			continue
+		}
+		children = append(children, entries[i])
+	}
+	if useCP {
+		cp.Save(it.dir, it.etag, children)
+	}
+	return children, own, nil
+}
+
+// walkRetryDelays are the waits before each new try of a walk's folder
+// listing that failed on every attempt the transport made: the network or the
+// server was down for its whole retry budget, a few seconds. On 4 Nov 2026 a
+// laptop lost the server's name for longer than that, hours into a first
+// sync's listing, and the sync failed (Deck #1111). These wait out about 14
+// minutes in all before giving up. A var so tests can shorten it.
+var walkRetryDelays = []time.Duration{15 * time.Second, 30 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute, 5 * time.Minute}
+
+// listPatiently is a paced Depth: 1 listing, tried again after walkRetryDelays
+// while it keeps failing on every attempt. Any other error (a refusal, a
+// missing folder) is returned at once.
+func listPatiently(ctx context.Context, c *transport.Client, dir string) ([]transport.Entry, error) {
+	for i := 0; ; i++ {
+		entries, err := c.PacedPropFind(ctx, dir, 1)
+		if err == nil || !errors.Is(err, transport.ErrRetriesExhausted) || i >= len(walkRetryDelays) || ctx.Err() != nil {
+			return entries, err
+		}
+		slog.Warn("could not list a server folder; trying it again shortly", "folder", dir, "in", walkRetryDelays[i], "err", err)
+		t := time.NewTimer(walkRetryDelays[i])
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return nil, ctx.Err()
+		case <-t.C:
+		}
+	}
 }
 
 // localRootVanished reports whether a pair's local root is missing, unreadable, or
@@ -4719,11 +5044,22 @@ func (e *Engine) SyncPaths(ctx context.Context, p Pair, relPaths []string) (tran
 		if ig.Match(rel) {
 			continue // not synced, so not asked about: its Stat can't fail the pass
 		}
-		_, tracked := base[rel]
+		b, tracked := base[rel]
 		if fi, serr := os.Stat(filepath.Join(p.LocalDir, filepath.FromSlash(rel))); serr == nil {
 			ls := engine.LocalState{Path: rel, IsDir: fi.IsDir(), MTime: fi.ModTime()}
 			if !fi.IsDir() {
 				ls.Size = fi.Size()
+			}
+			// A file exactly as last synced: nothing to send, so nothing to ask
+			// the server. The watcher reports every file a download writes, and
+			// a first sync's downloads were each asked about one at a time,
+			// hundreds of thousands of requests on a big account (Deck #1011).
+			// A change on the server is the push's or the poll's to find.
+			// Folders are still asked: the guards against reading an outage as
+			// a deleted folder (Deck #691) are checked on that answer.
+			if tracked && !ls.IsDir && unchangedSinceSynced(ls, b) && !e.takeAskedByName(p.LocalDir, rel) {
+				delete(base, rel) // nor planned, nor pruned as gone from both sides
+				continue
 			}
 			local[rel] = ls
 		}
@@ -4774,6 +5110,20 @@ func (e *Engine) SyncPaths(ctx context.Context, p Pair, relPaths []string) (tran
 	// nil base: this remote map is stat-built (not a subtree listing), so it must
 	// never stamp dir etags — only failure-dirtying applies inside applyPlan.
 	return e.applyPlan(ctx, st, p, actions, remote, nil, false) // scoped/delta — merge blocks, don't clear
+}
+
+// takeAskedByName reports whether rel was handed to the watcher by name since
+// its last quick pass, and forgets it: one ask, one pass.
+func (e *Engine) takeAskedByName(localDir, rel string) bool {
+	_, asked := e.askedByName.LoadAndDelete(filepath.Clean(filepath.Join(localDir, filepath.FromSlash(rel))))
+	return asked
+}
+
+// unchangedSinceSynced reports whether a local file is exactly as its baseline
+// row recorded it: still a file, with the size and modification time the diff
+// itself compares.
+func unchangedSinceSynced(l engine.LocalState, b engine.BaselineState) bool {
+	return !l.IsDir && !b.IsDir && !engine.LocalFileChanged(l, b)
 }
 
 // remoteStateFrom converts a single Stat result into a RemoteState. It exists so
@@ -4865,6 +5215,11 @@ func (e *Engine) syncRemoteDelta(ctx context.Context, p Pair) (transfer.Stats, e
 	}
 	// Before the baseline the scan prunes against is read.
 	relisting := e.relistBegin(st, pk, p)
+	if relisting {
+		if err := e.staggerCrawl(ctx, "one-off folder check"); err != nil {
+			return transfer.Stats{}, err
+		}
+	}
 
 	e.scanTickCountFor(pk, "server", 0, "")
 	scanEnded := false
@@ -5400,7 +5755,9 @@ func (e *Engine) startWatcher(p Pair) {
 			UserSync:      userExt,
 			Nudge:         nudge,
 			OnPush:        pushFn,
+			PushIsOwn:     func(ctx context.Context) bool { return e.pushIsOwn(ctx, key) },
 			FullSyncEvery: time.Hour, // most polls are fast remote-deltas; full walk hourly
+			ServerFault:   func(err error) bool { return transport.StatusCode(err) >= 500 },
 		}, syncFn)
 
 		e.watchMu.Lock()
@@ -5461,8 +5818,12 @@ func (e *Engine) runPush(ctx context.Context) {
 	c.SetStatusFunc(e.setPushState)
 	_ = c.Run(ctx, func(ev push.Event) {
 		switch ev.Type {
-		case "notify_file":
-			e.TriggerSync()
+		case "notify_file", "notify_file_id":
+			// With ids, a round that only finds our own upload is skipped
+			// (Deck d1103); without, anything may have changed.
+			ids, _ := ev.FileIDs()
+			e.notePushed(ids)
+			e.sendTriggers()
 			if e.onFilesChanged != nil {
 				e.onFilesChanged()
 			}

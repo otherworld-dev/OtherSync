@@ -25,7 +25,9 @@ import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import dev.otherworld.nimbo.ui.theme.resolveDark
 import dev.otherworld.nimbo.ui.theme.parseThemeColor
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -36,6 +38,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -47,6 +50,12 @@ import dev.otherworld.nimbo.ui.Route
 import dev.otherworld.nimbo.ui.theme.NimboTheme
 
 private const val TAG = "MainActivity"
+
+// The scrims behind three-button navigation on Android 8 and 9, which have no
+// system contrast scrim of their own. The androidx defaults, kept here because
+// a dark/light override needs them spelled out.
+private const val LIGHT_NAV_SCRIM = 0xE6FFFFFF.toInt()
+private const val DARK_NAV_SCRIM = 0x801B1B1B.toInt()
 
 /** Activity-backed actions the UI needs; implemented by [MainActivity]. */
 interface NimboHost {
@@ -103,6 +112,10 @@ class MainActivity : ComponentActivity(), NimboHost {
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Android 15+ draws edge-to-edge regardless; this makes every version do
+        // it and lets the app, not the platform theme, colour the system bars.
+        // The Compose tree re-applies it below with the theme it resolved.
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
         lifecycle.addObserver(
@@ -121,13 +134,31 @@ class MainActivity : ComponentActivity(), NimboHost {
         setContent {
             val state by viewModel.state.collectAsStateWithLifecycle()
             val supporter by supporterVm.ui.collectAsStateWithLifecycle()
+            val darkTheme = resolveDark(
+                preference = state.appearance,
+                serverAppearance = state.serverAppearance,
+                systemDark = isSystemInDarkTheme(),
+            )
+            // The bars follow the theme the app actually uses, which can differ
+            // from the phone's (Follow Nextcloud, Always dark/light). Left to the
+            // platform theme, three-button navigation got a light bar under a
+            // dark app (Galaxy S24, Android 16).
+            DisposableEffect(darkTheme) {
+                enableEdgeToEdge(
+                    statusBarStyle = SystemBarStyle.auto(
+                        android.graphics.Color.TRANSPARENT,
+                        android.graphics.Color.TRANSPARENT,
+                    ) { darkTheme },
+                    navigationBarStyle = SystemBarStyle.auto(
+                        LIGHT_NAV_SCRIM,
+                        DARK_NAV_SCRIM,
+                    ) { darkTheme },
+                )
+                onDispose {}
+            }
             CompositionLocalProvider(LocalNimboHost provides host) {
                 NimboTheme(
-                    darkTheme = resolveDark(
-                        preference = state.appearance,
-                        serverAppearance = state.serverAppearance,
-                        systemDark = isSystemInDarkTheme(),
-                    ),
+                    darkTheme = darkTheme,
                     // A Patron's chosen accent, else the user's Nextcloud colour
                     // as the desktop client does.
                     accent = supporter.effectiveAccent.argb?.let { Color(it) }

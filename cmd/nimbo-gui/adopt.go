@@ -69,7 +69,7 @@ func (a *App) scanAdopt() string {
 	if !cfapi.Supported() {
 		return adoptError("Virtual files aren't supported on this system.")
 	}
-	dir := a.GetBaseDir()
+	dir := a.baseDirOf(a.eng)
 	if dir == "" {
 		return adoptError("No folder is configured yet.")
 	}
@@ -100,7 +100,12 @@ func (a *App) scanAdopt() string {
 	// The sync ignore rules apply to the adopt too: ignored trees are excluded
 	// from the crawl, the plan, and therefore the upload bucket.
 	skip := a.eng.GlobalIgnoreMatcher()
-	remote, err := a.eng.RemoteTree(ctx, dir, "", skip, func(n int) { a.adoptScanDirs.Store(int64(n)) })
+	// Only the server folders holding local files are listed (Deck #1003):
+	// the plan never looks at a server-only path, and those are populated
+	// lazily by the cloud filter when Windows first opens them. A set-up into
+	// an empty folder costs one listing instead of a whole-account crawl.
+	listing, err := a.eng.RemoteTree(ctx, dir, "", skip, func(n int) { a.adoptScanDirs.Store(int64(n)) })
+	remote := listing.Entries
 	if err != nil {
 		// Nothing has changed either way — cancelled or unreachable, the user
 		// simply stays on their current mode.
@@ -129,10 +134,19 @@ func (a *App) scanAdopt() string {
 		}
 		remote = decoded
 	}
-	plan, err := vfs.Scan(dir, remote, skip, esc.Encode)
+	// Folders are never escaped, so the listing's Listed/Opaque sets are
+	// already in local names.
+	listing.Entries = remote
+	plan, err := vfs.ScanView(dir, listing, skip, esc.Encode)
 	if err != nil {
 		slog.Warn("adopt scan", "dir", dir, "err", err)
 		return adoptError("Couldn't read that folder: " + err.Error())
+	}
+	if plan.Deferred > 0 {
+		// Files under a server folder the scan did not list: their server
+		// state is unknown, so they stay plain files for reconcile to handle
+		// once mounted, rather than being guessed at here.
+		slog.Info("adopt scan: files left for reconcile (their server folder wasn't listed)", "count", plan.Deferred)
 	}
 	a.pendingAdopt = &adoptPending{plan: plan, dir: dir}
 	counts := plan.Counts()
@@ -162,7 +176,7 @@ func (a *App) adoptAndSwitch() string {
 	// This switch was scanned afresh, so an older resume record describes a
 	// folder state that no longer exists; the new plan records its own.
 	clearAdoptResume(a.eng.Account.ID)
-	if pending != nil && pending.dir == a.GetBaseDir() && len(pending.plan.Entries) > 0 {
+	if pending != nil && pending.dir == a.baseDirOf(a.eng) && len(pending.plan.Entries) > 0 {
 		a.preMountAdopt = pending
 	}
 	msg := a.SetSyncMode("ondemand")

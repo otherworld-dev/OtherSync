@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/otherworld/nimbo/internal/account"
 	"github.com/otherworld/nimbo/internal/agent"
 )
 
@@ -54,6 +55,12 @@ func TestComposeNow(t *testing.T) {
 		{name: "checking only",
 			in:    nowInput{Checking: []NowCheckDTO{{Dirs: 1240}}, LastCheck: now.Add(-time.Minute)},
 			state: "busy", main: "Checking folders… 1,240", tab: "activity", sub: ""},
+		{name: "about to check every folder",
+			in:    nowInput{Checking: []NowCheckDTO{{StartsIn: 12}}, LastCheck: now.Add(-time.Minute)},
+			state: "busy", main: "Starting shortly…", tab: "activity", sub: ""},
+		{name: "about to check, with a download running",
+			in:    nowInput{Checking: []NowCheckDTO{{StartsIn: 12}}, Jobs: []NowJobDTO{down("c.txt")}},
+			state: "busy", main: "Downloading c.txt", subStart: "1 download", tab: "activity"},
 		{name: "needs you while busy",
 			in: nowInput{Attention: AttentionInfo{Blocked: 2, Conflicts: 1},
 				Jobs: []NowJobDTO{up("a.txt", 10, 1)}},
@@ -522,5 +529,68 @@ func TestComposeNowMatchesAccountsByID(t *testing.T) {
 	got = composeNow(nowInput{ShownAccount: "id-home", Jobs: []NowJobDTO{mine}, Now: now}, "Nimbo")
 	if got.State != "busy" || got.Main != "Uploading x.txt" {
 		t.Errorf("own job: got %q / %q", got.State, got.Main)
+	}
+}
+
+// Deck #1128: a hung upload kept "Uploading X" on the line until a root
+// listing failed. Once the client says the server isn't answering, the line
+// says so over the transfer still "running".
+func TestUnreachableServerOutranksAHungUpload(t *testing.T) {
+	in := nowInput{Now: time.Now(), ShownAccount: "a",
+		Jobs: []NowJobDTO{{AccountID: "a", Kind: "upload", Path: "Report.docx", Size: 100, Sent: 40, State: "running"}}}
+	if got := composeNow(in, "Nimbo"); got.State != "busy" || got.Main != "Uploading Report.docx" {
+		t.Fatalf("answering: got %q / %q", got.State, got.Main)
+	}
+	in.Offline, in.Problem, in.Working, in.Holding = accountState("Syncing…", true)
+	if got := composeNow(in, "Nimbo"); got.State != "offline" || got.Main != "Can't reach the server" {
+		t.Errorf("not answering: got %q / %q", got.State, got.Main)
+	}
+}
+
+// A background account the server turned down has its engine stopped, so the
+// line said "Up to date" while it synced nothing. It needs you, ahead of
+// conflicts, and a click opens its sign-in (Deck #1130).
+func TestComposeNowOtherAccountNeedsSignIn(t *testing.T) {
+	base := nowInput{Now: time.Now(), LastCheck: time.Now()}
+
+	in := base
+	in.SignIn, in.SignInID = []string{"Work"}, "work-id"
+	got := composeNow(in, "Nimbo")
+	if got.State != "attention" || got.Main != "Work needs signing in again" || got.Sub != "" || got.Tab != "signin:work-id" {
+		t.Errorf("one account: got %q / %q / %q / %q", got.State, got.Main, got.Sub, got.Tab)
+	}
+
+	in.SignIn = []string{"Work", "Home"}
+	in.Attention = AttentionInfo{Conflicts: 1, Blocked: 2}
+	got = composeNow(in, "Nimbo")
+	if got.Main != "2 accounts need signing in again" || got.Sub != "3 items need you" || got.Tab != "signin:work-id" {
+		t.Errorf("two accounts and items: got %q / %q / %q", got.Main, got.Sub, got.Tab)
+	}
+
+	// Sign-in outranks a pause or an outage too: it is still a "needs you".
+	in = base
+	in.SignIn, in.SignInID = []string{"Work"}, "work-id"
+	in.Paused, in.Offline = true, true
+	got = composeNow(in, "Nimbo")
+	if got.State != "attention" {
+		t.Errorf("paused and offline: state = %q, want attention", got.State)
+	}
+	if trayStateFor(got.State) != "warning" {
+		t.Errorf("tray state = %q, want warning", trayStateFor(got.State))
+	}
+}
+
+func TestSignedOutOthers(t *testing.T) {
+	accts := []account.Account{
+		{ID: "a", LoginName: "Shown"}, {ID: "b", LoginName: "Work"},
+		{ID: "c", LoginName: "Home"}, {ID: "d", LoginName: "Fine"},
+	}
+	lost := map[string]bool{"a": true, "c": true, "b": true, "gone": true}
+	logins, first := signedOutOthers(accts, lost, "a")
+	if strings.Join(logins, ",") != "Work,Home" || first != "b" {
+		t.Errorf("got %v / %q, want [Work Home] / b", logins, first)
+	}
+	if logins, first := signedOutOthers(accts, nil, "a"); logins != nil || first != "" {
+		t.Errorf("none lost: got %v / %q", logins, first)
 	}
 }

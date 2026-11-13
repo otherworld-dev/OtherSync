@@ -371,11 +371,20 @@ func (c *Client) PropFind(ctx context.Context, remotePath string, depth int) ([]
 // PROPFINDs with a few bulk ones — but the response can be large, so use it only
 // for subtrees being fully enumerated (e.g. an initial clone), not routine syncs.
 // Servers may refuse Depth: infinity (HTTP 403/507); callers should fall back.
+//
+// It is sent once, never retried: the server builds the whole answer in
+// memory, so on a big folder a 500 means it ran out doing so, and each retry
+// held a PHP worker at its memory limit for another minute (Deck #1004).
+// Falling back to a folder-by-folder listing is the caller's retry.
 func (c *Client) PropFindRecursive(ctx context.Context, remotePath string) ([]Entry, error) {
-	return c.propFind(ctx, remotePath, "infinity")
+	return c.propFindVia(ctx, remotePath, "infinity", c.DoOnce)
 }
 
 func (c *Client) propFind(ctx context.Context, remotePath, depth string) ([]Entry, error) {
+	return c.propFindVia(ctx, remotePath, depth, c.Do)
+}
+
+func (c *Client) propFindVia(ctx context.Context, remotePath, depth string, do func(*http.Request) (*http.Response, error)) ([]Entry, error) {
 	req, err := c.NewRequest(ctx, "PROPFIND", c.davURL(remotePath), strings.NewReader(propfindBody))
 	if err != nil {
 		return nil, err
@@ -383,7 +392,7 @@ func (c *Client) propFind(ctx context.Context, remotePath, depth string) ([]Entr
 	req.Header.Set("Content-Type", "application/xml; charset=utf-8")
 	req.Header.Set("Depth", depth)
 
-	resp, err := c.Do(req)
+	resp, err := do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -715,6 +724,7 @@ func (c *Client) PutWithChecksum(ctx context.Context, remotePath string, newBody
 		return "", "", statusError("PUT", remotePath, resp)
 	}
 	etag, fileID = revisionHeaders(resp.Header)
+	c.noteWrote(remotePath, fileID)
 	return etag, fileID, nil
 }
 
@@ -738,6 +748,41 @@ func revisionHeaders(h http.Header) (etag, fileID string) {
 	}
 	fileID = h.Get("OC-FileId")
 	return etag, fileID
+}
+
+// SetWroteFunc registers f to hear about every file upload this client
+// finishes (a PUT, or the MOVE that assembles a chunked one), with the file id
+// the server gave it. The engine uses it to tell the server's push notice for
+// its own upload from somebody else's change (Deck d1103). f must be quick and
+// safe for concurrent use; nil stops it.
+func (c *Client) SetWroteFunc(f func(remotePath, fileID string)) {
+	if f == nil {
+		c.onWrote.Store(nil)
+		return
+	}
+	c.onWrote.Store(&f)
+}
+
+func (c *Client) noteWrote(remotePath, fileID string) {
+	if f := c.onWrote.Load(); f != nil && fileID != "" {
+		(*f)(remotePath, fileID)
+	}
+}
+
+// NumericFileID turns a file id in either of Nextcloud's spellings into the
+// number notify_push sends: oc:fileid is plain ("4213"), the OC-FileId header
+// pads it and appends the instance id ("00004213ocrt2fp5q2bq"). ok is false
+// when there is no number to read.
+func NumericFileID(s string) (uint64, bool) {
+	end := 0
+	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
+		end++
+	}
+	if end == 0 {
+		return 0, false
+	}
+	n, err := strconv.ParseUint(s[:end], 10, 64)
+	return n, err == nil
 }
 
 // Mkcol creates a directory (collection) at remotePath. An existing directory

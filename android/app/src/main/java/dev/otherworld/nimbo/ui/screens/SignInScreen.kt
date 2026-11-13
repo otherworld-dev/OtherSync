@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -69,6 +70,9 @@ fun SignInScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scroll)
+                // No top bar here to take the system bars, and the app draws
+                // edge-to-edge: keep the form clear of both.
+                .systemBarsPadding()
                 .imePadding()
                 .padding(horizontal = 28.dp, vertical = 40.dp),
             horizontalAlignment = Alignment.CenterHorizontally,

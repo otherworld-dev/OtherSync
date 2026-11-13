@@ -132,6 +132,7 @@ func (c *Client) AssembleUpload(ctx context.Context, uploadID, destPath string, 
 		return "", "", statusError("MOVE assemble", destPath, resp)
 	}
 	etag, fileID = revisionHeaders(resp.Header)
+	c.noteWrote(destPath, fileID)
 	return etag, fileID, nil
 }
 

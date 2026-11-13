@@ -67,6 +67,69 @@ func TestConnectAuthAndEvent(t *testing.T) {
 	}
 }
 
+// TestListensForFileIDs checks the client asks for changed file ids once
+// authenticated, and that a notify_file_id event parses into them (Deck d1103).
+func TestListensForFileIDs(t *testing.T) {
+	listened := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.Close(websocket.StatusNormalClosure, "")
+		ctx := r.Context()
+		_ = readText(ctx, c) // user
+		_ = readText(ctx, c) // pass
+		_ = c.Write(ctx, websocket.MessageText, []byte("authenticated"))
+		listened <- readText(ctx, c)
+		_ = c.Write(ctx, websocket.MessageText, []byte("notify_file_id [4213,17]"))
+		for ctx.Err() == nil {
+			if _, _, err := c.Read(ctx); err != nil {
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	events := make(chan Event, 8)
+	c := New(wsURL(srv.URL), "alice", "s3cret")
+	go c.Run(ctx, func(ev Event) { events <- ev })
+
+	select {
+	case got := <-listened:
+		if got != "listen notify_file_id" {
+			t.Fatalf("frame after auth = %q, want listen notify_file_id", got)
+		}
+	case <-ctx.Done():
+		t.Fatal("client never asked for file ids")
+	}
+	select {
+	case ev := <-events:
+		ids, ok := ev.FileIDs()
+		if !ok || len(ids) != 2 || ids[0] != 4213 || ids[1] != 17 {
+			t.Fatalf("FileIDs() = %v, %v; want [4213 17], true", ids, ok)
+		}
+	case <-ctx.Done():
+		t.Fatal("no event delivered")
+	}
+}
+
+func TestFileIDsRejectsOtherEvents(t *testing.T) {
+	for _, ev := range []Event{
+		{Type: "notify_file"},
+		{Type: "notify_file_id", Body: ""},
+		{Type: "notify_file_id", Body: "[]"},
+		{Type: "notify_file_id", Body: "not json"},
+		{Type: "notify_activity", Body: "[1]"},
+	} {
+		if ids, ok := ev.FileIDs(); ok {
+			t.Errorf("%+v: FileIDs() = %v, true; want false", ev, ids)
+		}
+	}
+}
+
 // TestReconnects verifies that when the server drops the connection, the client
 // reconnects (re-authenticating), and that the status callback toggles.
 func TestReconnects(t *testing.T) {

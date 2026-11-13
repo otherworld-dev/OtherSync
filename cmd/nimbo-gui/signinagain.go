@@ -162,6 +162,7 @@ func (a *App) markAuthLost(id string) {
 	a.acctStatus[id] = "Sign in again"
 	a.acctMu.Unlock()
 	a.emit("account")
+	a.nudgeNow() // the status line names it (Deck #1130)
 }
 
 func (a *App) clearAuthLost(id string) {
@@ -171,6 +172,7 @@ func (a *App) clearAuthLost(id string) {
 		delete(a.acctStatus, id)
 	}
 	a.acctMu.Unlock()
+	a.nudgeNow()
 }
 
 func (a *App) isAuthLost(id string) bool {

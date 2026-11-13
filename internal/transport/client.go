@@ -6,7 +6,6 @@ package transport
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -15,9 +14,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/time/rate"
+
+	"github.com/otherworld/nimbo/internal/pace"
 )
 
 // Client is an authenticated connection to a single Nextcloud server. It is
@@ -31,6 +33,13 @@ type Client struct {
 
 	upLimiter   *rate.Limiter // nil = unlimited
 	downLimiter *rate.Limiter
+
+	// pacer paces folder listings for this account (pace.go, Deck #1001).
+	pacer atomic.Pointer[pace.Pacer]
+	// downGate caps this account's sync downloads at once (pace.go, Deck #1055).
+	downGate atomic.Pointer[pace.Gate]
+	// onWrote hears about each file this client wrote (see SetWroteFunc).
+	onWrote atomic.Pointer[func(remotePath, fileID string)]
 
 	// Per-method request tally since construction (see RequestCounts).
 	countMu sync.Mutex
@@ -83,7 +92,7 @@ func New(server, user, appPassword string) *Client {
 		ForceAttemptHTTP2:     true,
 	}
 	r := newRouter(public, server)
-	return &Client{
+	c := &Client{
 		server: server,
 		user:   user,
 		pass:   appPassword,
@@ -95,6 +104,9 @@ func New(server, user, appPassword string) *Client {
 			Transport: r,
 		},
 	}
+	c.pacer.Store(newListPacer(server))
+	c.downGate.Store(newDownloadGate(server))
+	return c
 }
 
 // Server returns the base server URL.
@@ -151,7 +163,7 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 			// Retry-After when it names one (e.g. Nextcloud maintenance mode).
 			delay := retryAfter(resp)
 			drain(resp)
-			lastErr = fmt.Errorf("server returned %s", resp.Status)
+			lastErr = &StatusError{Code: resp.StatusCode, Status: resp.Status}
 			if delay > 0 {
 				if err := sleep(req.Context(), delay); err != nil {
 					return nil, err
@@ -217,6 +229,9 @@ func (c *Client) send(req *http.Request) (*http.Response, error) {
 	hadSession := debug && len(c.hc.Jar.Cookies(req.URL)) > 0
 	start := time.Now()
 	resp, err := c.hc.Do(req)
+	if err == nil {
+		c.notePushback(resp)
+	}
 	if !debug {
 		return resp, err
 	}

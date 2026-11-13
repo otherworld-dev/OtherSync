@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { kindIcon, kindLabel } from "./kinds";
+  import { activityLabel, kindIcon, kindLabel } from "./kinds";
   import { Events } from "@wailsio/runtime";
   import { App } from "../bindings/github.com/otherworld/nimbo/cmd/nimbo-gui";
   import { brand } from "./brand.svelte";
@@ -113,7 +113,7 @@
   async function pickGo(path: string) {
     pickCur = trimSlash(path);
     pickLoading = true;
-    pickEntries = (((await App.BrowseRemote(pickCur)) ?? []) as Entry[]).filter(e => e.isDir);
+    pickEntries = (((await App.BrowseRemote("", pickCur)) ?? []) as Entry[]).filter(e => e.isDir);
     pickLoading = false;
   }
   function openPick(c: CloneRun) {
@@ -244,8 +244,9 @@
 
   // "Right now": every job in progress, in full (Deck #988).
   type NowJob = { account: string; kind: string; path: string; size: number; sent: number; large: boolean; state: string };
-  type NowCheck = { account: string; folder: string; dirs: number };
-  type Now = { jobs: NowJob[]; checking: NowCheck[] };
+  type NowCheck = { account: string; folder: string; dirs: number; startsIn?: number };
+  // state and main are the flyout's line; only "offline" is shown here.
+  type Now = { jobs: NowJob[]; checking: NowCheck[]; state?: string; main?: string };
   let now = $state<Now>({ jobs: [], checking: [] });
   // Speed comes from two samples of the same job at least 2 s apart; between
   // samples the last figure is kept so it doesn't flicker.
@@ -276,7 +277,7 @@
     }
     for (const k of [...samples.keys()]) if (!live.has(k)) samples.delete(k);
     rates = next;
-    now = { jobs: n.jobs ?? [], checking: n.checking ?? [] };
+    now = { jobs: n.jobs ?? [], checking: n.checking ?? [], state: n.state, main: n.main };
   }
   const nowAccounts = $derived(new Set([...now.jobs.map(j => j.account), ...now.checking.map(c => c.account)].filter(Boolean)));
   const nowMulti = $derived(nowAccounts.size > 1);
@@ -297,6 +298,7 @@
   }
   const fmtNum = (n: number) => n.toLocaleString("en-US");
   function checkText(c: NowCheck): string {
+    if (c.startsIn && c.startsIn > 0) return `About to check every folder · starting in ${c.startsIn} s`;
     let s = "Checking folders for changes";
     if (c.dirs > 0) s += ` · ${fmtNum(c.dirs)}`;
     if (c.folder) s += ` · now in ${c.folder}`;
@@ -441,7 +443,10 @@
   <div class="body">
     {#if tab === "activity"}
       <div class="nowhead">Right now</div>
-      {#if now.jobs.length === 0 && now.checking.length === 0}<p class="empty">Nothing in progress</p>{/if}
+      <!-- Offline with no engine, every list here is empty and the window read
+           as signed out (10 Nov 2026): say what is actually going on. -->
+      {#if now.state === "offline" && now.main}<p class="empty">{now.main}</p>
+      {:else if now.jobs.length === 0 && now.checking.length === 0}<p class="empty">Nothing in progress</p>{/if}
       {#each now.checking as c}
         <div class="nowrow">
           <span class="ni">⟳</span>
@@ -463,7 +468,7 @@
       <div class="nowhead earlier">Earlier</div>
       {#if activity.length === 0}<p class="empty">Nothing yet.</p>{/if}
       {#each activity as e}
-        <div class="line" class:hl={(e.path + NL + e.kind) === highlight}><span class="t">{e.time}</span>{#if e.account}<span class="acct">{e.account}</span>{/if}<span class="k">{kindLabel(e.kind)}</span><span class="p">{e.path}</span>{#if e.err}<span class="err">⚠ {e.err}</span>{/if}</div>
+        <div class="line" class:hl={(e.path + NL + e.kind) === highlight}><span class="t">{e.time}</span>{#if e.account}<span class="acct">{e.account}</span>{/if}<span class="k">{activityLabel(e.kind, e.err)}</span><span class="p">{e.path}</span>{#if e.err}<span class="err">⚠ {e.err}</span>{/if}</div>
       {/each}
 
     {:else if tab === "conflicts"}

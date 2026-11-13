@@ -313,3 +313,26 @@ func TestSetupFolderHandedBackOnce(t *testing.T) {
 		t.Fatalf("an empty previous folder must still be handed back: %+v, %v", got, ok)
 	}
 }
+
+func TestFolderClashInIsFromTheTargetAccountsView(t *testing.T) {
+	d := config.Dirs{Config: t.TempDir(), Data: t.TempDir()}
+	st := account.Store{Accounts: []account.Account{
+		{ID: "a", ServerURL: "https://one.example.com", LoginName: "amy"},
+		{ID: "b", ServerURL: "https://two.example.com", LoginName: "bob"},
+	}}
+	if err := d.WithAccount("a").UpdateAccountState(func(s *config.AccountState) { s.BaseDir = `C:\A` }); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.WithAccount("b").UpdateAccountState(func(s *config.AccountState) { s.BaseDir = `C:\B` }); err != nil {
+		t.Fatal(err)
+	}
+	if folderClashIn(d, st, "b", `C:\A\x`) == "" {
+		t.Error("b may not take A's folder")
+	}
+	if msg := folderClashIn(d, st, "b", `C:\B\x`); msg != "" {
+		t.Errorf("b's own folder refused: %q", msg)
+	}
+	if folderClashIn(d, st, "a", `C:\B`) == "" {
+		t.Error("a may not take B's folder")
+	}
+}
