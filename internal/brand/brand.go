@@ -114,7 +114,7 @@ func stockBrand() Brand {
 		Tagline: "Native Nextcloud sync for desktop",
 		Website: "https://www.othersync.com", SupportEmail: "contact@otherworld.dev",
 		HelpURL:   "https://www.othersync.com/help/",
-		FeedURL:   "https://github.com/otherworld-dev/OtherSync/releases/latest/download/Nimbo.appinstaller",
+		FeedURL:   "https://github.com/otherworld-dev/OtherSync/releases/latest/download/OtherSync.appinstaller",
 		APIBase:   "https://api.github.com/repos/otherworld-dev/OtherSync",
 		AccentHex: "#22D3C4", AppID: "Nimbo",
 	}
@@ -137,6 +137,35 @@ func (b Brand) InstalledName() string {
 // installs knew by another (FormerName).
 func (b Brand) Renamed() bool {
 	return b.FormerName != "" && b.FormerName != b.Name
+}
+
+// Slug turns a name into a filesystem-safe one: lowercased, ASCII letters and
+// digits kept, every other run collapsed to a single hyphen, then trimmed. It
+// returns "" when nothing usable remains.
+func Slug(s string) string {
+	var b strings.Builder
+	hyphen := false
+	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			hyphen = false
+		} else if b.Len() > 0 && !hyphen {
+			b.WriteByte('-')
+			hyphen = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+// FileStem is the prefix for files people can see, such as the problem-report
+// zip in Downloads and the update helper's files in the home folder: the
+// product name as a slug ("othersync"). Saved state and identifiers use AppID
+// or InstalledName instead and never change with it.
+func (b Brand) FileStem() string {
+	if s := Slug(b.Name); s != "" {
+		return s
+	}
+	return Slug(b.AppID)
 }
 
 // HelpPage returns the address of one help page ("" = the help home), or ""

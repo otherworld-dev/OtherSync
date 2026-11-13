@@ -2,7 +2,9 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/otherworld/nimbo/internal/account"
 	"github.com/otherworld/nimbo/internal/brand"
@@ -147,5 +149,60 @@ func TestMigrateRenameCorruptSettings(t *testing.T) {
 	}
 	if show, err := migrateRename(d, renamed); err != nil || !show {
 		t.Fatalf("after repair: show=%v err=%v, want the notice", show, err)
+	}
+}
+
+// The update helper and the sidebar helper used to leave nimbo-named files in
+// the home folder. A renamed build removes the stale ones, but leaves anything
+// the old version's update helper may still be writing (recent files), and
+// never touches a file that isn't one of its own.
+func TestRemoveFormerHelperFiles(t *testing.T) {
+	home := t.TempDir()
+	now := time.Now()
+	old := now.Add(-2 * time.Hour)
+	write := func(name string, mod time.Time) string {
+		p := filepath.Join(home, name)
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, mod, mod); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	stale := []string{
+		write("nimbo-update.ps1", old), write("nimbo-update.vbs", old),
+		write("nimbo-update-task.xml", old), write("nimbo-sidebar.log", old),
+	}
+	fresh := write("nimbo-update.log", now) // the old helper may still be writing it
+	other := write("nimbo-notes.txt", old)
+	ours := write("othersync-update.log", old)
+
+	removeFormerHelperFiles(home, renamed, now)
+
+	for _, p := range stale {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("%s should have been removed (err %v)", filepath.Base(p), err)
+		}
+	}
+	for _, p := range []string{fresh, other, ours} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("%s should have been kept: %v", filepath.Base(p), err)
+		}
+	}
+}
+
+// A build that hasn't been renamed has no former files to remove.
+func TestRemoveFormerHelperFilesNotRenamed(t *testing.T) {
+	home := t.TempDir()
+	p := filepath.Join(home, "othersync-update.log")
+	if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * time.Hour)
+	_ = os.Chtimes(p, old, old)
+	removeFormerHelperFiles(home, brand.Brand{Name: "OtherSync", AppID: "Nimbo"}, time.Now())
+	if _, err := os.Stat(p); err != nil {
+		t.Fatalf("kept file removed: %v", err)
 	}
 }

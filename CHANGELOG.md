@@ -3,7 +3,10 @@
 All notable changes to OtherSync (formerly Nimbo) are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.4.0] - 2026-11-13
+## [0.4.1] - 2026-11-13
+
+0.4.0 was tagged but never published, so everything it had ships here, along with
+the downloads taking the OtherSync name.
 
 ### Added
 
@@ -27,6 +30,10 @@ All notable changes to OtherSync (formerly Nimbo) are recorded here. The format 
   up every worker on the server (#1055).
 - Android: every tab's ⋮ menu ends the same way and Sign out has moved into
   Settings (#957).
+- Downloads are named OtherSync: OtherSync-Setup.exe, OtherSync.msix and
+  OtherSync.appinstaller. Installs made with Nimbo-Setup.exe keep updating as
+  before. The problem-report zip and the update helper's files in your home
+  folder take the new name too.
 
 ### Fixed
 

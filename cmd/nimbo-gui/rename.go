@@ -3,6 +3,8 @@ package main
 import (
 	"errors"
 	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/otherworld/nimbo/internal/account"
 	"github.com/otherworld/nimbo/internal/brand"
@@ -48,6 +50,30 @@ func migrateRename(d config.Dirs, b brand.Brand) (bool, error) {
 		return false, err
 	}
 	return existing, nil
+}
+
+// formerHelperFiles are the files the update and sidebar helpers left in the
+// home folder under the former name, before they took the product name.
+var formerHelperFiles = []string{"-update.ps1", "-update.vbs", "-update.log", "-update-task.xml", "-sidebar.log"}
+
+// removeFormerHelperFiles deletes those leftovers once a renamed build runs. A
+// file changed in the last hour is kept: the old version's update helper may
+// still be finishing (it relaunches the app before it writes its last lines),
+// and the next launch removes it instead.
+func removeFormerHelperFiles(home string, b brand.Brand, now time.Time) {
+	if !b.Renamed() {
+		return
+	}
+	old := brand.Slug(b.FormerName)
+	if old == "" || old == b.FileStem() {
+		return
+	}
+	for _, suffix := range formerHelperFiles {
+		p := filepath.Join(home, old+suffix)
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() && now.Sub(fi.ModTime()) > time.Hour {
+			_ = os.Remove(p)
+		}
+	}
 }
 
 // renameNoticeDue is set at launch when migrateRename says this install is to

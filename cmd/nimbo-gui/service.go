@@ -5013,7 +5013,7 @@ func (a *App) ReportProblem() string {
 	if err != nil {
 		return err.Error()
 	}
-	out := filepath.Join(home, "Downloads", "nimbo-report-"+time.Now().Format("20060102-150405")+".zip")
+	out := filepath.Join(home, "Downloads", brand.Current.FileStem()+"-report-"+time.Now().Format("20060102-150405")+".zip")
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 		return err.Error()
 	}

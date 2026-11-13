@@ -1,11 +1,11 @@
 name: Feature request
-description: Suggest something Nimbo should do.
+description: Suggest something OtherSync should do.
 labels: [enhancement]
 body:
   - type: textarea
     id: want
     attributes:
-      label: What would you like Nimbo to do?
+      label: What would you like OtherSync to do?
     validations:
       required: true
   - type: textarea
