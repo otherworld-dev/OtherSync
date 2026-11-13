@@ -143,7 +143,7 @@ func (a *App) enableBadges() string {
 	}
 	// Freshly created, randomly-named staging dir — unpredictable to a would-be
 	// pre-planter, though the hash/signature check below is the real defence.
-	stage, err := os.MkdirTemp(home, "nimbo-badges-")
+	stage, err := os.MkdirTemp(home, brand.Current.FileStem()+"-badges-")
 	if err != nil {
 		return err.Error()
 	}

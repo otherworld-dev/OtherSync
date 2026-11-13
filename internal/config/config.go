@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/otherworld/nimbo/internal/brand"
 )
@@ -25,22 +24,10 @@ const legacyAppDir = "nextclient"
 // build.
 var appDir = brandSlug(brand.Current.AppID)
 
-// brandSlug turns a brand identifier into a filesystem-safe folder name:
-// lowercased, ASCII letters/digits kept, every other run collapsed to a single
-// hyphen, then trimmed. Falls back to "nimbo" if nothing usable remains.
+// brandSlug turns a brand identifier into a filesystem-safe folder name (see
+// brand.Slug). Falls back to "nimbo" if nothing usable remains.
 func brandSlug(s string) string {
-	var b strings.Builder
-	hyphen := false
-	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-			hyphen = false
-		} else if b.Len() > 0 && !hyphen {
-			b.WriteByte('-')
-			hyphen = true
-		}
-	}
-	if out := strings.Trim(b.String(), "-"); out != "" {
+	if out := brand.Slug(s); out != "" {
 		return out
 	}
 	return "nimbo"

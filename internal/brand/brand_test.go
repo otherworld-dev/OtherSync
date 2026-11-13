@@ -57,7 +57,7 @@ func TestStockRenameKeepsIdentity(t *testing.T) {
 	if got := Current.InstalledName(); got != "Nimbo" {
 		t.Errorf("InstalledName() = %q, want Nimbo (Start-menu folder, icon folder, existing labels)", got)
 	}
-	if want := "https://github.com/otherworld-dev/OtherSync/releases/latest/download/Nimbo.appinstaller"; Current.FeedURL != want {
+	if want := "https://github.com/otherworld-dev/OtherSync/releases/latest/download/OtherSync.appinstaller"; Current.FeedURL != want {
 		t.Errorf("FeedURL = %q, want %q", Current.FeedURL, want)
 	}
 	if want := "https://api.github.com/repos/otherworld-dev/OtherSync"; Current.APIBase != want {
@@ -145,5 +145,25 @@ func TestSanitizeDropsBadFormerName(t *testing.T) {
 	}
 	if got := sanitize(stockBrand()); got != stockBrand() {
 		t.Errorf("stock brand changed: %+v", got)
+	}
+}
+
+// FileStem names the files people see (report zip, update helper files): the
+// product name, not the app id that saved state is keyed by.
+func TestFileStem(t *testing.T) {
+	for _, c := range []struct {
+		b    Brand
+		want string
+	}{
+		{Brand{Name: "OtherSync", AppID: "Nimbo"}, "othersync"},
+		{Brand{Name: "Acme Cloud Sync", AppID: "AcmeSync"}, "acme-cloud-sync"},
+		{Brand{Name: "★", AppID: "Acme"}, "acme"},
+	} {
+		if got := c.b.FileStem(); got != c.want {
+			t.Errorf("FileStem(%q) = %q, want %q", c.b.Name, got, c.want)
+		}
+	}
+	if got := Current.FileStem(); got != "othersync" {
+		t.Errorf("stock FileStem = %q, want othersync", got)
 	}
 }

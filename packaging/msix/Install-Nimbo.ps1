@@ -22,7 +22,7 @@ function Fail($msg) { Write-Host ""; Write-Host "ERROR: $msg" -ForegroundColor R
 
 $cer  = Join-Path $here "NimboDev.cer"
 $msix = Join-Path $here "Nimbo.msix"
-$feed = "https://github.com/otherworld-dev/OtherSync/releases/latest/download/Nimbo.appinstaller"
+$feed = "https://github.com/otherworld-dev/OtherSync/releases/latest/download/OtherSync.appinstaller"
 if (-not (Test-Path $cer))  { Fail "NimboDev.cer not found next to this installer." }
 if (-not (Test-Path $msix)) { Fail "Nimbo.msix not found next to this installer." }
 

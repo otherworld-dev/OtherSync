@@ -84,7 +84,7 @@ func canApplyUpdate() bool { return !isStoreBuild() && packageFamilyName() != ""
 // service runs it, fully decoupled from our job. We register a one-shot task that
 // runs the .ps1 (in the REAL user home, not %TEMP%) and fire it. schtasks errors
 // are captured and returned so a failure surfaces instead of hanging; the script
-// logs each step to ~/nimbo-update.log and removes its own task when done.
+// logs each step to ~/othersync-update.log (brand.FileStem) and removes its own task when done.
 //
 // The task is defined via XML (schtasks /create /xml) rather than bare flags
 // because schtasks defaults to "start the task only if the computer is on AC
@@ -101,10 +101,11 @@ func applyUpdate(msixURL string) error {
 		return err
 	}
 	taskName := selfUpdateTaskName()
-	ps1 := filepath.Join(home, "nimbo-update.ps1")
-	vbs := filepath.Join(home, "nimbo-update.vbs")
-	taskXML := filepath.Join(home, "nimbo-update-task.xml")
-	logf := filepath.Join(home, "nimbo-update.log")
+	stem := brand.Current.FileStem() + "-update"
+	ps1 := filepath.Join(home, stem+".ps1")
+	vbs := filepath.Join(home, stem+".vbs")
+	taskXML := filepath.Join(home, stem+"-task.xml")
+	logf := filepath.Join(home, stem+".log")
 	// Brand-derived identifiers so a white-label build's updater targets ITS
 	// package, not "Nimbo": the MSIX package Name is the pfn up to the first
 	// underscore; the AUMID app id is brand.AppID; the exe basename feeds the
