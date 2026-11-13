@@ -47,6 +47,7 @@ import (
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 
+	"github.com/otherworld/nimbo/internal/brand"
 	"github.com/otherworld/nimbo/internal/psquote"
 )
 
@@ -388,7 +389,7 @@ func runOutOfContainer(action, body string) error {
 	}
 	taskName := pkg + "SidebarUpdate"
 	ps1, vbs, taskXML := scriptPaths(home)
-	logf := filepath.Join(home, "nimbo-sidebar.log")
+	logf := filepath.Join(home, brand.Current.FileStem()+"-sidebar.log")
 
 	// The script deletes itself last, so its disappearance is the signal that
 	// everything before it — the body included — has run.
@@ -466,7 +467,7 @@ var runSeq atomic.Uint64
 // definition under home. They are unique per run because a finishing script
 // removes its own files, which with shared names took the next run's with them.
 func scriptPaths(home string) (ps1, vbs, taskXML string) {
-	stem := fmt.Sprintf("nimbo-sidebar-%d-%d-%d", os.Getpid(), time.Now().Unix(), runSeq.Add(1))
+	stem := fmt.Sprintf("%s-sidebar-%d-%d-%d", brand.Current.FileStem(), os.Getpid(), time.Now().Unix(), runSeq.Add(1))
 	return filepath.Join(home, stem+".ps1"),
 		filepath.Join(home, stem+".vbs"),
 		filepath.Join(home, stem+"-task.xml")

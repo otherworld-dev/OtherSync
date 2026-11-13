@@ -13,8 +13,9 @@
 #
 # What it does:
 #   1. package.ps1 -> signed Nimbo.msix (bumps .build-rev for an in-place update)
-#   2. make-appinstaller.ps1 -> Nimbo.appinstaller pointing at the repo's stable
-#      releases/latest/download URLs (version auto-derived from .build-rev)
+#   2. make-appinstaller.ps1 -> OtherSync.appinstaller (plus the old-name
+#      Nimbo.appinstaller) pointing at the repo's stable releases/latest/download
+#      URLs (version auto-derived from .build-rev); the MSIX goes up as OtherSync.msix
 #   3. gh release create/upload -> a pre-release tagged vX.Y.Z.N carrying the files
 #      (skipped with -NoPublish, where /release creates the vX.Y.Z release)
 #
@@ -126,19 +127,29 @@ if ($PreRelease -and [int]$rev -eq 0) {
 # --- 3. App Installer feed pointing at the stable latest/download URLs ---
 # -Tag matters: the feed links the MSIX by its release tag, and a stable's tag
 # (vX.Y.Z) is not its 4-part package version.
+# The assets are named OtherSync (d1247); the build's own files and the package
+# identity stay Nimbo. The in-app updater picks whichever asset has ".msix" in its
+# name, so only ONE .msix may ever be attached to a release.
 $base = "https://github.com/$Owner/$Repo/releases/latest/download"
-& (Join-Path $here "make-appinstaller.ps1") -BaseUrl $base -Publisher $SignSubject -Version $pkgVersion -Tag $tag
-$appinstaller = Join-Path $here "Nimbo.appinstaller"
+$msixAsset = Join-Path $here "OtherSync.msix"
+Copy-Item $msix $msixAsset -Force
+& (Join-Path $here "make-appinstaller.ps1") -BaseUrl $base -Publisher $SignSubject -Version $pkgVersion -Tag $tag -FileName "OtherSync" -MsixFileName "OtherSync"
+$appinstaller = Join-Path $here "OtherSync.appinstaller"
+# Old-name feed: installs made before the rename (Setup.exe, Install-Nimbo.ps1)
+# have Windows' App Installer re-checking latest/download/Nimbo.appinstaller, so
+# every release keeps publishing it, pointing at the same OtherSync.msix.
+& (Join-Path $here "make-appinstaller.ps1") -BaseUrl $base -Publisher $SignSubject -Version $pkgVersion -Tag $tag -FileName "Nimbo" -MsixFileName "OtherSync"
+$legacyFeed = Join-Path $here "Nimbo.appinstaller"
 
-# Assets to publish: the MSIX + feed always; the offline Setup.exe too when it
-# can be built. Setup.exe is uploaded under a STABLE name (Nimbo-Setup.exe) so
-# the website can always link to .../releases/latest/download/Nimbo-Setup.exe.
-$assets = @($msix, $appinstaller)
+# Assets to publish: the MSIX + both feeds always; the offline Setup.exe too when
+# it can be built. Setup.exe is uploaded under a STABLE name (OtherSync-Setup.exe)
+# so the website can always link to .../releases/latest/download/OtherSync-Setup.exe.
+$assets = @($msixAsset, $appinstaller, $legacyFeed)
 try {
     & (Join-Path $here "build-exe-installer.ps1") -Version $Version -SignSubject $SignSubject -AzureSign:$AzureSign -AzureCertProfile $AzureCertProfile
     $setupSrc = Join-Path $here "Nimbo-Setup-$Version.exe"
     if (Test-Path $setupSrc) {
-        $setup = Join-Path $here "Nimbo-Setup.exe"
+        $setup = Join-Path $here "OtherSync-Setup.exe"
         Copy-Item $setupSrc $setup -Force
         $assets += $setup
     } else {
@@ -173,7 +184,7 @@ if ($prevCreated) {
 # Pass notes via a file, not --notes "<string>": commit subjects routinely contain
 # double-quotes/brackets that Windows PowerShell 5.1 mis-parses as native-command
 # args (a quote in a subject aborted a publish with "no matches found").
-$notesFile = Join-Path ([System.IO.Path]::GetTempPath()) "nimbo-release-notes.md"
+$notesFile = Join-Path ([System.IO.Path]::GetTempPath()) "othersync-release-notes.md"
 [System.IO.File]::WriteAllText($notesFile, $notes, (New-Object System.Text.UTF8Encoding($false)))
 
 # --- 4. publish the release with both assets ---
@@ -231,5 +242,5 @@ if ($isPrerelease -eq "true") {
     Write-Host "The next stable comes from /release, not from promoting this beta."
 } else {
     Write-Host "First-time install (so Windows tracks updates):"
-    Write-Host "  Add-AppxPackage -AppInstallerFile `"$base/Nimbo.appinstaller`""
+    Write-Host "  Add-AppxPackage -AppInstallerFile `"$base/OtherSync.appinstaller`""
 }

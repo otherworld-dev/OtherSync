@@ -25,7 +25,9 @@ param(
     [string]$Tag = "",                               # release tag holding the MSIX; empty = derived from -Version
     [Parameter(Mandatory = $true)][string]$BaseUrl,  # e.g. https://github.com/adam/Nimbo/releases/latest/download
     [string]$Publisher = "CN=Nimbo Dev",             # MUST match the signing cert subject + manifest Publisher (see the signing runbook)
-    [string]$Name = "Nimbo"                          # MSIX Identity Name + feed/MSIX file basename; white-label passes the partner's
+    [string]$Name = "Nimbo",                         # MSIX Identity Name + feed/MSIX file basename; white-label passes the partner's
+    [string]$FileName = "",                          # feed file basename when it differs from $Name (OtherSync.appinstaller; the identity stays Nimbo)
+    [string]$MsixFileName = ""                       # MSIX asset basename when it differs from $Name
 )
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "rev-common.ps1")
@@ -45,6 +47,8 @@ while ($parts.Count -lt 4) { $parts += "0" }
 $ver = ($parts[0..3] -join '.')
 if (-not $Tag) { $Tag = Get-ReleaseTag -Version ($parts[0..2] -join '.') -Revision ([int]$parts[3]) }
 $base = $BaseUrl.TrimEnd('/')
+if (-not $FileName) { $FileName = $Name }
+if (-not $MsixFileName) { $MsixFileName = $Name }
 
 # The .appinstaller itself stays at the stable latest/download URL so update
 # CHECKS always find the newest release. But the MSIX it pulls must use the
@@ -53,9 +57,9 @@ $base = $BaseUrl.TrimEnd('/')
 # PREVIOUS release's MSIX for a while after publishing — which made updates
 # silently reinstall the old version ("installed ok", but no version change).
 # A versioned URL is unique per release and never stale.
-$msixUri = "$base/$Name.msix"
+$msixUri = "$base/$MsixFileName.msix"
 if ($base -match '^(?<root>.*)/releases/latest/download$') {
-    $msixUri = "$($Matches.root)/releases/download/$Tag/$Name.msix"
+    $msixUri = "$($Matches.root)/releases/download/$Tag/$MsixFileName.msix"
 }
 
 # The 2017/2 schema, not a newer one: Windows 10's App Installer rejects the
@@ -65,7 +69,7 @@ $xml = @"
 <?xml version="1.0" encoding="utf-8"?>
 <AppInstaller xmlns="http://schemas.microsoft.com/appx/appinstaller/2017/2"
               Version="$ver"
-              Uri="$base/$Name.appinstaller">
+              Uri="$base/$FileName.appinstaller">
   <MainPackage Name="$Name"
                Publisher="$Publisher"
                Version="$ver"
@@ -77,8 +81,8 @@ $xml = @"
 </AppInstaller>
 "@
 
-$out = Join-Path $PSScriptRoot "$Name.appinstaller"
+$out = Join-Path $PSScriptRoot "$FileName.appinstaller"
 [System.IO.File]::WriteAllText($out, $xml, (New-Object System.Text.UTF8Encoding($false)))
 Write-Host "Wrote $out (version $ver, base $base)"
-Write-Host "Upload $Name.appinstaller + $Name.msix to $base/ and install via:"
-Write-Host "  Add-AppxPackage -AppInstallerFile `"$base/$Name.appinstaller`""
+Write-Host "Upload $FileName.appinstaller + $MsixFileName.msix to $base/ and install via:"
+Write-Host "  Add-AppxPackage -AppInstallerFile `"$base/$FileName.appinstaller`""

@@ -47,6 +47,7 @@ Thumbs.db
 /packaging/msix/dist/
 /packaging/msix/Nimbo-Setup-*.zip
 /packaging/msix/Nimbo-Setup-*.exe
+/packaging/msix/OtherSync-Setup.exe
 # Windows App Cert Kit output (regenerated per Store build)
 /packaging/msix/wack-report.xml
 .icon-preview/

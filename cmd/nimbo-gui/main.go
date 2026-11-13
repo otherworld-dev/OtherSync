@@ -105,6 +105,9 @@ func main() {
 		} else {
 			renameNoticeDue = show
 		}
+		if home, herr := os.UserHomeDir(); herr == nil {
+			removeFormerHelperFiles(home, brand.Current, time.Now())
+		}
 	} else {
 		applog.SetVerbose(verbose)
 		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: applog.Level()})))

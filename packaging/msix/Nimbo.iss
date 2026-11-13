@@ -1,4 +1,4 @@
-; Inno Setup script for OtherSync's Setup.exe (the file stays Nimbo-Setup.exe).
+; Inno Setup script for OtherSync's Setup.exe (published as OtherSync-Setup.exe).
 ;
 ; It's a bootstrapper, not a traditional file-install: it bundles the signed MSIX
 ; and, on install (elevated), runs Add-AppxPackage so the real app is the MSIX
@@ -34,7 +34,7 @@
   #define Publisher "Otherworld Dev Ltd"
 #endif
 #ifndef FeedUrl
-  #define FeedUrl "https://github.com/otherworld-dev/OtherSync/releases/latest/download/Nimbo.appinstaller"
+  #define FeedUrl "https://github.com/otherworld-dev/OtherSync/releases/latest/download/OtherSync.appinstaller"
 #endif
 
 [Setup]
@@ -48,7 +48,7 @@ AppCopyright=Copyright (C) {#GetDateTimeString('yyyy', '', '')} {#Publisher}
 ; copyright / version is one more "unknown file" signal to reputation scanners.
 VersionInfoVersion={#FileVer}
 VersionInfoDescription=OtherSync Setup
-VersionInfoOriginalFileName=Nimbo-Setup.exe
+VersionInfoOriginalFileName=OtherSync-Setup.exe
 WizardStyle=modern
 PrivilegesRequired=admin
 ; Matches the MSIX's TargetDeviceFamily MinVersion (Windows 10 2004), so an
