@@ -42,7 +42,8 @@ export function ActivateLicence(token) {
 
 /**
  * AddAccount opens the sign-in window to connect another Nextcloud account.
- * The completed login becomes the active account (see account.Complete).
+ * The new account is shown while its setup runs, then the account that was
+ * shown before comes back (returnAfterSetup): adding one keeps the main one.
  * @returns {$CancellablePromise<void>}
  */
 export function AddAccount() {

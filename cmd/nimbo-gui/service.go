@@ -126,6 +126,11 @@ type App struct {
 	// setupPrev holds an account's folder setup while its setup asks whether
 	// to keep the files in a folder it recorded provisionally (guarded by setupMu).
 	setupPrev map[string]setupFolder
+	// setupReturn maps a newly added account to the account that was shown
+	// before it signed in. Setup works on the shown account, so the new one is
+	// shown while its setup runs and the earlier one comes back once it ends
+	// (guarded by setupMu).
+	setupReturn map[string]string
 	// leftoversSwept: the once-per-launch clean-up of leftover roots has run.
 	leftoversSwept atomic.Bool
 	preMountAdopt  *adoptPending
@@ -5247,7 +5252,8 @@ func (a *App) SwitchAccount(id string) string {
 }
 
 // AddAccount opens the sign-in window to connect another Nextcloud account.
-// The completed login becomes the active account (see account.Complete).
+// The new account is shown while its setup runs, then the account that was
+// shown before comes back (returnAfterSetup): adding one keeps the main one.
 func (a *App) AddAccount() { a.showLoginFor("") }
 
 // RemoveAccount disconnects a NON-active account and clears its sync setup and
@@ -5852,7 +5858,10 @@ func (a *App) setupClosed() {
 	a.restoreSetupFolder(eng)
 	if a.GetSyncMode() != "ondemand" || eng.StoredBaseDir() != "" {
 		a.emit("setup:done")
-		go a.syncSidebar()
+		go func() {
+			a.syncSidebar()
+			a.returnAfterSetup(eng.Account.ID)
+		}()
 		return
 	}
 	slog.Info("setup closed without choosing a folder; using the default", "account", eng.Account.LoginName)
@@ -5860,6 +5869,7 @@ func (a *App) setupClosed() {
 		a.mountAccountOnDemand()
 		a.syncSidebar()
 		a.emit("setup:done")
+		a.returnAfterSetup(eng.Account.ID)
 	}()
 }
 
@@ -5921,8 +5931,12 @@ func (a *App) CompleteSetup(localDir, mode string) string {
 	if msg == "" {
 		a.endSetup(id)
 		a.emit("setup:done")
-		// Its folder is chosen now, so it can have its sidebar entry.
-		go a.syncSidebar()
+		// Its folder is chosen now, so it can have its sidebar entry; then the
+		// account that was shown before it was added is shown again.
+		go func() {
+			a.syncSidebar()
+			a.returnAfterSetup(id)
+		}()
 	}
 	return msg
 }

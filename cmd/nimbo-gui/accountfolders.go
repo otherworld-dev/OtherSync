@@ -579,3 +579,58 @@ func (a *App) restoreSetupFolder(eng *agent.Engine) {
 	_ = eng.SetOnDemandRoot(prev.root)
 	slog.Info("setup's folder not kept; the account's previous folder is back", "account", eng.Account.LoginName, "dir", prev.baseDir)
 }
+
+// holdSetupReturn records that once newID's setup ends, prevID is shown again.
+func (a *App) holdSetupReturn(newID, prevID string) {
+	a.setupMu.Lock()
+	defer a.setupMu.Unlock()
+	if a.setupReturn == nil {
+		a.setupReturn = map[string]string{}
+	}
+	a.setupReturn[newID] = prevID
+}
+
+// takeSetupReturn hands back (once) the account to show after newID's setup.
+func (a *App) takeSetupReturn(newID string) string {
+	a.setupMu.Lock()
+	defer a.setupMu.Unlock()
+	prev := a.setupReturn[newID]
+	delete(a.setupReturn, newID)
+	return prev
+}
+
+// converting reports whether a virtual-files conversion is running in any
+// mounted folder; switching accounts would stop it part way.
+func (a *App) converting() bool {
+	for _, m := range a.mounts() {
+		if m.convertCancel != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// returnAfterSetup shows again the account that was main before newID was
+// added, now newID's setup has ended. Adding an account must not change which
+// one is main. Left alone while a conversion of the new folder is still
+// running (the user can switch back in the account switcher afterwards).
+func (a *App) returnAfterSetup(newID string) {
+	prev := a.takeSetupReturn(newID)
+	if prev == "" {
+		return
+	}
+	if _, st, ok := accountsAndDirs(); !ok {
+		return
+	} else if _, found := st.Find(prev); !found {
+		return // signed out meanwhile: the new account stays shown
+	}
+	if a.converting() {
+		slog.Info("left the new account shown: its folder is still being converted", "account", newID)
+		return
+	}
+	if msg := a.SwitchAccount(prev); msg != "" {
+		slog.Warn("could not show the main account again after setup", "account", prev, "err", msg)
+		return
+	}
+	slog.Info("setup finished; the main account is shown again", "account", prev)
+}

@@ -271,6 +271,8 @@ func (a *App) completeSignIn(creds account.Credentials, want SignInTargetDTO) (a
 		return false, fmt.Errorf("your browser signed in to Nextcloud as %s, not %s. Log out of Nextcloud in your browser, then sign in again.", got, want.Address)
 	}
 	if !again {
+		// Captured before Complete makes the new account the shown one.
+		before, hadBefore := st.Default()
 		acct, err := account.Complete(d.AccountsFile(), creds)
 		if err != nil {
 			return false, err
@@ -278,6 +280,11 @@ func (a *App) completeSignIn(creds account.Credentials, want SignInTargetDTO) (a
 		// The setup screen comes next and chooses the account's folder, so the
 		// start below must not mount a default one ahead of it (GitHub #11).
 		a.beginSetup(acct.ID)
+		// Adding an account keeps the existing main account: the new one is
+		// only shown while its setup runs (returnAfterSetup).
+		if hadBefore && before.ID != acct.ID {
+			a.holdSetupReturn(acct.ID, before.ID)
+		}
 		a.restartShown()
 		return false, nil
 	}
