@@ -5851,12 +5851,14 @@ func (a *App) setupClosed() {
 	// never chosen.
 	a.restoreSetupFolder(eng)
 	if a.GetSyncMode() != "ondemand" || eng.StoredBaseDir() != "" {
+		a.emit("setup:done")
 		return
 	}
 	slog.Info("setup closed without choosing a folder; using the default", "account", eng.Account.LoginName)
 	go func() {
 		a.mountAccountOnDemand()
 		a.syncSidebar()
+		a.emit("setup:done")
 	}()
 }
 
@@ -5917,6 +5919,7 @@ func (a *App) CompleteSetup(localDir, mode string) string {
 	msg := a.completeSetup(localDir, mode)
 	if msg == "" {
 		a.endSetup(id)
+		a.emit("setup:done")
 	}
 	return msg
 }

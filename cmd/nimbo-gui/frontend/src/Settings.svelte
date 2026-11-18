@@ -188,6 +188,10 @@
   }
   loadAccounts();
   Events.On("account", loadAccounts);
+  // Setup for a new account runs in the sign-in window and sets its folder
+  // (and maybe the mode) there. An open account page loaded before that, so it
+  // showed the folder from before setup until it was reopened.
+  Events.On("setup:done", () => { loadAccounts(); refreshModeAndFolders(); });
 
   let autoSupported = $state(false), auto = $state(false);
   (async () => { autoSupported = await App.AutostartSupported(); auto = await App.AutostartEnabled(); })();
