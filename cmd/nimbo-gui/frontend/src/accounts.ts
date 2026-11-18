@@ -16,6 +16,7 @@ export type AccountEntry = {
   sidebarName: string;
   sidebarAuto: string;
   sidebarLabel: string;
+  sidebarShown: boolean;
 };
 
 export type AppPage = "sync" | "exclusions" | "appearance" | "general";
@@ -51,6 +52,7 @@ export function nextSelection(accounts: AccountEntry[], cur: Selection): Selecti
 export function sidebarClashes(accounts: AccountEntry[]): Set<string> {
   const byLabel = new Map<string, string[]>();
   for (const a of accounts) {
+    if (a.sidebarShown === false) continue; // a hidden entry can't be confused with another
     byLabel.set(a.sidebarLabel, [...(byLabel.get(a.sidebarLabel) ?? []), a.id]);
   }
   const out = new Set<string>();

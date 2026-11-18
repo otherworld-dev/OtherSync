@@ -396,6 +396,17 @@
     if (err) tell({ title: "Couldn't rename the sidebar entry", message: err });
   }
   const navNameClash = $derived(sidebarClashes(accounts).has(acctId));
+  // Show or hide just this account's sidebar entry. Applying it can take a
+  // second or two (Explorer is updated out of the app's container).
+  let navShownBusy = $state(false);
+  async function toggleNavShown(e: Event) {
+    const box = e.currentTarget as HTMLInputElement;
+    const want = box.checked;
+    navShownBusy = true;
+    const err = await App.SetAccountSidebarShown(acctId, want);
+    navShownBusy = false;
+    if (err) { box.checked = !want; tell({ title: "Couldn't change the Explorer sidebar", message: err }); }
+  }
 </script>
 
 <div class="acct">
@@ -696,6 +707,7 @@ SHA-256: {localTest.fingerprint}</pre>
 
 {#if navSupported}
   <div class="field navname">
+    <label class="check"><input type="checkbox" checked={acct.sidebarShown} disabled={navShownBusy} onchange={toggleNavShown} /> Show this account in the Explorer sidebar</label>
     <label for={"navname-" + acctId}>Explorer sidebar name</label>
     <input id={"navname-" + acctId} type="text" maxlength="80" placeholder={acct.sidebarAuto} value={acct.sidebarName} onchange={(e) => saveNavName(e.currentTarget.value)} />
     <p class="fhint">Leave it empty to use the name shown in grey.</p>

@@ -1145,6 +1145,18 @@ export function SetAccountSidebarName(id, name) {
 }
 
 /**
+ * SetAccountSidebarShown shows or hides one account's Explorer sidebar entry
+ * (the sidebar option itself stays as it is) and applies it straight away. It
+ * returns "" or a message to show.
+ * @param {string} id
+ * @param {boolean} shown
+ * @returns {$CancellablePromise<string>}
+ */
+export function SetAccountSidebarShown(id, shown) {
+    return $Call.ByID(3337918875, id, shown);
+}
+
+/**
  * SetAllowedFilenames persists the allow-list (trimmed, de-duped) and applies it
  * live: the running engine rebuilds its forbidden-name matcher and re-syncs, so a
  * change takes effect immediately instead of on next launch.

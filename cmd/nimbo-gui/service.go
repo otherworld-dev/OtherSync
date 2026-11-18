@@ -4743,20 +4743,13 @@ func (a *App) SetSidebar(on bool) string {
 		if err := a.removeSidebarEntries(); err != nil {
 			return err.Error()
 		}
-		node := cfapi.ShellSyncRootNamespaceCLSID(target)
-		if node == "" {
-			if !on {
-				return "Explorer has no entry for the cloud folder yet, so there is nothing to hide. Try again once the folder shows in Explorer."
-			}
-			// Preference on, target recorded as the sentinel: if the folder later
-			// stops being a sync root, syncSidebar sees an unapplied target and
-			// puts our own entry back.
-			rememberSidebar(true, sidebarSyncRoot)
-			return ""
-		}
-		if err := shellns.SetCloudRootPinned(node, on); err != nil {
+		// Each account's folder has its own node; an account the user hid
+		// stays hidden when the sidebar is turned on.
+		if err := a.pinCloudRoots(target, on); err != nil {
 			return err.Error()
 		}
+		// Recorded as the sentinel: if the folder later stops being a sync
+		// root, syncSidebar sees an unapplied target and puts our own entry back.
 		rememberSidebar(on, sidebarSyncRoot)
 		return ""
 	}
@@ -4827,12 +4820,17 @@ func (a *App) syncSidebar() {
 		}
 		slog.Info("removed the duplicate navigation-pane entry; the cloud sync root provides it", "dir", target)
 		recorded, _, _ := sidebarChoice()
-		if recorded == nil {
-			// Never chosen: Windows shows the node, and SidebarEnabled says so.
-			rememberSidebar(true, sidebarSyncRoot)
-			return
+		on := true // never chosen: Windows shows the node, and SidebarEnabled says so
+		if recorded != nil {
+			on = *recorded
 		}
-		a.applyCloudRootChoice(target, *recorded)
+		if err := a.pinCloudRoots(target, on); err != nil {
+			slog.Warn("could not apply the sidebar choice to every cloud folder's entry", "err", err)
+			if recorded != nil {
+				return
+			}
+		}
+		rememberSidebar(on, sidebarSyncRoot)
 		return
 	}
 	if !a.sidebarWanted() {
@@ -4845,33 +4843,61 @@ func (a *App) syncSidebar() {
 	}
 }
 
-// applyCloudRootChoice hides or shows the node Windows supplies for target's
-// cloud sync root so that it matches want, then records the choice. The
-// out-of-container round trip is skipped when the node already agrees: that
-// key is only ever written outside the container (by Windows, or by our task),
-// so unlike our own entry's keys a read of it from inside is not shadowed by a
-// private copy. The node can lag the registration by a moment, so it is given
-// a short while to appear before the choice is left for the next launch.
-func (a *App) applyCloudRootChoice(target string, want bool) {
+// pinCloudRoots shows or hides the node Windows supplies for each mounted
+// cloud sync root: shown when the sidebar is on and the root's account is not
+// one the user hid. With nothing mounted (a live folder that is a sync root),
+// fallback's node is set instead. Returns the first failure.
+func (a *App) pinCloudRoots(fallback string, on bool) error {
+	hidden := map[string]bool{}
+	if _, st, ok := accountsAndDirs(); ok {
+		for _, acc := range st.Accounts {
+			hidden[acc.ID] = acc.HideSidebar
+		}
+	}
+	mounts := a.mounts()
+	if len(mounts) == 0 {
+		return pinCloudRoot(fallback, on)
+	}
+	var first error
+	for dir, m := range mounts {
+		if err := pinCloudRoot(dir, on && !hidden[m.accountID]); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
+
+// pinCloudRoot hides or shows the node Windows supplies for target's cloud
+// sync root so that it matches want. The out-of-container round trip is
+// skipped when the node already agrees: that key is only ever written outside
+// the container (by Windows, or by our task), so unlike our own entry's keys a
+// read of it from inside is not shadowed by a private copy. The node can lag
+// the registration by a moment, so it is given a short while to appear.
+func pinCloudRoot(target string, want bool) error {
+	if target == "" {
+		return nil
+	}
 	node := cfapi.ShellSyncRootNamespaceCLSID(target)
 	for i := 0; node == "" && i < 8; i++ {
 		time.Sleep(250 * time.Millisecond)
 		node = cfapi.ShellSyncRootNamespaceCLSID(target)
 	}
 	if node == "" {
-		slog.Warn("cloud sync root has no navigation-pane node to apply the sidebar choice to", "dir", target, "shown", want)
-		return
+		if want {
+			return nil // Windows creates it shown
+		}
+		slog.Warn("cloud sync root has no navigation-pane node to hide", "dir", target)
+		return errors.New("Explorer has no entry for the cloud folder yet, so there is nothing to hide. Try again once the folder shows in Explorer.")
 	}
 	if pinned, ok := shellns.CloudRootPinned(node); ok && pinned == want {
-		rememberSidebar(want, sidebarSyncRoot)
-		return
+		return nil
 	}
 	if err := shellns.SetCloudRootPinned(node, want); err != nil {
 		slog.Warn("could not apply the sidebar choice to the cloud folder's entry", "dir", target, "shown", want, "err", err)
-		return
+		return err
 	}
 	slog.Info("applied the sidebar choice to the cloud folder's navigation-pane entry", "dir", target, "shown", want)
-	rememberSidebar(want, sidebarSyncRoot)
+	return nil
 }
 
 // navIconPath writes the embedded app icon to the config dir and returns its
@@ -5124,6 +5150,9 @@ type AccountEntryDTO struct {
 	SidebarName  string `json:"sidebarName"`
 	SidebarAuto  string `json:"sidebarAuto"`
 	SidebarLabel string `json:"sidebarLabel"`
+	// SidebarShown is whether this account has an entry in the sidebar when
+	// the sidebar option is on (the user can hide one account's).
+	SidebarShown bool `json:"sidebarShown"`
 }
 
 // accountEntry builds one account's list entry. The engine-derived fields
@@ -5134,7 +5163,7 @@ func accountEntry(ac account.Account, all []account.Account, defID, status strin
 		ID: ac.ID, User: ac.LoginName, Server: ac.ServerURL,
 		Active: ac.ID == defID, Status: status,
 		SidebarName: ac.Label, SidebarAuto: autoSidebarLabel(ac, all),
-		SidebarLabel: sidebarLabel(ac, all),
+		SidebarLabel: sidebarLabel(ac, all), SidebarShown: !ac.HideSidebar,
 	}
 	if ac.Local != nil {
 		e.LocalAddress, e.LocalPinned = ac.Local.Address, ac.Local.Pin != ""

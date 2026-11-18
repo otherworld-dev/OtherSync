@@ -73,7 +73,7 @@ func planSidebarEntries(want []sidebarWant, have map[string]config.SidebarEntry)
 }
 
 // wantedSidebarEntries lists an entry for every account with a folder of its
-// own, other than one still in setup.
+// own, other than one still in setup or one the user hid.
 func (a *App) wantedSidebarEntries() []sidebarWant {
 	d, st, ok := accountsAndDirs()
 	if !ok {
@@ -81,8 +81,8 @@ func (a *App) wantedSidebarEntries() []sidebarWant {
 	}
 	var out []sidebarWant
 	for _, acc := range st.Accounts {
-		if a.setupPending(acc.ID) {
-			continue // its folder isn't chosen yet
+		if a.setupPending(acc.ID) || acc.HideSidebar {
+			continue // its folder isn't chosen yet, or the user hid it
 		}
 		target := baseDirFromDisk(d, acc.ID)
 		if target == "" {

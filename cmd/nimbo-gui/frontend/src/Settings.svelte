@@ -815,7 +815,7 @@
         <p class="fhint">Windows 11's new right-click menu shows {brandName} either way; this covers the classic one (Show more options).</p>
       {/if}
       {#if navSupported}
-        <label class="check"><input type="checkbox" checked={navOn} disabled={navBusy} onchange={toggleNav} /> Show {brandName} in the Explorer sidebar (points at the shown account's sync folder)</label>
+        <label class="check"><input type="checkbox" checked={navOn} disabled={navBusy} onchange={toggleNav} /> Show {brandName} in the Explorer sidebar (one entry per account; hide one on its account page)</label>
       {/if}
 
       <div class="row"><h3>Troubleshooting</h3>{#if brandHelp}<button class="link" onclick={() => App.OpenURL(helpPage("troubleshooting"))}>Troubleshooting guide</button>{/if}</div>

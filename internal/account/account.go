@@ -25,6 +25,9 @@ type Account struct {
 	// entry. "" = the automatic one ("OtherSync - <login>"); see sidebarLabel in
 	// cmd/nimbo-gui.
 	Label string `json:"label,omitempty"`
+	// HideSidebar keeps this account out of the Explorer sidebar while the
+	// other accounts are shown there.
+	HideSidebar bool `json:"hideSidebar,omitempty"`
 }
 
 // LocalRoute is the saved setup of an account's local network address.

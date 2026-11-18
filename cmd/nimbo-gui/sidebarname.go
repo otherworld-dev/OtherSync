@@ -141,3 +141,38 @@ func (a *App) applySidebarLabel(id string) {
 // sidebar entry's icon (shellns.Register). It is a folder existing installs
 // already have, so it follows brand.InstalledName and stays "Nimbo".
 func sidebarIconFolder() string { return brand.Current.InstalledName() }
+
+// SetAccountSidebarShown shows or hides one account's Explorer sidebar entry
+// (the sidebar option itself stays as it is) and applies it straight away. It
+// returns "" or a message to show.
+func (a *App) SetAccountSidebarShown(id string, shown bool) string {
+	d, err := config.Resolve()
+	if err != nil {
+		return err.Error()
+	}
+	if err := account.Update(d.AccountsFile(), func(st *account.Store) error {
+		acc, ok := st.Find(id)
+		if !ok {
+			return errors.New("That account is no longer set up on this PC.")
+		}
+		acc.HideSidebar = !shown
+		st.Upsert(acc)
+		return nil
+	}); err != nil {
+		return err.Error()
+	}
+	defer a.emit("account")
+	if !a.sidebarWanted() {
+		return "" // nothing is shown while the sidebar option is off
+	}
+	if a.GetSyncMode() == "ondemand" {
+		if err := a.pinCloudRoots("", true); err != nil {
+			return err.Error()
+		}
+		return ""
+	}
+	if err := a.applySidebarEntries(); err != nil {
+		return err.Error()
+	}
+	return ""
+}

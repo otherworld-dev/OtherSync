@@ -184,6 +184,15 @@ export class AccountEntryDTO {
              */
             this["sidebarLabel"] = "";
         }
+        if (!("sidebarShown" in $$source)) {
+            /**
+             * SidebarShown is whether this account has an entry in the sidebar when
+             * the sidebar option is on (the user can hide one account's).
+             * @member
+             * @type {boolean}
+             */
+            this["sidebarShown"] = false;
+        }
 
         Object.assign(this, $$source);
     }
