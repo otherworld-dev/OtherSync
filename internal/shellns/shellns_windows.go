@@ -32,6 +32,7 @@
 package shellns
 
 import (
+	"crypto/sha1"
 	"encoding/base64"
 	"fmt"
 	"os"
@@ -51,8 +52,29 @@ import (
 	"github.com/otherworld/nimbo/internal/psquote"
 )
 
-// NavGUID identifies the Nimbo navigation-pane node (fixed for the app).
+// NavGUID identifies the app's original navigation-pane node. With several
+// accounts it stays with the first account, so that account's entry keeps its
+// place; every other account gets its own (EntryGUID).
 const NavGUID = "{B7A4C3E0-9D2F-4E18-A6C1-2F5E8B0D7A10}"
+
+// ownGUIDPrefix is shared by NavGUID and every EntryGUID, so the app's own
+// entries can be told apart from the nodes Windows makes for sync roots.
+const ownGUIDPrefix = "{B7A4C3E0-9D2F-4E18-"
+
+// EntryGUID is the navigation-pane node for one account's entry ("" = NavGUID).
+// It is derived from the account ID, so it is the same on every launch.
+func EntryGUID(accountID string) string {
+	if accountID == "" {
+		return NavGUID
+	}
+	h := sha1.Sum([]byte("othersync-sidebar:" + accountID))
+	return fmt.Sprintf("%s%X-%X}", ownGUIDPrefix, h[0:2], h[2:8])
+}
+
+// IsOwnGUID reports whether clsid is one of the app's own entries.
+func IsOwnGUID(clsid string) bool {
+	return len(clsid) == len(NavGUID) && strings.HasPrefix(strings.ToUpper(clsid), ownGUIDPrefix)
+}
 
 // delegateCLSID is shell32's generic folder-shortcut implementation.
 const delegateCLSID = "{0E5AAE11-A475-4c5b-AB00-C66DE400274E}"
@@ -62,6 +84,12 @@ const (
 	nameSpace  = `Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\` + NavGUID
 	hideDeskKy = `Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel`
 )
+
+func clsidKey(guid string) string { return `Software\Classes\CLSID\` + guid }
+
+func nameSpaceKey(guid string) string {
+	return `Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\` + guid
+}
 
 // Supported reports whether the sidebar entry can be configured here.
 func Supported() bool { return true }
@@ -107,6 +135,12 @@ type regVal struct {
 // desired returns every value that defines the sidebar entry, in write order.
 // Pure, so both write paths (direct and out-of-container) render the same thing.
 func desired(name, targetFolder, iconPath string) []regVal {
+	return desiredFor(NavGUID, name, targetFolder, iconPath)
+}
+
+// desiredFor is desired for the entry guid.
+func desiredFor(guid, name, targetFolder, iconPath string) []regVal {
+	clsidBase, nameSpace := clsidKey(guid), nameSpaceKey(guid)
 	return []regVal{
 		{clsidBase, "", kindSz, name, 0},
 		{clsidBase, "System.IsPinnedToNameSpaceTree", kindDword, "", 1},
@@ -121,7 +155,7 @@ func desired(name, targetFolder, iconPath string) []regVal {
 		{clsidBase + `\ShellFolder`, "FolderValueFlags", kindDword, "", 0x28},
 		// Pin into the navigation-pane tree and hide the matching Desktop icon.
 		{nameSpace, "", kindSz, name, 0},
-		{hideDeskKy, NavGUID, kindDword, "", 1},
+		{hideDeskKy, guid, kindDword, "", 1},
 	}
 }
 
@@ -135,10 +169,15 @@ func desired(name, targetFolder, iconPath string) []regVal {
 // once that task has run its script (a second or two), or with an error if it
 // did not run within outOfContainerTimeout.
 func Register(brandName, name, targetFolder, iconPath string) error {
+	return RegisterEntry(NavGUID, brandName, name, targetFolder, iconPath)
+}
+
+// RegisterEntry is Register for the entry guid (see EntryGUID).
+func RegisterEntry(guid, brandName, name, targetFolder, iconPath string) error {
 	if Packaged() {
-		return registerOutOfContainer(brandName, name, targetFolder, iconPath)
+		return registerOutOfContainer(guid, brandName, name, targetFolder, iconPath)
 	}
-	for _, v := range desired(name, targetFolder, iconPath) {
+	for _, v := range desiredFor(guid, name, targetFolder, iconPath) {
 		if err := write(v); err != nil {
 			return err
 		}
@@ -148,13 +187,16 @@ func Register(brandName, name, targetFolder, iconPath string) error {
 }
 
 // Unregister removes the sidebar node.
-func Unregister() error {
+func Unregister() error { return UnregisterEntry(NavGUID) }
+
+// UnregisterEntry removes the entry guid.
+func UnregisterEntry(guid string) error {
 	if Packaged() {
-		return runOutOfContainer("unregister", unregisterScript())
+		return runOutOfContainer("unregister", unregisterScriptFor(guid))
 	}
-	deleteTree(clsidBase)
-	deleteTree(nameSpace)
-	delValue(hideDeskKy, NavGUID)
+	deleteTree(clsidKey(guid))
+	deleteTree(nameSpaceKey(guid))
+	delValue(hideDeskKy, guid)
 	refresh()
 	return nil
 }
@@ -277,7 +319,7 @@ func stableIconPath(brandDir string) string {
 // the app can read its own copy but the task cannot (the app's path is
 // redirected into the package's LocalCache), and hard-coding that redirected
 // path would tie the icon to the current package family name.
-func registerOutOfContainer(brandName, name, targetFolder, iconPath string) error {
+func registerOutOfContainer(guid, brandName, name, targetFolder, iconPath string) error {
 	icon := stableIconPath(brandName)
 	if icon == "" {
 		icon = iconPath
@@ -286,7 +328,7 @@ func registerOutOfContainer(brandName, name, targetFolder, iconPath string) erro
 	if err != nil {
 		return fmt.Errorf("read sidebar icon: %w", err)
 	}
-	return runOutOfContainer("register", registerScript(desired(name, targetFolder, icon), icon, ico))
+	return runOutOfContainer("register", registerScript(desiredFor(guid, name, targetFolder, icon), icon, ico))
 }
 
 // registerScript renders the values as PowerShell. The icon bytes are written
@@ -325,15 +367,18 @@ func registerScript(vals []regVal, iconPath string, ico []byte) string {
 }
 
 // unregisterScript removes the entry from the real HKCU.
-func unregisterScript() string {
+func unregisterScript() string { return unregisterScriptFor(NavGUID) }
+
+// unregisterScriptFor is unregisterScript for the entry guid.
+func unregisterScriptFor(guid string) string {
 	var b strings.Builder
 	b.WriteString("$ErrorActionPreference = 'Continue'\r\n")
-	for _, k := range []string{clsidBase, nameSpace} {
+	for _, k := range []string{clsidKey(guid), nameSpaceKey(guid)} {
 		b.WriteString(fmt.Sprintf("Remove-Item -LiteralPath %s -Recurse -Force -ErrorAction SilentlyContinue\r\n",
 			psQuote(`HKCU:\`+k)))
 	}
 	b.WriteString(fmt.Sprintf("Remove-ItemProperty -LiteralPath %s -Name %s -Force -ErrorAction SilentlyContinue\r\n",
-		psQuote(`HKCU:\`+hideDeskKy), psQuote(NavGUID)))
+		psQuote(`HKCU:\`+hideDeskKy), psQuote(guid)))
 	b.WriteString(notifyShellPS)
 	return b.String()
 }
@@ -632,7 +677,7 @@ func refresh() {
 // --- sidebar entries left behind (GitHub #10) ---
 
 // NavNodes lists the sidebar folder entries in HKCU that carry an icon, other
-// than Nimbo's own entry (NavGUID). Windows creates one per registered sync
+// than the app's own entries (IsOwnGUID). Windows creates one per registered sync
 // root, and has been seen to leave them behind after the root itself is gone;
 // the caller decides which are its own by their icon. Reads are safe from
 // inside the MSIX container for keys the app never wrote, which these are
@@ -646,7 +691,7 @@ func NavNodes() []NavNode {
 	_ = k.Close()
 	var out []NavNode
 	for _, c := range names {
-		if strings.EqualFold(c, NavGUID) {
+		if IsOwnGUID(c) {
 			continue
 		}
 		bag, err := registry.OpenKey(registry.CURRENT_USER, `Software\Classes\CLSID\`+c+`\Instance\InitPropertyBag`, registry.QUERY_VALUE)

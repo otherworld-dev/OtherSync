@@ -4724,19 +4724,6 @@ func rememberSidebar(on bool, target string) {
 	})
 }
 
-// rememberSidebarEntry records that our own entry is on, pointing at target and
-// shown as name.
-func rememberSidebarEntry(target, name string) {
-	d, err := config.Resolve()
-	if err != nil {
-		return
-	}
-	on := true
-	_ = d.UpdateSettings(func(s *config.Settings) {
-		s.SidebarEnabled, s.SidebarTarget, s.SidebarName = &on, target, name
-	})
-}
-
 // SetSidebar shows or hides the Nimbo entry in the Explorer navigation pane.
 //
 // Which entry depends on the folder. A cloud sync root (on-demand mode, or a
@@ -4753,7 +4740,7 @@ func rememberSidebarEntry(target, name string) {
 func (a *App) SetSidebar(on bool) string {
 	target := a.baseDirOf(a.eng)
 	if a.GetSyncMode() == "ondemand" || cfapi.ShellSyncRootRegistered(target) {
-		if err := shellns.Unregister(); err != nil {
+		if err := a.removeSidebarEntries(); err != nil {
 			return err.Error()
 		}
 		node := cfapi.ShellSyncRootNamespaceCLSID(target)
@@ -4774,24 +4761,17 @@ func (a *App) SetSidebar(on bool) string {
 		return ""
 	}
 	if !on {
-		if err := shellns.Unregister(); err != nil {
+		if err := a.removeSidebarEntries(); err != nil {
 			return err.Error()
 		}
 		rememberSidebar(false, "")
 		return ""
 	}
-	if err := os.MkdirAll(target, 0o755); err != nil {
+	// Every account with a folder gets its own entry.
+	if err := a.applySidebarEntries(); err != nil {
 		return err.Error()
 	}
-	icon, err := navIconPath()
-	if err != nil {
-		return err.Error()
-	}
-	name := a.ownSidebarLabel()
-	if err := shellns.Register(sidebarIconFolder(), name, target, icon); err != nil {
-		return err.Error()
-	}
-	rememberSidebarEntry(target, name)
+	rememberSidebar(true, "")
 	return ""
 }
 
@@ -4841,7 +4821,7 @@ func (a *App) syncSidebar() {
 		// never retrying a removal that silently failed. The cost of getting it
 		// wrong that way is a permanent duplicate; the cost of retrying is one
 		// task run per launch (a second or two, waited for).
-		if err := shellns.Unregister(); err != nil {
+		if err := a.removeSidebarEntries(); err != nil {
 			slog.Warn("could not drop the duplicate navigation-pane entry", "err", err)
 			return // leave the record alone so the next launch retries
 		}
@@ -4858,20 +4838,11 @@ func (a *App) syncSidebar() {
 	if !a.sidebarWanted() {
 		return
 	}
-	name := a.ownSidebarLabel()
-	if recorded, applied, appliedName := sidebarChoice(); recorded != nil && applied == target && appliedName == name {
-		return // already applied for this folder, under this label
+	// One entry per account, each written only when it differs from the
+	// record (see applySidebarEntries).
+	if err := a.applySidebarEntries(); err != nil {
+		slog.Warn("sidebar entries not all applied", "err", err)
 	}
-	icon, err := navIconPath()
-	if err != nil {
-		slog.Warn("sidebar icon unavailable", "err", err)
-		return
-	}
-	if err := shellns.Register(sidebarIconFolder(), name, target, icon); err != nil {
-		slog.Warn("sidebar registration failed", "err", err)
-		return
-	}
-	rememberSidebarEntry(target, name)
 }
 
 // applyCloudRootChoice hides or shows the node Windows supplies for target's
@@ -5424,7 +5395,7 @@ func (a *App) SignOut(acct string, clearData bool) string {
 	}
 	// No account left: the live-mode sidebar entry has nothing to point at.
 	if !moreAccounts {
-		if err := shellns.Unregister(); err != nil {
+		if err := a.removeSidebarEntries(); err != nil {
 			slog.Warn("could not remove the sidebar entry after signing out", "err", err)
 		}
 	}
@@ -5852,6 +5823,7 @@ func (a *App) setupClosed() {
 	a.restoreSetupFolder(eng)
 	if a.GetSyncMode() != "ondemand" || eng.StoredBaseDir() != "" {
 		a.emit("setup:done")
+		go a.syncSidebar()
 		return
 	}
 	slog.Info("setup closed without choosing a folder; using the default", "account", eng.Account.LoginName)
@@ -5920,6 +5892,8 @@ func (a *App) CompleteSetup(localDir, mode string) string {
 	if msg == "" {
 		a.endSetup(id)
 		a.emit("setup:done")
+		// Its folder is chosen now, so it can have its sidebar entry.
+		go a.syncSidebar()
 	}
 	return msg
 }

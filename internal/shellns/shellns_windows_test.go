@@ -268,3 +268,39 @@ func TestRemoveNodesScriptRemovesEachEntry(t *testing.T) {
 		}
 	}
 }
+
+// Each account's entry has its own node, stable across launches, which the
+// leftover sweep recognises as ours (NavNodes skips it).
+func TestEntryGUID(t *testing.T) {
+	if EntryGUID("") != NavGUID {
+		t.Fatalf("empty account should map to NavGUID")
+	}
+	a, b := EntryGUID("6ff3224491225171"), EntryGUID("d6a805c7a9f0a8de")
+	if a == b || a == NavGUID {
+		t.Fatalf("accounts must get distinct entries: %s %s", a, b)
+	}
+	if a != EntryGUID("6ff3224491225171") {
+		t.Fatalf("EntryGUID not stable")
+	}
+	if len(a) != len(NavGUID) || a[len(a)-1] != '}' {
+		t.Fatalf("not GUID-shaped: %s", a)
+	}
+	for _, g := range []string{a, b, NavGUID, strings.ToLower(a)} {
+		if !IsOwnGUID(g) {
+			t.Errorf("%s should be ours", g)
+		}
+	}
+	if IsOwnGUID("{FAE6C166-B8D9-4EEB-912D-7D7609AE123F}") {
+		t.Errorf("a Windows sync-root node is not ours")
+	}
+	vals := desiredFor(a, "OtherSync - otherworld", `E:\Otherworld Dev`, `C:\ico\n.ico`)
+	if got := find(t, vals, clsidKey(a)+`\Instance\InitPropertyBag`, "TargetFolderPath"); got.s != `E:\Otherworld Dev` {
+		t.Errorf("target = %q", got.s)
+	}
+	if got := find(t, vals, hideDeskKy, a); got.d != 1 {
+		t.Errorf("desktop icon not hidden for the entry")
+	}
+	if s := unregisterScriptFor(a); !strings.Contains(s, clsidKey(a)) || strings.Contains(s, NavGUID) {
+		t.Errorf("unregister script must remove only its own entry")
+	}
+}

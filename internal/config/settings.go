@@ -7,6 +7,13 @@ import (
 	"path/filepath"
 )
 
+// SidebarEntry is one account's Explorer sidebar entry as last written.
+type SidebarEntry struct {
+	GUID   string `json:"guid"`
+	Target string `json:"target"`
+	Name   string `json:"name"`
+}
+
 // Settings holds global client preferences.
 type Settings struct {
 	// Bandwidth caps in KiB/s; 0 means unlimited.
@@ -128,6 +135,11 @@ type Settings struct {
 	// the account, so it changes with the shown account even when the folder
 	// does not, and an entry written before it carried the account has none.
 	SidebarName string `json:"sidebarName,omitempty"`
+	// SidebarEntries records each account's own live-mode entry by account ID:
+	// the node it was written under and the folder and label it was written
+	// with. Each account has an entry of its own; a single one followed the
+	// shown account, so adding an account took it from the first one.
+	SidebarEntries map[string]SidebarEntry `json:"sidebarEntries,omitempty"`
 	// ShellMenuOff: the user turned the classic Explorer right-click submenu
 	// off in Settings. Every launch registers the menu unless this is set, so
 	// without it the choice only lasted until the next start (Deck d951).

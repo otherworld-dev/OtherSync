@@ -49,15 +49,6 @@ func autoSidebarLabel(acc account.Account, all []account.Account) string {
 	return product + " - " + acc.LoginName
 }
 
-// ownSidebarLabel is the label for our own entry (live mode), which points at
-// the shown account's folder (GetBaseDir) and so is named after that account.
-func (a *App) ownSidebarLabel() string {
-	if a.eng == nil {
-		return brand.Current.Name
-	}
-	return sidebarLabelFor(a.eng.Account)
-}
-
 // sidebarLabelFor is sidebarLabel against the configured accounts. The
 // account is looked up again by ID because a running engine holds the record
 // it started with, and the user can rename the entry since then.
@@ -119,8 +110,7 @@ func (a *App) SetAccountSidebarName(id, name string) string {
 }
 
 // applySidebarLabel renames the account's entries now rather than at the next
-// start: each of its on-demand roots, and our own live-mode entry when it
-// points at this account's folder (it follows the shown account).
+// start: each of its on-demand roots, or its own live-mode entry.
 func (a *App) applySidebarLabel(id string) {
 	label := ""
 	if _, st, ok := accountsAndDirs(); ok {
@@ -142,8 +132,8 @@ func (a *App) applySidebarLabel(id string) {
 		}
 		slog.Info("renamed the folder's sidebar entry", "dir", dir, "name", label)
 	}
-	if a.eng != nil && a.eng.Account.ID == id && a.GetSyncMode() != "ondemand" {
-		a.syncSidebar() // rewrites our entry: its recorded name no longer matches
+	if a.GetSyncMode() != "ondemand" {
+		a.syncSidebar() // rewrites its entry: the recorded name no longer matches
 	}
 }
 

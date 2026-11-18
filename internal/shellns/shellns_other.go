@@ -20,6 +20,18 @@ func Register(string, string, string, string) error { return nil }
 // Unregister is a no-op on non-Windows platforms.
 func Unregister() error { return nil }
 
+// EntryGUID has no meaning off Windows.
+func EntryGUID(string) string { return "" }
+
+// IsOwnGUID never matches off Windows.
+func IsOwnGUID(string) bool { return false }
+
+// RegisterEntry is a no-op on non-Windows platforms.
+func RegisterEntry(string, string, string, string, string) error { return nil }
+
+// UnregisterEntry is a no-op on non-Windows platforms.
+func UnregisterEntry(string) error { return nil }
+
 // CloudRootPinned never finds a node off Windows.
 func CloudRootPinned(string) (pinned, exists bool) { return false, false }
 
