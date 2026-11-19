@@ -721,16 +721,16 @@ SHA-256: {localTest.fingerprint}</pre>
   .acct { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px;
           border: 1px solid var(--border); border-radius: 8px; background: var(--panel); margin-bottom: 16px; }
   .avatar { flex: 0 0 auto; width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-            background: var(--accent); color: #fff; font-size: 15px; font-weight: 700; }
+            background: var(--accent); color: var(--on-accent); font-size: 15px; font-weight: 700; }
   .acctinfo { display: flex; flex-direction: column; min-width: 0; flex: 1; }
   .acctinfo b { font-size: 14px; }
   .acctinfo span { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .acctinfo .acctline { color: var(--fg2); }
-  .acctinfo .acctline.warn { color: #b26a00; }
+  .acctinfo .acctline.warn { color: var(--warn); }
   .acctacts { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
   .ronote { margin: 0 0 12px; }
   .hint { color: var(--fg2); font-size: 12px; margin: 0 0 12px; }
-  .warnhint { color: #8a6d1a; background: #fff8e6; border: 1px solid #f5e3b0; border-radius: 6px; padding: 7px 9px; }
+  .warnhint { color: var(--warn); background: var(--warn-bg); border: 1px solid var(--warn-border); border-radius: 6px; padding: 7px 9px; }
   .fhint { color: var(--muted); font-size: 12px; margin: 0 0 6px; }
   .navname { margin-top: 18px; }
   .dmuted { color: var(--muted); }
@@ -743,7 +743,7 @@ SHA-256: {localTest.fingerprint}</pre>
   .everything .etop { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .everything .etitle { font-size: 14.5px; font-weight: 700; }
   .everything .ebadge { flex: 0 0 auto; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
-                        background: var(--accent); color: #fff; border-radius: 999px; padding: 2px 8px; }
+                        background: var(--accent); color: var(--on-accent); border-radius: 999px; padding: 2px 8px; }
   .everything .ehint { font-size: 12px; color: var(--fg2); }
   .orsep { text-align: center; color: var(--muted); font-size: 12px; margin: 12px 0; }
   .crumb { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; color: var(--fg2); font-size: 13px; }
@@ -761,8 +761,8 @@ SHA-256: {localTest.fingerprint}</pre>
   .applysum .dmuted { font-size: 12px; }
   .applybtns { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; margin-left: auto; }
   .applybtns .primary:disabled { opacity: .45; cursor: not-allowed; }
-  .addbtns button.danger { color: #c0392b; }
-  .merrs { margin-top: 10px; padding: 8px 10px; border: 1px solid #e6b3ad; background: #fdf3f2; color: #7a2f26;
+  .addbtns button.danger { color: var(--danger); }
+  .merrs { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--danger-border); background: var(--danger-bg); color: var(--danger);
            border-radius: 8px; font-size: 12.5px; overflow-wrap: anywhere; }
   .merrs ul { margin: 4px 0 0; padding-left: 18px; }
   .merrhead { font-weight: 600; }
@@ -779,20 +779,20 @@ SHA-256: {localTest.fingerprint}</pre>
   .connmain .arrow { color: var(--muted); }
   .connmain .local { color: var(--fg2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .connacts { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
-  .saved { color: #2e9e5b; font-size: 12px; font-weight: 600; align-self: center; animation: savedfade 1.5s forwards; }
+  .saved { color: var(--ok); font-size: 12px; font-weight: 600; align-self: center; animation: savedfade 1.5s forwards; }
   .managed { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
   @keyframes savedfade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
-  .danger { color: #c0392b; }
-  .freeze { border: 1px solid #e6b3ad; background: #fdf3f2; color: #7a2f26; border-radius: 8px;
+  .danger { color: var(--danger); }
+  .freeze { border: 1px solid var(--danger-border); background: var(--danger-bg); color: var(--danger); border-radius: 8px;
             padding: 10px 12px; margin-bottom: 6px; font-size: 12.5px; }
   .freezehead { font-weight: 600; margin-bottom: 4px; }
   .freeze p { margin: 0 0 6px; }
   .freezewhy { font-weight: 600; }
   .freezelist { margin: 0 0 8px; padding-left: 18px; max-height: 96px; overflow-y: auto; }
   .freezelist li { font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
-  .modalback { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex;
+  .modalback { position: fixed; inset: 0; background: var(--scrim); display: flex;
                align-items: center; justify-content: center; z-index: 50; }
-  .modalbox { max-width: 360px; width: 90%; margin: 0; box-shadow: 0 10px 40px rgba(0,0,0,.4); }
+  .modalbox { max-width: 360px; width: 90%; margin: 0; box-shadow: 0 10px 40px var(--shadow); }
   .addpanel { border: 1px solid var(--border); background: var(--panel); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
   .addhead { font-size: 13px; margin-bottom: 8px; }
   .addrow2 { display: flex; gap: 8px; }
@@ -801,14 +801,14 @@ SHA-256: {localTest.fingerprint}</pre>
   .addbtns { display: flex; gap: 8px; margin-top: 10px; }
   .addbtns .primary { padding: 7px 14px; }
   .addbtns button:not(.primary) { padding: 7px 12px; border: 1px solid var(--border-2); border-radius: 6px; background: var(--bg); color: var(--fg); cursor: pointer; }
-  .err { color: #e06b6b; font-size: 12px; margin: 8px 0 0; white-space: pre-wrap; font-family: inherit; }
+  .err { color: var(--danger); font-size: 12px; margin: 8px 0 0; white-space: pre-wrap; font-family: inherit; }
   .frow { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; }
   .name { background: none; border: none; cursor: pointer; font-size: 13px; color: var(--fg); text-align: left; flex: 1; min-width: 0;
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .name:hover { color: var(--accent); }
   .name.file { cursor: default; color: var(--fg2); }
-  .tag { font-size: 12px; color: #2e7d32; white-space: nowrap; flex: 0 0 auto; }
-  .tag.moving { color: #b26a00; }
+  .tag { font-size: 12px; color: var(--ok); white-space: nowrap; flex: 0 0 auto; }
+  .tag.moving { color: var(--warn); }
   .selbox { flex: 0 0 auto; margin: 0; }
   .selspace { flex: 0 0 auto; width: 13px; }
   .addbar { display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -827,7 +827,7 @@ SHA-256: {localTest.fingerprint}</pre>
   .field input { padding: 7px 8px; border: 1px solid var(--border-2); border-radius: 5px; background: var(--bg); color: var(--fg); }
   .check { display: flex; gap: 8px; align-items: center; font-size: 13px; margin-bottom: 12px; }
   button { font-size: 13px; }
-  .primary { padding: 8px 14px; border: none; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
+  .primary { padding: 8px 14px; border: none; border-radius: 6px; background: var(--accent); color: var(--on-accent); cursor: pointer; }
   .primary:hover { background: var(--accent-dark); }
   .primary.small { padding: 6px 12px; font-size: 12.5px; }
   .link { background: none; border: none; color: var(--accent); cursor: pointer; }
@@ -840,8 +840,8 @@ SHA-256: {localTest.fingerprint}</pre>
   .localroute .baserow button.small:disabled { opacity: .45; cursor: not-allowed; }
   .cert { font-size: 11px; white-space: pre-wrap; word-break: break-all; border: 1px solid var(--border-2); border-radius: 5px; background: var(--bg); color: var(--fg); padding: 6px 8px; margin: 4px 0; font-family: ui-monospace, Consolas, monospace; }
   .signout { flex: 0 0 auto; padding: 7px 14px; border: 1px solid var(--border-2); border-radius: 6px;
-             background: var(--bg); color: #c0392b; cursor: pointer; font-size: 13px; }
-  .signout:hover { background: #fdeceb; }
+             background: var(--bg); color: var(--danger); cursor: pointer; font-size: 13px; }
+  .signout:hover { background: var(--danger-bg); }
   .signoutbox { margin: 8px 0 12px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
   .signoutbox .addbtns { margin-top: 8px; }
 </style>

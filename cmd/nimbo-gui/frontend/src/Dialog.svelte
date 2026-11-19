@@ -53,11 +53,11 @@
 {/if}
 
 <style>
-  .dlgback { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex;
+  .dlgback { position: fixed; inset: 0; background: var(--scrim); display: flex;
              align-items: center; justify-content: center; z-index: 1000; }
   .dlgbox { width: 90%; max-width: 380px; max-height: 90%; overflow-y: auto; padding: 16px;
             background: var(--bg); color: var(--fg); border: 1px solid var(--border);
-            border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,.4); }
+            border-radius: 8px; box-shadow: 0 10px 40px var(--shadow); }
   h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
   .dlgmsg { margin: 0 0 12px; font-size: 12.5px; line-height: 1.45; color: var(--fg2);
             white-space: pre-line; overflow-wrap: anywhere; }
@@ -68,9 +68,9 @@
   .dlgbtns button { padding: 6px 14px; border: 1px solid var(--border-2); border-radius: 6px;
                     background: var(--panel-2); color: var(--fg); cursor: pointer; font-size: 12.5px; }
   .dlgbtns button:hover { background: var(--hover); }
-  .dlgbtns button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .dlgbtns button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
   .dlgbtns button.primary:hover { background: var(--accent-dark); }
-  .dlgbtns button.primary.danger { background: #c0392b; border-color: #c0392b; }
-  .dlgbtns button.primary.danger:hover { background: #a93226; }
+  .dlgbtns button.primary.danger { background: var(--danger-fill); border-color: var(--danger-fill); color: var(--on-danger); }
+  .dlgbtns button.primary.danger:hover { background: var(--danger-dark); }
   .dlgbtns button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 </style>

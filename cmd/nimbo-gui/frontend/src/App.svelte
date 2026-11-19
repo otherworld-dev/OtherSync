@@ -48,35 +48,68 @@
   }
   fetchNcAppearance();
 
-  // Accent the UI with the user's Nextcloud theme colour (every window applies it).
+  // Accent colour. By default the windows wear the product's own accent: the
+  // stylesheet's valley green pair for the stock brand, or a partner brand's
+  // accentHex. Settings > Appearance can switch to the Nextcloud server's theme
+  // colour instead ("server"), which is what every window did before the
+  // valley-green rebrand.
+  const STOCK_ACCENT = "#5fa05b";
+  let accentSource = "brand";
+  let brandAccent = "";  // the build's accentHex ("" until App.Brand answers)
+  let serverAccent = ""; // the Nextcloud theme colour ("" until known)
+  const isHex = (h: string) => /^#[0-9a-fA-F]{6}$/.test(h || "");
   function darken(hex: string, f: number): string {
     const m = hex.replace("#", "");
     if (m.length !== 6) return hex;
     const c = [0, 2, 4].map(i => Math.max(0, Math.round(parseInt(m.slice(i, i + 2), 16) * f)));
     return "#" + c.map(x => x.toString(16).padStart(2, "0")).join("");
   }
-  function applyAccent(hex: string) {
+  // onAccent is whichever of white and slate reads better on the accent.
+  function onAccent(hex: string): string {
+    const lin = (v: number) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    const m = hex.replace("#", "");
+    const [r, g, b] = [0, 2, 4].map(i => lin(parseInt(m.slice(i, i + 2), 16)));
+    const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    const slate = 0.0189; // relative luminance of #23262B
+    return 1.05 / (l + 0.05) >= (l + 0.05) / (slate + 0.05) ? "#FFFFFF" : "#23262B";
+  }
+  function applyAccent() {
     const root = document.documentElement;
-    if (hex && /^#[0-9a-fA-F]{6}$/.test(hex)) {
+    let hex = "";
+    if (accentSource === "server" && isHex(serverAccent)) hex = serverAccent;
+    else if (isHex(brandAccent) && brandAccent.toLowerCase() !== STOCK_ACCENT) hex = brandAccent;
+    if (hex) {
       root.style.setProperty("--accent", hex);
       root.style.setProperty("--accent-dark", darken(hex, 0.88));
+      root.style.setProperty("--on-accent", onAccent(hex));
     } else {
-      root.style.removeProperty("--accent"); // stylesheet default
+      // The stylesheet's own light/dark pair.
+      root.style.removeProperty("--accent");
       root.style.removeProperty("--accent-dark");
+      root.style.removeProperty("--on-accent");
     }
   }
-  // The engine pushes the theme when it starts (this window may load long before
-  // that — on a fresh install the flyout exists while the user is still signing
-  // in, and on an account switch the colour changes). Re-read the appearance too.
-  Events.On("accent", (e: any) => { applyAccent(e.data || ""); fetchNcAppearance(); });
+  App.Brand()
+    .then((b: any) => { brandAccent = b?.accentHex || ""; applyAccent(); })
+    .catch(() => { /* stock accent */ });
+  App.GetAccentSource()
+    .then((s: string) => { accentSource = s || "brand"; applyAccent(); })
+    .catch(() => { /* brand */ });
+  Events.On("accentSource", (e: any) => { accentSource = e.data || "brand"; applyAccent(); });
+  // The engine pushes the server theme when it starts (this window may load
+  // long before that: on a fresh install the flyout exists while the user is
+  // still signing in, and on an account switch the colour changes). Re-read
+  // the appearance too.
+  Events.On("accent", (e: any) => { serverAccent = e.data || ""; applyAccent(); fetchNcAppearance(); });
   (async () => {
     // The engine (which fetches the theme) may not be ready at window load, so
     // retry briefly until a colour is available.
     for (let i = 0; i < 12; i++) {
       try {
         const hex = await App.ThemeColor();
-        if (hex && /^#[0-9a-fA-F]{6}$/.test(hex)) {
-          applyAccent(hex);
+        if (isHex(hex)) {
+          serverAccent = hex;
+          applyAccent();
           return;
         }
       } catch { /* default accent */ }

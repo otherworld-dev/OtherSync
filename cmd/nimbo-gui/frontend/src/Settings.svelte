@@ -227,6 +227,9 @@
   let theme = $state("system");
   (async () => { theme = await App.GetTheme(); })();
   function saveTheme() { App.SetTheme(theme); }
+  let accentSource = $state("brand");
+  (async () => { accentSource = await App.GetAccentSource(); })();
+  function saveAccentSource() { App.SetAccentSource(accentSource); }
 
   let onDemandSupported = $state(false);
   let syncMode = $state("live");
@@ -802,6 +805,13 @@
           <option value="dark">Dark</option>
         </select>
       </div>
+      <div class="field">
+        <label>Accent colour</label>
+        <select bind:value={accentSource} onchange={saveAccentSource}>
+          <option value="brand">{brandName} colour</option>
+          <option value="server">Match Nextcloud theme colour</option>
+        </select>
+      </div>
       <label class="check"><input type="checkbox" checked={notifyOn} onchange={toggleNotify} /> Show desktop notifications</label>
 
       <h3>System integration</h3>
@@ -889,7 +899,7 @@
       {:else}
         <p class="fhint">
           {brandName} is <b>free for personal use</b>. A business licence unlocks central deployment policy and white-label branding for organisations — <button class="link" onclick={() => App.OpenURL(brandWebsite + "/business.html")}>about business licensing</button>.
-          {#if lic.hasLicence && lic.err}<br /><span style="color:#c0392b">Installed licence: {lic.err}.</span>{/if}
+          {#if lic.hasLicence && lic.err}<br /><span style="color:var(--danger)">Installed licence: {lic.err}.</span>{/if}
         </p>
         <div class="addrow">
           <input placeholder="NIMBO-LIC-1.…" bind:value={licInput} onkeydown={(e) => e.key === "Enter" && activateLicence()} />
@@ -1042,10 +1052,10 @@
   .srow .ico { flex: 0 0 auto; width: 26px; display: flex; justify-content: center; color: var(--fg2); }
   .srow.sel .ico { color: var(--accent); }
   .av { position: relative; flex: 0 0 auto; width: 26px; height: 26px; border-radius: 50%; display: flex;
-        align-items: center; justify-content: center; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; }
+        align-items: center; justify-content: center; background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 700; }
   .dot { position: absolute; right: -2px; bottom: -2px; width: 9px; height: 9px; border-radius: 50%;
-         background: #2e9e44; border: 2px solid var(--panel); }
-  .dot.warn { background: #d08b00; }
+         background: var(--ok-fill); border: 2px solid var(--panel); }
+  .dot.warn { background: var(--warn); }
   .who { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
   .who .user, .who .host { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .who .host { font-size: 11px; font-weight: 400; color: var(--muted); }
@@ -1058,17 +1068,17 @@
   .seg { display: inline-flex; border: 1px solid var(--border-2); border-radius: 8px; overflow: hidden; }
   .seg button { padding: 6px 12px; border: none; border-left: 1px solid var(--border-2); background: var(--bg); color: var(--fg); cursor: pointer; font-size: 12px; }
   .seg button:first-child { border-left: none; }
-  .seg button.sel { background: var(--accent); color: #fff; }
+  .seg button.sel { background: var(--accent); color: var(--on-accent); }
   .seg button:not(.sel):hover { background: var(--hover); }
   .fhint { color: var(--muted); font-size: 12px; margin: 0 0 6px; }
-  .fhint code { font-size: 11px; background: var(--bg2, rgba(127,127,127,.12)); padding: 0 3px; border-radius: 3px; }
+  .fhint code { font-size: 11px; background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 0 3px; border-radius: 3px; }
   .flabel { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 4px; }
   .dhealth { font-size: 13px; font-weight: 600; margin: 16px 0 6px; }
   .diaggrid { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 12px; margin-bottom: 6px; }
   .dk { color: var(--muted); white-space: nowrap; }
   .dv { color: var(--fg); word-break: break-word; }
-  .dok { color: #2e9e44; }
-  .dbad { color: #d08b00; }
+  .dok { color: var(--ok); }
+  .dbad { color: var(--warn); }
   /* Flyout section reorder list */
   .seclist { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
   .secrow { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border-2);
@@ -1085,7 +1095,7 @@
   .builtins summary { cursor: pointer; color: var(--fg2); font-size: 12.5px; }
   .builtins .binfo { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
   .builtins .binfo code { font-size: 11px; background: var(--panel-2); border: 1px solid var(--border-2); border-radius: 4px; padding: 1px 5px; }
-  .addbtns button.danger { color: #c0392b; }
+  .addbtns button.danger { color: var(--danger); }
   h3 { font-size: 12px; text-transform: uppercase; color: var(--muted); margin: 18px 0 8px; }
   h3:first-of-type { margin-top: 0; }
   /* Section header: heading left, action (Add folder / Back / Done) right, with
@@ -1093,7 +1103,7 @@
   .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 18px 0 12px; }
   .row:first-child { margin-top: 0; }
   .row h3 { margin: 0; }
-  .saved { color: #2e9e5b; font-size: 12px; font-weight: 600; align-self: center; animation: savedfade 1.5s forwards; }
+  .saved { color: var(--ok); font-size: 12px; font-weight: 600; align-self: center; animation: savedfade 1.5s forwards; }
   .managed { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
   .mgbanner { background: color-mix(in srgb, var(--accent) 12%, var(--panel)); border: 1px solid var(--accent);
               border-radius: 8px; padding: 8px 12px; font-size: 13px; color: var(--fg); margin-bottom: 14px; }
@@ -1105,11 +1115,11 @@
                background: var(--bg); color: var(--fg); cursor: pointer; font-size: 12px; }
   .aboutco { color: var(--muted); font-size: 12px; margin: 10px 0 0; }
   .aboutco .link { font-size: 12px; }
-  .danger { color: #c0392b; }
-  .hint code { font-size: 11px; background: var(--bg2, rgba(127,127,127,.12)); padding: 0 3px; border-radius: 3px; }
-  .modalback { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex;
+  .danger { color: var(--danger); }
+  .hint code { font-size: 11px; background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 0 3px; border-radius: 3px; }
+  .modalback { position: fixed; inset: 0; background: var(--scrim); display: flex;
                align-items: center; justify-content: center; z-index: 50; }
-  .modalbox { max-width: 360px; width: 90%; margin: 0; box-shadow: 0 10px 40px rgba(0,0,0,.4); }
+  .modalbox { max-width: 360px; width: 90%; margin: 0; box-shadow: 0 10px 40px var(--shadow); }
   .addpanel { border: 1px solid var(--border); background: var(--panel); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
   .addhead { font-size: 13px; margin-bottom: 8px; }
   .addbtns { display: flex; gap: 8px; margin-top: 10px; }
@@ -1126,7 +1136,7 @@
   .check { display: flex; gap: 8px; align-items: center; font-size: 13px; margin-bottom: 12px; }
   .possel { padding: 7px 8px; border: 1px solid var(--border-2); border-radius: 5px; font-size: 13px; max-width: 200px; background: var(--bg); color: var(--fg); }
   button { font-size: 13px; }
-  .primary { padding: 8px 14px; border: none; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
+  .primary { padding: 8px 14px; border: none; border-radius: 6px; background: var(--accent); color: var(--on-accent); cursor: pointer; }
   .primary:hover { background: var(--accent-dark); }
   .primary.small { padding: 6px 12px; font-size: 12.5px; }
   .link { background: none; border: none; color: var(--accent); cursor: pointer; }

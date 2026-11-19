@@ -65,6 +65,9 @@ type Settings struct {
 	ConflictPolicy string `json:"conflictPolicy"`
 	// Theme: "system" (default), "light", or "dark".
 	Theme string `json:"theme"`
+	// AccentSource picks the windows' accent colour: "brand" (default: the
+	// product's own accent) or "server" (the Nextcloud server's theme colour).
+	AccentSource string `json:"accentSource,omitempty"`
 	// SyncMode: "live" (default; real files, full two-way sync) or "ondemand"
 	// (experimental; online-only placeholders that download when opened).
 	SyncMode string `json:"syncMode"`

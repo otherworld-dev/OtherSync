@@ -615,15 +615,15 @@
   .tool:hover, .tool.on { background: var(--tint); border-color: var(--accent); color: var(--accent); }
   .tool.notif { position: relative; }
   .badge { position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px; padding: 0 3px;
-           border-radius: 8px; background: #d63939; color: #fff; font-size: 10px; font-weight: 700;
+           border-radius: 8px; background: var(--danger-fill); color: var(--on-danger); font-size: 10px; font-weight: 700;
            line-height: 16px; text-align: center; box-sizing: border-box; }
   /* Primary action (Sync now) is filled with the user's Nextcloud theme colour. */
-  .tool.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .tool.primary:hover { background: var(--accent-dark); border-color: var(--accent-dark); color: #fff; }
-  .presence.online { background: #2fb344; }
-  .presence.away { background: #f0a020; }
-  .presence.dnd { background: #d63939; }
-  .presence.invisible, .presence.offline { background: #b0b0b0; }
+  .tool.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .tool.primary:hover { background: var(--accent-dark); border-color: var(--accent-dark); color: var(--on-accent); }
+  .presence.online { background: var(--ok-fill); }
+  .presence.away { background: var(--warn); }
+  .presence.dnd { background: var(--danger-fill); }
+  .presence.invisible, .presence.offline { background: var(--muted); }
   .acctmenu { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
   .acctlist { display: flex; flex-direction: column; gap: 4px; }
   .statusedit { padding: 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
@@ -643,9 +643,9 @@
   .stxt .sof { margin: 0 4px; }        /* spacing around "of" / "used" */
   .sbar { flex: 1; min-width: 24px; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
   .sfill { height: 100%; background: var(--accent); border-radius: 2px; transition: width .3s; }
-  .sfill.full { background: #d63939; }
+  .sfill.full { background: var(--danger-fill); }
   .spct { flex: 0 0 auto; font-size: 11px; font-weight: 600; color: var(--muted); }
-  .spct.full { color: #d63939; }
+  .spct.full { color: var(--danger); }
   /* The one status line: round state icon, main line, quieter second line, a
      3px bar when progress is measurable. No boxes or chips; amber matches the
      tray warning. */
@@ -654,15 +654,15 @@
              border: none; border-radius: 8px; background: none; color: var(--fg); text-align: left; cursor: pointer; }
   .nowline:hover { background: var(--hover); }
   .nicon { flex: 0 0 auto; width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center;
-           justify-content: center; font-size: 12px; line-height: 1; background: rgba(46, 125, 50, .15); color: #2e7d32; }
+           justify-content: center; font-size: 12px; line-height: 1; background: color-mix(in srgb, var(--ok-fill) 18%, transparent); color: var(--ok); }
   .nowline.busy .nicon { background: var(--tint); color: var(--accent); }
-  .nowline.attention .nicon { background: rgba(232, 138, 0, .16); color: #E88A00; font-weight: 700; font-size: 14px; }
+  .nowline.attention .nicon { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); font-weight: 700; font-size: 14px; }
   .nowline.paused .nicon, .nowline.offline .nicon { background: var(--hover); color: var(--fg2); }
   .nowline.paused .nicon { font-size: 9px; letter-spacing: -1px; }
   .nicon.spinning { animation: spin 1.6s linear infinite; }
   .nbody { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .nmain { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .nowline.attention .nmain { color: #E88A00; font-weight: 600; }
+  .nowline.attention .nmain { color: var(--warn); font-weight: 600; }
   .nsub { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .nbar { display: block; height: 3px; margin-top: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
   .nfill { display: block; height: 100%; background: var(--accent); border-radius: 2px; transition: width .25s; }
@@ -673,8 +673,8 @@
                       background: var(--bg); color: var(--fg); cursor: pointer; font-size: 12px; white-space: nowrap; }
   .pausemenu button:hover { background: var(--tint); border-color: var(--accent); }
   .moremenu button { flex: 1 1 45%; }
-  .moremenu .quit { color: #c0392b; }
-  .moremenu .quit:hover { background: #fdeceb; border-color: #f0c0bb; }
+  .moremenu .quit { color: var(--danger); }
+  .moremenu .quit:hover { background: var(--danger-bg); border-color: var(--danger-border); }
   /* Account rows in the ⋯ menu: full-width, name left + live status right. */
   /* A status too long to sit beside the name wraps onto its own line below it. */
   .moremenu .acctitem, .acctmenu .acctitem { flex: 1 1 100%; min-width: 0; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 8px; text-align: left; }
@@ -683,10 +683,10 @@
   .acctmenu .acctitem:hover { background: var(--tint); border-color: var(--accent); }
   .acctitem.cur { font-weight: 600; cursor: default; }
   .acctmain { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .accthost { color: var(--muted, #888); font-weight: 400; }
-  .acctstat { color: var(--muted, #888); font-size: 11px; min-width: 0; overflow-wrap: anywhere; }
-  .accterror { margin-top: 8px; padding: 6px 10px; border: 1px solid #e6b8b2; border-radius: 6px;
-               color: #c0392b; font-size: 12px; }
+  .accthost { color: var(--muted); font-weight: 400; }
+  .acctstat { color: var(--muted); font-size: 11px; min-width: 0; overflow-wrap: anywhere; }
+  .accterror { margin-top: 8px; padding: 6px 10px; border: 1px solid var(--danger-border); border-radius: 6px;
+               color: var(--danger); font-size: 12px; }
   .search { padding: 8px 16px 4px; position: relative; }
   .searchbar { display: flex; align-items: center; gap: 7px; padding: 6px 9px; background: var(--panel-2);
                border: 1px solid var(--border-2); border-radius: 8px; }
@@ -725,12 +725,12 @@
   /* One line per item: a plain symbol, the name (ellipsis), the time. */
   .aicon { flex: 0 0 auto; width: 16px; text-align: center; font-size: 12px; color: var(--fg2); }
   .aicon.download { color: var(--accent); }
-  .aicon.upload { color: #2e7d32; }
-  .aicon.conflict { color: #c0392b; }
+  .aicon.upload { color: var(--ok); }
+  .aicon.conflict { color: var(--danger); }
   .apath { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .atime { flex: 0 0 auto; font-size: 11px; color: var(--muted); }
-  .act.err .apath { color: #e06b6b; }
-  .act.err .atime { color: #e06b6b; }
+  .act.err .apath { color: var(--danger); }
+  .act.err .atime { color: var(--danger); }
   .ic { flex: 0 0 auto; width: 22px; height: 22px; border-radius: 6px; background: var(--accent);
         display: inline-flex; align-items: center; justify-content: center; font-size: 13px; }
   .ic img { width: 14px; height: 14px; filter: brightness(0) invert(1); }
@@ -785,7 +785,7 @@
   .signin h3 { margin: 0; font-size: 16px; color: var(--fg); }
   .signin p { margin: 0 0 6px; font-size: 13px; line-height: 1.45; color: var(--fg2); }
   .signbtn { min-width: 140px; padding: 8px 18px; border: 1px solid var(--accent); border-radius: 8px;
-             background: var(--accent); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
+             background: var(--accent); color: var(--on-accent); font-size: 13px; font-weight: 600; cursor: pointer; }
   .signbtn:hover { background: var(--accent-dark); border-color: var(--accent-dark); }
   .signupd { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); width: 100%;
              display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }

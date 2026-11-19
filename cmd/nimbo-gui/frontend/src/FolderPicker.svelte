@@ -166,8 +166,8 @@
   .ficon { color: var(--accent); display: inline-flex; }
   .tlabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .chg { flex: 0 0 auto; font-size: 11.5px; white-space: nowrap; }
-  .chg.stops { color: #b26a00; }
-  .chg.starts { color: #2e7d32; }
+  .chg.stops { color: var(--warn); }
+  .chg.starts { color: var(--ok); }
   .chg.inside { color: var(--muted); }
   .size { flex: 0 0 auto; min-width: 52px; text-align: right; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .note { margin: 0; padding: 4px 10px; font-size: 12px; color: var(--muted); }

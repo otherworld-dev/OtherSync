@@ -116,7 +116,7 @@
            display: flex; flex-direction: column; gap: 12px; }
   h1 { font-size: 17px; margin: 0; }
   input { padding: 9px 10px; border: 1px solid var(--border-2); border-radius: 6px; font-size: 13px; background: var(--bg); color: var(--fg); }
-  button.primary { padding: 9px; border: none; border-radius: 6px; background: var(--accent); color: #fff;
+  button.primary { padding: 9px; border: none; border-radius: 6px; background: var(--accent); color: var(--on-accent);
                    font-size: 13px; font-weight: 500; cursor: pointer; }
   button.primary:hover { background: var(--accent-dark); }
   button.secondary { padding: 8px; border: 1px solid var(--border-2); border-radius: 6px; background: transparent;
