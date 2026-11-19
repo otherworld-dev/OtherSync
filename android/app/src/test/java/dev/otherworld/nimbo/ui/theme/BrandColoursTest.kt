@@ -33,11 +33,11 @@ class BrandColoursTest {
     private val schemes: Map<String, ColorScheme> = mapOf("light" to LightColors, "dark" to DarkColors)
 
     @Test
-    fun `the accent is OtherSync teal`() {
-        assertEquals(Color(0xFF22D3C4), BrandTeal)
-        assertEquals(Color(0xFF0D9488), BrandDeepTeal)
-        assertEquals(BrandDeepTeal, LightColors.primary)
-        assertEquals(BrandTeal, DarkColors.primary)
+    fun `the accent is OtherSync valley green`() {
+        assertEquals(Color(0xFF5FA05B), BrandGreen)
+        assertEquals(Color(0xFF2F6B3A), BrandDeepGreen)
+        assertEquals(BrandDeepGreen, LightColors.primary)
+        assertEquals(BrandGreen, DarkColors.primary)
     }
 
     @Test
@@ -47,6 +47,11 @@ class BrandColoursTest {
                 "onPrimary" to (s.primary to s.onPrimary),
                 "onPrimaryContainer" to (s.primaryContainer to s.onPrimaryContainer),
                 "onSecondaryContainer" to (s.secondaryContainer to s.onSecondaryContainer),
+                "onTertiaryContainer" to (s.tertiaryContainer to s.onTertiaryContainer),
+                "onError" to (s.error to s.onError),
+                "onErrorContainer" to (s.errorContainer to s.onErrorContainer),
+                "onSurface" to (s.surface to s.onSurface),
+                "onSurfaceVariant" to (s.surfaceVariant to s.onSurfaceVariant),
             )
             for ((role, pair) in pairs) {
                 val ratio = contrast(pair.first, pair.second)
