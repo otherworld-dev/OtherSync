@@ -119,7 +119,7 @@ var icoSizes = []int{16, 20, 24, 32, 40, 48, 64, 256}
 
 // stockAccent is OtherSync's own brand accent: a build using it draws the
 // family mark. Any other accent is a white-label partner and gets the nimbus.
-const stockAccent = "#22D3C4"
+const stockAccent = "#5FA05B"
 
 // legacyNimboAccent is Nimbo's old indigo, which still maps to the exact
 // hand-tuned gold-on-indigo nimbus (so -accent "#5856E0" reproduces it).

@@ -1,6 +1,6 @@
 // Android output for the stock brand: the OtherSync family mark.
 //
-// The adaptive icon is the mark split into its two layers: the night tile's
+// The adaptive icon is the mark split into its two layers: the slate tile's
 // radial gradient full-bleed in the background, and the ring, glow, sync
 // glyph and centre point in the foreground. The geometry is brandmark's own
 // (GeometryFor), drawn in the 512-unit design space inside one <group> that
@@ -18,17 +18,16 @@ import (
 	"github.com/otherworld/nimbo/internal/brandmark"
 )
 
-// The sheet's night gradient (brandmark keeps its own copy unexported).
+// The sheet's tile gradient.
 var (
-	nightCentre = color.RGBA{0x12, 0x20, 0x2B, 0xff}
-	nightEdge   = color.RGBA{0x0A, 0x0F, 0x16, 0xff}
+	tileCentre = brandmark.TileCentre()
+	tileEdge   = brandmark.TileEdge()
 )
 
 // ringSafeFill is how much of the 66dp safe zone the ring's outer edge spans.
-// The master's ring spans 376 of the 512 tile (73%); 80% of the safe zone is
-// 52.8dp, which is 73% of the 72dp a launcher shows, so the phone icon keeps
-// the desktop tile's proportions.
-const ringSafeFill = 0.80
+// The sheet's Android export (Exports/othersync/android) runs the ring's outer
+// edge right to the safe zone.
+const ringSafeFill = 1.0
 
 // markScale is dp per design unit for the launcher layers.
 func markScale(g brandmark.Geometry) float64 {
@@ -44,11 +43,11 @@ type markPalette struct {
 	ring, glyph, dot     color.RGBA
 }
 
-// stockPalette is the sheet's own colours: night tile, teal ring.
+// stockPalette is the sheet's own colours: slate tile, valley-green ring.
 var stockPalette = markPalette{
-	label:      "night",
-	tileCentre: nightCentre, tileEdge: nightEdge,
-	ring: brandmark.Teal, glyph: brandmark.Paper, dot: brandmark.Glow,
+	label:      "slate",
+	tileCentre: tileCentre, tileEdge: tileEdge,
+	ring: brandmark.Ring, glyph: brandmark.Chalk, dot: brandmark.Dot,
 }
 
 // markVariants are the supporter launcher icons (Android activity-aliases
@@ -102,7 +101,7 @@ const markHeader = `<?xml version="1.0" encoding="utf-8"?>
      %s -->
 `
 
-// markBackgroundVector is the night tile's radial gradient, full-bleed: the
+// markBackgroundVector is the slate tile's radial gradient, full-bleed: the
 // launcher applies its own mask. The gradient sits where it sits on the
 // desktop tile (centre 50%/42%, radius 65% of the tile), with the tile laid
 // over the foreground's scale.
