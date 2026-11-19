@@ -116,7 +116,7 @@ func stockBrand() Brand {
 		HelpURL:   "https://www.othersync.com/help/",
 		FeedURL:   "https://github.com/otherworld-dev/OtherSync/releases/latest/download/OtherSync.appinstaller",
 		APIBase:   "https://api.github.com/repos/otherworld-dev/OtherSync",
-		AccentHex: "#22D3C4", AppID: "Nimbo",
+		AccentHex: "#5FA05B", AppID: "Nimbo",
 	}
 }
 

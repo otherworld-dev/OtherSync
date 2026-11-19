@@ -47,7 +47,7 @@ func TestBrandAccentIsStock(t *testing.T) {
 
 func TestStockAccentSelectsTheMark(t *testing.T) {
 	defer setAccent(stockAccent)
-	for _, a := range []string{"#22D3C4", "22d3c4", " #22d3c4 "} {
+	for _, a := range []string{"#5FA05B", "5fa05b", " #5fa05b "} {
 		if setAccent(a); !stockMark {
 			t.Errorf("setAccent(%q) did not select the family mark", a)
 		}
@@ -71,9 +71,9 @@ func TestMarkColours(t *testing.T) {
 			t.Errorf("%s = %v, want %v", name, got, c)
 		}
 	}
-	want("centre dot", at(256, 256), brandmark.Glow)
-	want("ring", at(256+178, 256), brandmark.Teal)
-	want("top arc", at(256, 256-92), brandmark.Paper)
+	want("centre dot", at(256, 256), brandmark.Dot)
+	want("ring", at(256+212, 256), brandmark.Ring)
+	want("top arc", at(256, 256-133), brandmark.Chalk)
 	if c := img.NRGBAAt(0, 0); c.A != 0 {
 		t.Errorf("corner should be transparent, got %v", c)
 	}
@@ -356,7 +356,7 @@ func TestAndroidMarkFitsTheSafeZone(t *testing.T) {
 	}
 }
 
-// The stock Play icon is the mark's tile filling the square: opaque night in
+// The stock Play icon is the mark's tile filling the square: opaque slate in
 // the corners (Play masks them), the ring where the master has it.
 func TestPlayIconIsTheSquareMark(t *testing.T) {
 	defer setAccent(brand.Current.AccentHex)
@@ -379,9 +379,9 @@ func TestPlayIconIsTheSquareMark(t *testing.T) {
 	if a != 0xffff {
 		t.Errorf("corner is not opaque (alpha %d)", a)
 	}
-	r, g, b, _ := img.At(256+178, 256).RGBA()
-	if want := brandmark.Teal; d(uint8(r>>8), want.R) > 2 || d(uint8(g>>8), want.G) > 2 || d(uint8(b>>8), want.B) > 2 {
-		t.Errorf("ring pixel %02x%02x%02x, want teal", r>>8, g>>8, b>>8)
+	r, g, b, _ := img.At(256+212, 256).RGBA()
+	if want := brandmark.Ring; d(uint8(r>>8), want.R) > 2 || d(uint8(g>>8), want.G) > 2 || d(uint8(b>>8), want.B) > 2 {
+		t.Errorf("ring pixel %02x%02x%02x, want the ring green", r>>8, g>>8, b>>8)
 	}
 	committed, err := os.ReadFile(filepath.Join("..", "..", "..", "android", "store", "icon-512.png"))
 	if err != nil {

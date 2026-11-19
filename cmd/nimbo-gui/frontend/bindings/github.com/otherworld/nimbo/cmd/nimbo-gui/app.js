@@ -477,6 +477,16 @@ export function FreeSpace(dir) {
 }
 
 /**
+ * GetAccentSource returns where the windows take their accent colour from:
+ * "brand" (default, the product's own accent) or "server" (the Nextcloud
+ * server's theme colour, as every version before the valley-green rebrand did).
+ * @returns {$CancellablePromise<string>}
+ */
+export function GetAccentSource() {
+    return $Call.ByID(93174160);
+}
+
+/**
  * GetAllowedFilenames returns the filenames the user permits even when normally
  * blocked (the builtin web-config block — .htaccess/.htpasswd/.user.ini — or the
  * server's forbidden list).
@@ -1131,6 +1141,16 @@ export function Search(term) {
     return $Call.ByID(3097496321, term).then(/** @type {($result: any) => any} */(($result) => {
         return $$createType44($result);
     }));
+}
+
+/**
+ * SetAccentSource persists the accent source and tells every window to
+ * re-apply its accent.
+ * @param {string} src
+ * @returns {$CancellablePromise<void>}
+ */
+export function SetAccentSource(src) {
+    return $Call.ByID(2240079996, src);
 }
 
 /**

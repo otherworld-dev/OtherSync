@@ -121,7 +121,7 @@
   h3 { font-size: 12px; text-transform: uppercase; color: var(--muted); margin: 18px 0 8px; }
   h3:first-of-type { margin-top: 0; }
   .empty { color: var(--muted); font-size: 13px; }
-  .err { color: #c0392b; font-size: 12.5px; background: #fdeceb; border: 1px solid #f0c0bb; border-radius: 6px; padding: 8px 10px; margin: 0 0 12px; }
+  .err { color: var(--danger); font-size: 12.5px; background: var(--danger-bg); border: 1px solid var(--danger-border); border-radius: 6px; padding: 8px 10px; margin: 0 0 12px; }
   .share { border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin-bottom: 8px; background: var(--panel); }
   .srow { display: flex; align-items: center; gap: 10px; }
   .who { flex: 1; font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -136,10 +136,10 @@
   .frow label { font-size: 12px; color: var(--fg2); }
   .frow input { padding: 7px 8px; border: 1px solid var(--border-2); border-radius: 5px; font-size: 13px; background: var(--bg); color: var(--fg); }
   .chk { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--fg2); }
-  .primary { align-self: flex-start; padding: 8px 16px; border: none; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; font-size: 13px; }
+  .primary { align-self: flex-start; padding: 8px 16px; border: none; border-radius: 6px; background: var(--accent); color: var(--on-accent); cursor: pointer; font-size: 13px; }
   .primary:hover { background: var(--accent-dark); }
   .primary:disabled { opacity: .6; cursor: default; }
   .link { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 12px; }
-  .link.danger { color: #c0392b; }
+  .link.danger { color: var(--danger); }
   .link:hover { text-decoration: underline; }
 </style>

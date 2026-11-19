@@ -1,13 +1,13 @@
 // Package brandmark draws the OtherSync family mark.
 //
-// The mark: a night tile carrying a teal portal ring, with two
-// paper-white sync arcs turning around a glowing centre point.
+// The mark: a warm slate tile carrying a valley-green portal ring, with two
+// chalk sync arcs turning around a green centre point.
 //
-// It is drawn procedurally from the 512 px design in the Other family brand
-// sheet (Icons/othersync.svg), so every size is rendered crisp rather than
-// downscaled. At the small sizes the sheet's hairlines would vanish (a 20 px
-// ring stroke is 0.6 px at 16 px), so those sizes use a heavier preset: no glow,
-// thicker ring and arcs, larger arrowheads, wider gaps between the arcs.
+// It is drawn procedurally from the Other family brand sheet so every size is
+// rendered crisp rather than downscaled, and so the tray can turn the glyph.
+// Two designs, as the sheet exports them: above 64 px the master
+// (Icons/othersync.svg); at 64 px and below the bolder taskbar/tray variant
+// (Icons/small/othersync-small.svg: thicker ring, bigger, heavier glyph).
 package brandmark
 
 import (
@@ -16,14 +16,18 @@ import (
 	"math"
 )
 
-// The sheet's colours.
+// The sheet's colours (Other family brief, 15 Nov 2026).
 var (
-	nightCentre = color.RGBA{0x12, 0x20, 0x2B, 0xff} // tile gradient centre
-	nightEdge   = color.RGBA{0x0A, 0x0F, 0x16, 0xff} // tile gradient edge
-	Teal        = color.RGBA{0x22, 0xD3, 0xC4, 0xff} // portal ring
-	Paper       = color.RGBA{0xF2, 0xEF, 0xE6, 0xff} // glyph
-	Glow        = color.RGBA{0x5E, 0xEA, 0xD4, 0xff} // sync point
+	tileCentre = color.RGBA{0x33, 0x37, 0x3C, 0xff} // tile gradient centre
+	tileEdge   = color.RGBA{0x1E, 0x21, 0x24, 0xff} // tile gradient edge
+	Ring       = color.RGBA{0x5F, 0xA0, 0x5B, 0xff} // portal ring: valley green
+	Chalk      = color.RGBA{0xF4, 0xF0, 0xE8, 0xff} // glyph
+	Dot        = Ring                               // sync point
 )
+
+// TileCentre and TileEdge are the tile's radial gradient stops.
+func TileCentre() color.RGBA { return tileCentre }
+func TileEdge() color.RGBA   { return tileEdge }
 
 // markSpec is the mark's geometry in the 512-unit design space.
 type markSpec struct {
@@ -32,49 +36,44 @@ type markSpec struct {
 	arcR, arcW   float64 // sync arcs: radius and stroke (round caps)
 	gapDeg       float64 // half the angular gap between the arcs, at each side
 	arrow        float64 // arrowhead scale relative to the master polygon
+	arrowPad     float64 // half the arrowheads' round-joined outline stroke
 	dotR         float64 // centre point radius (0 = none)
 	cornerR      float64 // tile corner radius
 }
 
-// masterSpec is othersync.svg exactly.
-var masterSpec = markSpec{
-	ringR: 178, ringW: 20, glowW: 44, glowA: 0.14,
-	arcR: 92, arcW: 26, gapDeg: 20, arrow: 1, dotR: 15, cornerR: 112,
+// glyphSpec scales the sheet's glyph (drawn at 1x around the centre, then
+// scaled by the svg's group transform) with the given stroke widths.
+func glyphSpec(ringR, ringW, scale, arcW, arrowStroke float64) markSpec {
+	return markSpec{
+		ringR: ringR, ringW: ringW,
+		arcR: 92 * scale, arcW: arcW * scale, gapDeg: 20,
+		arrow: scale, arrowPad: arrowStroke / 2 * scale,
+		dotR: 15 * scale, cornerR: 112,
+	}
 }
 
-// specFor returns the geometry used at a pixel size. The thresholds were tuned
-// by eye against the svg rendered at the same sizes.
+// masterSpec is othersync.svg exactly: ring r212 w24, glyph scaled 1.45.
+var masterSpec = glyphSpec(212, 24, 1.45, 26, 6)
+
+// smallSpec is othersync-small.svg exactly: ring r224 w48, glyph scaled 1.66
+// with strokes 1.25x heavier.
+var smallSpec = glyphSpec(224, 48, 1.66, 32.5, 7.5)
+
+// SmallMax is the largest size drawn with the small variant (the sheet's
+// export uses it at 64 px and below, so 200% taskbar scaling gets it too).
+const SmallMax = 64
+
+// specFor returns the geometry used at a pixel size.
 func specFor(size int) markSpec {
-	switch {
-	case size >= 64:
-		return masterSpec
-	case size >= 40:
-		s := masterSpec
-		s.ringW, s.arcW, s.glowA = 24, 32, 0.10
-		return s
-	case size >= 28:
-		return markSpec{ringR: 190, ringW: 32, arcR: 104, arcW: 42, gapDeg: 40, arrow: 1.9, cornerR: 112}
-	case size >= 22:
-		return markSpec{ringR: 200, ringW: 34, arcR: 110, arcW: 46, gapDeg: 42, arrow: 2.1, cornerR: 112}
-	case size >= 18:
-		return markSpec{ringR: 208, ringW: 34, arcR: 112, arcW: 48, gapDeg: 42, arrow: 2.1, cornerR: 112}
-	default:
-		return markSpec{ringR: 210, ringW: 32, arcR: 118, arcW: 50, gapDeg: 45, arrow: 2.3, cornerR: 112}
+	if size <= SmallMax {
+		return smallSpec
 	}
+	return masterSpec
 }
 
-// Margin is the transparent border around the tile, snapped to whole
-// pixels so the tile's straight edges land on the pixel grid.
-func Margin(size int) int {
-	switch {
-	case size <= 20:
-		return 0 // every pixel counts at taskbar/tray sizes
-	case size < 32:
-		return 1
-	}
-	m := int(math.Round(float64(size) / 16))
-	return m
-}
+// Margin is the transparent border around the tile. The sheet's exports run
+// the rounded tile to the edge of the canvas, so there is none.
+func Margin(size int) int { return 0 }
 
 // The master's right-hand arrowhead (the left one is its 180° rotation), and
 // the end of the top arc it sits on.
@@ -114,7 +113,7 @@ type Options struct {
 // space centred on (256,256), for drawing it as vectors (the Android icons).
 type Geometry struct {
 	RingR, RingW float64 // portal ring radius and stroke
-	GlowW, GlowA float64 // soft glow ring stroke and opacity (0 = none)
+	GlowW, GlowA float64 // soft glow ring stroke and opacity (0 = none; the sheet has none)
 	ArcR, ArcW   float64 // sync arcs: radius and stroke (round caps)
 	// The top arc runs clockwise from 180+GapDeg to 360-GapDeg degrees and the
 	// bottom one from GapDeg to 180-GapDeg (0 = +x, y down).
@@ -126,14 +125,14 @@ type Geometry struct {
 	DotR     float64 // centre point radius (0 = none)
 }
 
-// GeometryFor returns the geometry Draw uses at a pixel size (64 and up is
-// the master, othersync.svg exactly).
+// GeometryFor returns the geometry Draw uses at a pixel size (above SmallMax
+// the master, othersync.svg exactly; otherwise othersync-small.svg).
 func GeometryFor(size int) Geometry {
 	sp := specFor(size)
 	return Geometry{
 		RingR: sp.ringR, RingW: sp.ringW, GlowW: sp.glowW, GlowA: sp.glowA,
 		ArcR: sp.arcR, ArcW: sp.arcW, GapDeg: sp.gapDeg,
-		Arrows: arrowheads(sp), ArrowPad: 3.0 * sp.arrow, DotR: sp.dotR,
+		Arrows: arrowheads(sp), ArrowPad: sp.arrowPad, DotR: sp.dotR,
 	}
 }
 
@@ -167,8 +166,8 @@ func DrawWith(size int, o Options) *image.NRGBA {
 	k := tile / 512 // pixels per design unit
 	// The two arrowheads, in design units.
 	arrows := arrowheads(sp)
-	// The master strokes its arrowheads 6 wide with round joins.
-	arrowPad := 3.0 * sp.arrow
+	// The sheet strokes its arrowheads with round joins.
+	arrowPad := sp.arrowPad
 
 	img := image.NewNRGBA(image.Rect(0, 0, size, size))
 	for y := 0; y < size; y++ {
@@ -181,9 +180,9 @@ func DrawWith(size int, o Options) *image.NRGBA {
 			}
 			// Back to design units for everything inside the tile.
 			du, dv := (cx-m)/k, (cy-m)/k
-			// Radial night gradient: cx 50% cy 42% r 65% of the tile.
+			// Radial tile gradient: cx 50% cy 42% r 65% of the tile.
 			t := math.Min(1, math.Hypot(du-256, dv-0.42*512)/(0.65*512))
-			r, g, b := rgbF(lerpColor(nightCentre, nightEdge, t))
+			r, g, b := rgbF(lerpColor(tileCentre, tileEdge, t))
 			paint := func(col color.RGBA, alpha float64) {
 				if alpha <= 0 {
 					return
@@ -195,9 +194,9 @@ func DrawWith(size int, o Options) *image.NRGBA {
 			}
 			d := math.Hypot(du-256, dv-256)
 			if sp.glowA > 0 {
-				paint(Teal, sp.glowA*cover((math.Abs(d-sp.ringR)-sp.glowW/2)*k))
+				paint(Ring, sp.glowA*cover((math.Abs(d-sp.ringR)-sp.glowW/2)*k))
 			}
-			paint(Teal, cover((math.Abs(d-sp.ringR)-sp.ringW/2)*k))
+			paint(Ring, cover((math.Abs(d-sp.ringR)-sp.ringW/2)*k))
 			glyph := func(u, v float64) float64 {
 				if o.GlyphAngle != 0 {
 					// Sample the unrotated glyph at the point turned back.
@@ -222,12 +221,12 @@ func DrawWith(size int, o Options) *image.NRGBA {
 						}
 					}
 				}
-				paint(Paper, sum/float64(n*n))
+				paint(Chalk, sum/float64(n*n))
 			} else {
-				paint(Paper, cover(glyph(du, dv)*k))
+				paint(Chalk, cover(glyph(du, dv)*k))
 			}
 			if sp.dotR > 0 {
-				paint(Glow, cover((d-sp.dotR)*k))
+				paint(Dot, cover((d-sp.dotR)*k))
 			}
 			img.SetNRGBA(x, y, color.NRGBA{toByte(r), toByte(g), toByte(b), toByte(a)})
 		}

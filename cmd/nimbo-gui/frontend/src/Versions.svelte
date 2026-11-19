@@ -73,13 +73,13 @@
   .body { flex: 1; overflow-y: auto; padding: 14px 16px; }
   .hint { color: var(--fg2); font-size: 12px; margin: 0 0 12px; }
   .empty { color: var(--muted); font-size: 13px; }
-  .err { color: #c0392b; font-size: 12.5px; background: #fdeceb; border: 1px solid #f0c0bb; border-radius: 6px; padding: 8px 10px; margin: 0 0 12px; }
+  .err { color: var(--danger); font-size: 12.5px; background: var(--danger-bg); border: 1px solid var(--danger-border); border-radius: 6px; padding: 8px 10px; margin: 0 0 12px; }
   .ver { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border-soft); }
   .ver:last-child { border-bottom: none; }
   .vinfo { min-width: 0; }
   .vdate { font-size: 13px; }
   .vsize { font-size: 11.5px; color: var(--muted); }
-  .primary { padding: 6px 14px; border: none; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; font-size: 12.5px; }
+  .primary { padding: 6px 14px; border: none; border-radius: 6px; background: var(--accent); color: var(--on-accent); cursor: pointer; font-size: 12.5px; }
   .primary:hover { background: var(--accent-dark); }
   .primary:disabled { opacity: .6; cursor: default; }
 </style>

@@ -25,7 +25,7 @@ func withAccent(t *testing.T, hex string) {
 
 // One loop is trayLoopFrames frames, and the next loop repeats it exactly.
 func TestTraySpinLoops(t *testing.T) {
-	withAccent(t, "#22D3C4")
+	withAccent(t, "#5FA05B")
 	if trayLoopFrames != 12 {
 		t.Fatalf("trayLoopFrames = %d", trayLoopFrames)
 	}
@@ -47,9 +47,9 @@ func TestTraySpinLoops(t *testing.T) {
 }
 
 // The stock sync state turns the glyph and carries no corner spinner; the
-// spinner's teal is gone and the corner is the tile's own.
+// spinner's green is gone and the corner is the tile's own.
 func TestTraySpinStockHasNoCornerBadge(t *testing.T) {
-	withAccent(t, "#22D3C4")
+	withAccent(t, "#5FA05B")
 	sync := trayImage("sync", 0, false, 32)
 	idle := trayImage("idle", 0, false, 32)
 	// The bottom-right corner area (where the badge sits) outside the glyph
@@ -76,7 +76,7 @@ func TestTraySpinStockHasNoCornerBadge(t *testing.T) {
 
 // The notification dot overlays the turning mark.
 func TestTraySpinKeepsNotificationDot(t *testing.T) {
-	withAccent(t, "#22D3C4")
+	withAccent(t, "#5FA05B")
 	c := trayImage("sync", 3, true, 32).NRGBAAt(25, 7)
 	if c.R < 0xc0 || c.G > 0x60 {
 		t.Fatalf("notification dot missing: %v", c)
@@ -87,15 +87,15 @@ func TestTraySpinKeepsNotificationDot(t *testing.T) {
 func TestTraySyncPartnerKeepsSpinner(t *testing.T) {
 	withAccent(t, "#CC2233")
 	img := trayImage("sync", 0, false, 32)
-	var teal int
+	var green int
 	for y := 20; y < 32; y++ {
 		for x := 20; x < 32; x++ {
-			if c := img.NRGBAAt(x, y); c.G > c.R+60 && c.B > c.R+40 && c.A > 0 && color.NRGBAModel.Convert(c).(color.NRGBA).G > 100 {
-				teal++
+			if c := img.NRGBAAt(x, y); c.A > 0 && c.G > c.R+40 && c.G > c.B+30 && c.R < 0x60 {
+				green++
 			}
 		}
 	}
-	if teal == 0 {
+	if green == 0 {
 		t.Fatal("partner sync lost its corner spinner")
 	}
 	// And it is not frame-cached to the stock rotation: it advances per frame.
@@ -114,7 +114,7 @@ func TestRenderTraySpinPreview(t *testing.T) {
 	if dir == "" {
 		t.Skip("set NIMBO_TRAY_PREVIEW=<dir> to render")
 	}
-	withAccent(t, "#22D3C4")
+	withAccent(t, "#5FA05B")
 	_ = os.MkdirAll(dir, 0o755)
 	const scale = 4
 	bgs := []color.NRGBA{{0xf3, 0xf3, 0xf3, 0xff}, {0x20, 0x20, 0x20, 0xff}}

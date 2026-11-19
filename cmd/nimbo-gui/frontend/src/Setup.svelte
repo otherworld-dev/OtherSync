@@ -257,7 +257,7 @@
   .head { display: flex; align-items: flex-start; justify-content: center; gap: 18px; }
   .who { flex: 1; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 4px; }
   .arrow { font-size: 22px; color: var(--fg2); align-self: center; }
-  .avatar { width: 64px; height: 64px; border-radius: 50%; background: var(--accent); color: #fff;
+  .avatar { width: 64px; height: 64px; border-radius: 50%; background: var(--accent); color: var(--on-accent);
             font-size: 28px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
   .folder { font-size: 56px; line-height: 64px; }
   .name { font-weight: 600; font-size: 14px; }
@@ -273,16 +273,16 @@
   .exp { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--accent);
          border: 1px solid var(--accent); border-radius: 4px; padding: 0 5px; margin-left: 6px; }
   .note { margin: -2px 2px 0; color: var(--fg2); font-size: 12px; }
-  .err { color: #e5484d; margin: 0; }
+  .err { color: var(--danger); margin: 0; }
   .loading { color: var(--fg2); }
   .actions { margin-top: auto; display: flex; justify-content: flex-end; gap: 10px; }
   button { padding: 9px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; }
-  button.primary { border: none; background: var(--accent); color: #fff; font-weight: 500; }
+  button.primary { border: none; background: var(--accent); color: var(--on-accent); font-weight: 500; }
   button.primary:hover { background: var(--accent-dark); }
   button.ghost { border: 1px solid var(--border-2); background: transparent; color: var(--fg); }
   button.ghost:hover { background: var(--hover); }
   button:disabled { opacity: 0.6; cursor: default; }
-  .modalback { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45);
+  .modalback { position: fixed; inset: 0; background: var(--scrim);
                display: flex; align-items: center; justify-content: center; z-index: 10; }
   .modalbox { background: var(--bg); border: 1px solid var(--border-2); border-radius: 10px;
               padding: 18px; max-width: 420px; display: flex; flex-direction: column; gap: 10px; }

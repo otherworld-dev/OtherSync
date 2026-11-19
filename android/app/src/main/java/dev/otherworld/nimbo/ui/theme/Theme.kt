@@ -19,88 +19,107 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 
 /*
- * The OtherSync brand accent (the Other family brand sheet): bright teal on dark
- * surfaces, deep teal on light ones, and the brand's dark Ink for text and icons
- * that sit ON teal. White on deep teal is only 3.7:1, below the 4.5:1 the tests
- * ask of text, which is why the brand puts Ink on its teal buttons instead.
- *
- * The rest of each scheme is Material 3's own palette generated from the deep
- * teal (material-color-utilities, tonal spot), with the primary roles then
- * pointed at the brand colours, the same way the indigo schemes were made.
+ * The OtherSync brand accent (Other family brief, 15 Nov 2026): valley green on
+ * dark surfaces, deep valley green on light ones, over the Cŵn Annwn studio
+ * neutrals (slate, chalk, stone) rather than Material's generated greys. White
+ * reads on the deep green (6.4:1); on the brighter dark-mode green it is only
+ * 3.2:1, so slate sits on it instead (4.8:1).
  */
 
-/** OtherSync teal (#22D3C4): the accent on dark surfaces. */
-val BrandTeal = Color(0xFF22D3C4)
+/** OtherSync valley green (#5FA05B): the accent on dark surfaces. */
+val BrandGreen = Color(0xFF5FA05B)
 
-/** Deep teal (#0D9488): the accent on light surfaces. */
-val BrandDeepTeal = Color(0xFF0D9488)
+/** Deep valley green (#2F6B3A): the accent on light surfaces. */
+val BrandDeepGreen = Color(0xFF2F6B3A)
 
-/** The brand's Ink (#0A1118): text and icons on either teal. */
-val BrandInk = Color(0xFF0A1118)
+/** Slate (#23262B): dark backgrounds, text on light, text on the bright green. */
+val BrandSlate = Color(0xFF23262B)
+
+/** Chalk (#F4F0E8): light backgrounds and text on dark. */
+val BrandChalk = Color(0xFFF4F0E8)
+
+/** Stone (#ECE6DB): light panels. */
+val BrandStone = Color(0xFFECE6DB)
 
 internal val LightColors = lightColorScheme(
-    primary = BrandDeepTeal,
-    onPrimary = BrandInk,
-    primaryContainer = Color(0xFF73F8E7),
-    onPrimaryContainer = Color(0xFF00201D),
-    secondary = Color(0xFF4A635F),
+    primary = BrandDeepGreen,
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFD3E6CF),
+    onPrimaryContainer = Color(0xFF0F2A14),
+    secondary = Color(0xFF5A5650),
     onSecondary = Color(0xFFFFFFFF),
-    secondaryContainer = Color(0xFFCCE8E3),
-    onSecondaryContainer = Color(0xFF05201C),
-    tertiary = Color(0xFF46617A),
+    secondaryContainer = BrandStone,
+    onSecondaryContainer = BrandSlate,
+    tertiary = Color(0xFF56632F),
     onTertiary = Color(0xFFFFFFFF),
-    tertiaryContainer = Color(0xFFCDE5FF),
-    onTertiaryContainer = Color(0xFF001D32),
-    error = Color(0xFFBA1A1A),
+    tertiaryContainer = Color(0xFFDFE6C6),
+    onTertiaryContainer = Color(0xFF1C2208),
+    error = Color(0xFFA63A2B),
     onError = Color(0xFFFFFFFF),
-    errorContainer = Color(0xFFFFDAD6),
-    onErrorContainer = Color(0xFF410002),
-    background = Color(0xFFFAFDFB),
-    onBackground = Color(0xFF191C1B),
-    surface = Color(0xFFFAFDFB),
-    onSurface = Color(0xFF191C1B),
-    surfaceVariant = Color(0xFFDAE5E2),
-    onSurfaceVariant = Color(0xFF3F4947),
-    outline = Color(0xFF6F7977),
-    outlineVariant = Color(0xFFBEC9C6),
-    inverseSurface = Color(0xFF2D3130),
-    inverseOnSurface = Color(0xFFEFF1EF),
-    // Snackbar actions sit on the dark inverse surface, so the bright teal.
-    inversePrimary = BrandTeal,
+    errorContainer = Color(0xFFF6DAD3),
+    onErrorContainer = Color(0xFF410E06),
+    background = BrandChalk,
+    onBackground = BrandSlate,
+    surface = BrandChalk,
+    onSurface = BrandSlate,
+    surfaceVariant = BrandStone,
+    onSurfaceVariant = Color(0xFF5A5650),
+    surfaceTint = BrandDeepGreen,
+    outline = Color(0xFF8F897F),
+    outlineVariant = Color(0xFFD5CEC1),
+    inverseSurface = BrandSlate,
+    inverseOnSurface = BrandChalk,
+    // Snackbar actions sit on the slate inverse surface, so the bright green.
+    inversePrimary = BrandGreen,
     scrim = Color(0xFF000000),
+    surfaceBright = Color(0xFFFAF8F3),
+    surfaceDim = Color(0xFFDDD6C9),
+    surfaceContainerLowest = Color(0xFFFFFFFF),
+    surfaceContainerLow = Color(0xFFF8F5EF),
+    surfaceContainer = Color(0xFFF0EBE2),
+    surfaceContainerHigh = BrandStone,
+    surfaceContainerHighest = Color(0xFFE5DED1),
 )
 
 internal val DarkColors = darkColorScheme(
-    primary = BrandTeal,
-    onPrimary = BrandInk,
-    primaryContainer = Color(0xFF005049),
-    onPrimaryContainer = Color(0xFF73F8E7),
-    secondary = Color(0xFFB1CCC7),
-    onSecondary = Color(0xFF1C3531),
-    secondaryContainer = Color(0xFF324B48),
-    onSecondaryContainer = Color(0xFFCCE8E3),
-    tertiary = Color(0xFFAECAE6),
-    onTertiary = Color(0xFF163349),
-    tertiaryContainer = Color(0xFF2E4961),
-    onTertiaryContainer = Color(0xFFCDE5FF),
-    error = Color(0xFFFFB4AB),
-    onError = Color(0xFF690005),
-    errorContainer = Color(0xFF93000A),
-    onErrorContainer = Color(0xFFFFB4AB),
-    background = Color(0xFF191C1B),
-    onBackground = Color(0xFFE0E3E1),
-    surface = Color(0xFF191C1B),
-    onSurface = Color(0xFFE0E3E1),
-    surfaceVariant = Color(0xFF3F4947),
-    onSurfaceVariant = Color(0xFFBEC9C6),
-    outline = Color(0xFF899390),
-    outlineVariant = Color(0xFF3F4947),
-    inverseSurface = Color(0xFFE0E3E1),
-    inverseOnSurface = Color(0xFF2D3130),
-    // On the light inverse surface the deep teal is only 2.9:1, so this is
-    // the generated tone-40 teal (5:1) rather than a brand hex.
-    inversePrimary = Color(0xFF006A61),
+    primary = BrandGreen,
+    onPrimary = BrandSlate,
+    primaryContainer = Color(0xFF2C4A2E),
+    onPrimaryContainer = Color(0xFFD3E6CF),
+    secondary = Color(0xFFA8A39A),
+    onSecondary = BrandSlate,
+    secondaryContainer = Color(0xFF3A3D42),
+    onSecondaryContainer = BrandStone,
+    tertiary = Color(0xFFA3B46B),
+    onTertiary = BrandSlate,
+    tertiaryContainer = Color(0xFF3E4720),
+    onTertiaryContainer = Color(0xFFDFE6C6),
+    error = Color(0xFFE58B74),
+    onError = BrandSlate,
+    errorContainer = Color(0xFF7A2A1F),
+    onErrorContainer = Color(0xFFF6DAD3),
+    background = BrandSlate,
+    onBackground = BrandChalk,
+    surface = BrandSlate,
+    onSurface = BrandChalk,
+    surfaceVariant = Color(0xFF3A3D42),
+    onSurfaceVariant = Color(0xFFC9C3B8),
+    surfaceTint = BrandGreen,
+    outline = Color(0xFF8F8A82),
+    outlineVariant = Color(0xFF3A3D42),
+    inverseSurface = BrandChalk,
+    inverseOnSurface = BrandSlate,
+    // On the chalk inverse surface the bright green is only 2.8:1, so the
+    // deep green (5.6:1).
+    inversePrimary = BrandDeepGreen,
     scrim = Color(0xFF000000),
+    surfaceBright = Color(0xFF3A3D42),
+    surfaceDim = Color(0xFF1E2124),
+    surfaceContainerLowest = Color(0xFF1B1E21),
+    surfaceContainerLow = Color(0xFF26292E),
+    surfaceContainer = Color(0xFF2A2D32),
+    surfaceContainerHigh = Color(0xFF303338),
+    surfaceContainerHighest = Color(0xFF383B40),
 )
 
 /** Material 3 default type scale — no custom fonts in the walking skeleton. */

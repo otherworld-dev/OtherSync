@@ -2294,6 +2294,34 @@ func (a *App) SetTheme(mode string) {
 	}
 }
 
+// GetAccentSource returns where the windows take their accent colour from:
+// "brand" (default, the product's own accent) or "server" (the Nextcloud
+// server's theme colour, as every version before the valley-green rebrand did).
+func (a *App) GetAccentSource() string {
+	if d, err := config.Resolve(); err == nil {
+		if s, e := d.LoadSettings(); e == nil && s.AccentSource == "server" {
+			return "server"
+		}
+	}
+	return "brand"
+}
+
+// SetAccentSource persists the accent source and tells every window to
+// re-apply its accent.
+func (a *App) SetAccentSource(src string) {
+	if src != "server" {
+		src = "brand"
+	}
+	if d, err := config.Resolve(); err == nil {
+		_ = d.UpdateSettings(func(s *config.Settings) {
+			s.AccentSource = src
+		})
+	}
+	if a.app != nil {
+		a.app.Event.Emit("accentSource", src)
+	}
+}
+
 // FlyoutAppearanceDTO carries the flyout's appearance settings to the UI.
 type FlyoutAppearanceDTO struct {
 	DockIconSize string   `json:"dockIconSize"` // small | medium | large

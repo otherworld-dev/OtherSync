@@ -4,43 +4,75 @@
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
 
-  /* Accent colour — overridden at runtime with the user's Nextcloud theme. */
-  --accent: #0082c9;
-  --accent-dark: #0073b3;
+  /* Accent: OtherSync valley green (Other family brief, 15 Nov 2026), the
+     darker shade on light surfaces. App.svelte overrides it with a partner
+     brand's accent, or with the Nextcloud theme colour when the user picks
+     that in Settings > Appearance. --accent-dark is the hover shade. */
+  --accent: #2F6B3A;
+  --accent-dark: #24542D;
+  --on-accent: #FFFFFF;   /* text and icons on an accent fill */
 
-  /* Semantic palette (light). Components reference these so dark mode is a
-     single override below. */
-  --bg: #ffffff;          /* window / panel background */
-  --panel: #fafafa;       /* cards, inputs, tiles */
-  --panel-2: #f7f7f7;     /* secondary buttons */
-  /* Hover/selected backgrounds are derived from the accent so they always match
-     the user's Nextcloud theme (green, blue, …). color-mix against --bg keeps
-     them subtle and adapts automatically to light/dark mode. */
+  /* Semantic palette (light): the Cŵn Annwn studio neutrals. Components
+     reference these so dark mode is a single override below. */
+  --bg: #F4F0E8;          /* chalk: window / panel background */
+  --panel: #FAF8F3;       /* cards, inputs, tiles */
+  --panel-2: #ECE6DB;     /* stone: secondary buttons, sidebars */
+  /* Hover/selected backgrounds are derived from the accent; color-mix against
+     --bg keeps them subtle and adapts automatically to light/dark mode. */
   --hover: color-mix(in srgb, var(--accent) 8%, var(--bg));   /* hover background */
   --tint: color-mix(in srgb, var(--accent) 15%, var(--bg));   /* accent-tinted / selected */
-  --fg: #1b1b1b;          /* primary text */
-  --fg2: #555555;         /* secondary text */
-  --muted: #999999;       /* labels / tertiary text */
-  --border: #e6e6e6;      /* default borders */
-  --border-2: #d0d0d0;    /* stronger borders (inputs) */
-  --border-soft: #f3f3f3; /* faint dividers */
+  --fg: #23262B;          /* slate: primary text */
+  --fg2: #5A5650;         /* secondary text */
+  --muted: #6B665E;       /* labels / tertiary text (4.5:1 on chalk and stone) */
+  --border: #DDD6C9;      /* default borders */
+  --border-2: #8F897F;    /* stronger borders (inputs, 3:1) */
+  --border-soft: #E8E2D6; /* faint dividers */
+
+  /* Status colours. Text shades hold 4.5:1 on --bg and --panel; fills are for
+     dots, bars and badges (3:1). */
+  --danger: #A63A2B;      /* oxblood: errors, destructive actions */
+  --danger-fill: #A63A2B;
+  --on-danger: #FFFFFF;
+  --danger-dark: #8A2F23; /* destructive button hover */
+  --danger-bg: color-mix(in srgb, var(--danger) 9%, var(--bg));
+  --danger-border: color-mix(in srgb, var(--danger) 35%, var(--bg));
+  --ok: #56632F;          /* moss, deepened for text */
+  --ok-fill: #6E7F3E;     /* moss */
+  --warn: #8F5B00;        /* needs-attention text and dots */
+  --warn-bg: color-mix(in srgb, var(--warn) 9%, var(--bg));
+  --warn-border: color-mix(in srgb, var(--warn) 30%, var(--bg));
+  --scrim: rgba(30, 33, 36, .5);  /* modal backdrop */
+  --shadow: rgba(20, 22, 25, .35);
 
   color: var(--fg);
   background: var(--bg);
 }
 
 :root[data-theme="dark"] {
-  --bg: #1f2023;
-  --panel: #2a2c2f;
-  --panel-2: #303236;
+  --accent: #5FA05B;
+  --accent-dark: #72B26E; /* hover: lighter on dark */
+  --on-accent: #23262B;   /* slate on valley green (4.8:1; white is 3.2:1) */
+  --bg: #23262B;          /* slate */
+  --panel: #282B2F;
+  --panel-2: #303338;
   /* --hover / --tint inherit the accent-derived color-mix from :root, resolved
      against this dark --bg, so they stay themed in dark mode too. */
-  --fg: #e8e8e8;
-  --fg2: #b6b6b6;
-  --muted: #8c8f93;
-  --border: #3a3d42;
-  --border-2: #4a4e54;
-  --border-soft: #2e3034;
+  --fg: #F4F0E8;          /* chalk */
+  --fg2: #A8A39A;
+  --muted: #9A958C;
+  --border: #3A3D42;
+  --border-2: #7A766D;
+  --border-soft: #2E3135;
+
+  --danger: #E58B74;      /* russet, lifted for text on slate */
+  --danger-fill: #E07D64;
+  --on-danger: #23262B;
+  --danger-dark: #C8553D;
+  --ok: #A3B46B;
+  --ok-fill: #6E7F3E;
+  --warn: #E0A040;
+  --scrim: rgba(10, 11, 13, .55);
+  --shadow: rgba(0, 0, 0, .5);
 }
 
 * { box-sizing: border-box; }

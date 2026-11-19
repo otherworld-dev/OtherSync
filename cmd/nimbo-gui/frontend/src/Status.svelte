@@ -756,8 +756,8 @@
                background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
   .line .k { color: var(--accent); min-width: 86px; }
   .line .p { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .line .err { color: #e06b6b; }
-  .resolveerr { margin-top: 8px; font-size: 12.5px; color: #e06b6b; }
+  .line .err { color: var(--danger); }
+  .resolveerr { margin-top: 8px; font-size: 12.5px; color: var(--danger); }
   /* Deep-link flash: briefly tint + outline the row the flyout pointed at. */
   .hl { animation: hlflash 3.4s ease-out both; border-radius: 6px; }
   @keyframes hlflash {
@@ -807,7 +807,7 @@
   .vhead { font-size: 11px; text-transform: uppercase; letter-spacing: .3px; color: var(--muted); font-weight: 600; }
   .ver.newest .vhead { color: var(--accent); }
   .vmeta { font-size: 12.5px; color: var(--fg); margin-top: 3px; }
-  .vmeta.gone { color: #e06b6b; }
+  .vmeta.gone { color: var(--danger); }
   .prevtoggle { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 12px;
                 padding: 0 0 8px; }
   .prevtoggle:hover { text-decoration: underline; }
@@ -824,9 +824,9 @@
   .btns button { padding: 6px 12px; border: 1px solid var(--border-2); border-radius: 6px; background: var(--panel-2);
                  color: var(--fg); cursor: pointer; font-size: 12px; }
   .btns button:hover { background: var(--hover); }
-  .btns button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .btns button.danger { color: #c0392b; border-color: #e6b8b2; }
-  .btns button.danger:hover { background: #fdeceb; }
+  .btns button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .btns button.danger { color: var(--danger); border-color: var(--danger-border); }
+  .btns button.danger:hover { background: var(--danger-bg); }
   .btns button:disabled { opacity: .55; cursor: default; }
   .bulkrow { display: flex; align-items: center; justify-content: space-between; gap: 10px;
              padding: 8px 10px; margin-bottom: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
@@ -834,9 +834,9 @@
   .bulkrow button { padding: 6px 12px; border: 1px solid var(--border-2); border-radius: 6px;
                     background: var(--panel-2); color: var(--fg); cursor: pointer; font-size: 12px; }
   .bulkrow button:hover { background: var(--hover); }
-  .bulkrow button.danger { padding: 6px 12px; border: 1px solid #e6b8b2; border-radius: 6px;
-                           background: var(--panel-2); color: #c0392b; cursor: pointer; font-size: 12px; }
-  .bulkrow button.danger:hover { background: #fdeceb; }
+  .bulkrow button.danger { padding: 6px 12px; border: 1px solid var(--danger-border); border-radius: 6px;
+                           background: var(--panel-2); color: var(--danger); cursor: pointer; font-size: 12px; }
+  .bulkrow button.danger:hover { background: var(--danger-bg); }
   .empty { color: var(--muted); font-size: 13px; }
   .trow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border-soft); }
   .tmain { min-width: 0; }
@@ -845,5 +845,5 @@
   .tbtns { display: flex; gap: 8px; flex: 0 0 auto; }
   .tbtns button { padding: 5px 11px; border: 1px solid var(--border-2); border-radius: 6px; background: var(--panel-2); color: var(--fg); cursor: pointer; font-size: 12px; }
   .tbtns button:hover { background: var(--hover); }
-  .tbtns button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .tbtns button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 </style>

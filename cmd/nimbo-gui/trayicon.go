@@ -16,10 +16,10 @@ import (
 
 // Tray badge colours.
 var (
-	traySpin  = color.RGBA{0x0D, 0x94, 0x88, 0xff} // spinner: the brand's deep teal (legible on white)
-	trayRed   = color.RGBA{0xd6, 0x39, 0x39, 0xff}
+	traySpin  = color.RGBA{0x2F, 0x6B, 0x3A, 0xff} // spinner: the brand's valley green for light surfaces (legible on white)
+	trayRed   = color.RGBA{0xC8, 0x55, 0x3D, 0xff} // studio russet: errors and the notification dot
 	trayAmber = color.RGBA{0xE8, 0x8A, 0x00, 0xff} // "needs attention", the flyout's amber bar
-	trayGray  = color.RGBA{0x88, 0x90, 0x96, 0xff}
+	trayGray  = color.RGBA{0xA8, 0xA3, 0x9A, 0xff} // warm mid-grey (secondary text on dark)
 	trayWhite = color.RGBA{0xff, 0xff, 0xff, 0xff}
 )
 
@@ -241,7 +241,7 @@ func trayGlyphAngle(frame int) float64 {
 // sync state turns the glyph. Partner builds keep the nimbus with a corner
 // spinner.
 func stockTray() bool {
-	return strings.EqualFold(strings.TrimPrefix(strings.TrimSpace(brand.Current.AccentHex), "#"), "22D3C4")
+	return strings.EqualFold(strings.TrimPrefix(strings.TrimSpace(brand.Current.AccentHex), "#"), "5FA05B")
 }
 
 // spinCache holds the encoded stock sync icons, drawn on first use, so a tick

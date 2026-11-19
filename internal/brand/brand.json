@@ -8,6 +8,6 @@
   "helpUrl": "https://www.othersync.com/help/",
   "feedUrl": "https://github.com/otherworld-dev/OtherSync/releases/latest/download/OtherSync.appinstaller",
   "apiBase": "https://api.github.com/repos/otherworld-dev/OtherSync",
-  "accentHex": "#22D3C4",
+  "accentHex": "#5FA05B",
   "appId": "Nimbo"
 }
