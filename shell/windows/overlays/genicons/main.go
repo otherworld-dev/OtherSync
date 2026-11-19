@@ -17,26 +17,30 @@ import (
 	"path/filepath"
 )
 
+// Badge colours from the Other family palette (rebrand brief, 15 Nov 2026).
+// Each is dark enough for the white glyph to hold 3:1 or better, and the four
+// stay in different hue families so they read apart at 16 px.
 var (
-	green = color.RGBA{0x2e, 0x7d, 0x32, 0xff} // synced: the universal green check
-	// Nimbo indigo (the app's brand colour) for the in-progress badge, instead
-	// of the Nextcloud-ish blue.
-	indigo = color.RGBA{0x58, 0x56, 0xE0, 0xff}
-	amber  = color.RGBA{0xf0, 0xa0, 0x20, 0xff}
-	// Shared: azure — a clearly different hue family from the green tick, the
-	// violet-indigo spinner, and the amber warning (the first teal version
-	// read as "another tick" at 16px).
-	azure = color.RGBA{0x10, 0x69, 0xd8, 0xff}
-	white  = color.RGBA{0xff, 0xff, 0xff, 0xff}
+	green = color.RGBA{0x2F, 0x6B, 0x3A, 0xff} // synced: deep valley green (white glyph 6.4:1)
+	// Syncing: warm slate grey, a neutral "in progress" that can't be mistaken
+	// for the green tick (white glyph 7.3:1).
+	slate = color.RGBA{0x5A, 0x56, 0x50, 0xff}
+	// Needs attention: a deep warm amber (white glyph 4.0:1; the old
+	// #F0A020 was 2.1:1).
+	amber = color.RGBA{0xA8, 0x65, 0x0A, 0xff}
+	// Shared: slate blue, a clearly different hue family from the green tick,
+	// the grey spinner and the amber warning (white glyph 7.0:1).
+	blue  = color.RGBA{0x34, 0x59, 0x7F, 0xff}
+	white = color.RGBA{0xff, 0xff, 0xff, 0xff}
 )
 
 func main() {
 	out := filepath.Join("..", "icons")
 	_ = os.MkdirAll(out, 0o755)
 	write(filepath.Join(out, "ok.ico"), func(s int) image.Image { return badge(s, green, glyphCheck) })
-	write(filepath.Join(out, "sync.ico"), func(s int) image.Image { return badge(s, indigo, glyphSync) })
+	write(filepath.Join(out, "sync.ico"), func(s int) image.Image { return badge(s, slate, glyphSync) })
 	write(filepath.Join(out, "warn.ico"), func(s int) image.Image { return badge(s, amber, glyphBang) })
-	write(filepath.Join(out, "shared.ico"), func(s int) image.Image { return badge(s, azure, glyphPerson) })
+	write(filepath.Join(out, "shared.ico"), func(s int) image.Image { return badge(s, blue, glyphPerson) })
 }
 
 type glyphFn func(img *image.RGBA, cx, cy, r float64, col color.RGBA)
@@ -59,10 +63,10 @@ func write(path string, make func(size int) image.Image) {
 	binary.Write(&buf, binary.LittleEndian, uint16(len(sizes)))
 	offset := 6 + 16*len(sizes)
 	for i, s := range sizes {
-		buf.WriteByte(byte(s)) // width
-		buf.WriteByte(byte(s)) // height
-		buf.WriteByte(0)       // palette
-		buf.WriteByte(0)       // reserved
+		buf.WriteByte(byte(s))                              // width
+		buf.WriteByte(byte(s))                              // height
+		buf.WriteByte(0)                                    // palette
+		buf.WriteByte(0)                                    // reserved
 		binary.Write(&buf, binary.LittleEndian, uint16(1))  // planes
 		binary.Write(&buf, binary.LittleEndian, uint16(32)) // bitcount
 		binary.Write(&buf, binary.LittleEndian, uint32(len(pngs[i])))
@@ -84,9 +88,9 @@ func write(path string, make func(size int) image.Image) {
 func badge(size int, c color.RGBA, glyph glyphFn) image.Image {
 	img := image.NewRGBA(image.Rect(0, 0, size, size))
 	f := float64(size)
-	r := f * 0.30           // badge radius (~60% diameter)
-	m := f * 0.04           // margin from the edges
-	cx, cy := r+m, f-r-m    // lower-left
+	r := f * 0.30        // badge radius (~60% diameter)
+	m := f * 0.04        // margin from the edges
+	cx, cy := r+m, f-r-m // lower-left
 	// Anti-aliased disc with a thin white outline for contrast on any icon.
 	for y := 0; y < size; y++ {
 		for x := 0; x < size; x++ {
