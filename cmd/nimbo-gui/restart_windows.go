@@ -121,10 +121,22 @@ func applyUpdate(msixURL string) error {
 		exeRegex = strings.ReplaceAll(base, ".", "\\.")
 		procName = strings.TrimSuffix(base, filepath.Ext(base))
 	}
-	// %[1]s msix url, %[2]s pfn, %[3]s log, %[4]s task, %[5]s taskXML,
-	// %[6]s package name, %[7]s AUMID app id, %[8]s exe-name regex,
-	// %[9]s exe base name without extension (for Get-Process).
-	script := fmt.Sprintf(
+	script := updaterScript(msixURL, pfn, logf, taskName, taskXML, pkgName, brand.Current.AppID, exeRegex, procName, vbs)
+	if err := os.WriteFile(ps1, []byte(script), 0o644); err != nil {
+		return err
+	}
+	return scheduleUpdater(ps1, vbs, taskXML, taskName)
+}
+
+// updaterScript is the PowerShell the self-update task runs, outside the MSIX
+// container: close the app, install the new package, relaunch it, make sure it
+// stayed up, migrate the tray-icon visibility, then remove itself.
+//
+// %[1]s msix url, %[2]s pfn, %[3]s log, %[4]s task, %[5]s taskXML,
+// %[6]s package name, %[7]s AUMID app id, %[8]s exe-name regex,
+// %[9]s exe base name without extension (for Get-Process), %[10]s vbs.
+func updaterScript(msixURL, pfn, logf, taskName, taskXML, pkgName, appID, exeRegex, procName, vbs string) string {
+	return fmt.Sprintf(
 		"\"$(Get-Date -Format s) helper started: %[1]s\" | Out-File -FilePath '%[3]s' -Append\r\n"+
 			// Close the app OURSELVES before installing. Add-AppxPackage's
 			// -ForceTargetApplicationShutdown is not free: Windows gives each process
@@ -209,6 +221,33 @@ func applyUpdate(msixURL string) error {
 			// shell: URI from the task context didn't reliably bring the app back.
 			"Start-Sleep -Seconds 2\r\n"+
 			"explorer.exe 'shell:AppsFolder\\%[2]s!%[7]s'\r\n"+
+			// Make sure the relaunch STAYED up. On 2026-11-19 (0.4.1.411 -> .412)
+			// Windows started the new version, its log showed a normal start, and
+			// one second later the process was gone: no "exiting" line, no crash
+			// log, no Windows Error Reporting entry, so the cause is unknown. The
+			// user was left with nothing syncing until they noticed. So check, and
+			// start it again if it isn't running (twice at most); every outcome is
+			// logged so a repeat can be compared with that night.
+			"$relaunched = $false\r\n"+
+			"for ($try = 1; $try -le 2; $try++) {\r\n"+
+			"  Start-Sleep -Seconds 15\r\n"+
+			"  $running = Get-Process -Name '%[9]s' -ErrorAction SilentlyContinue\r\n"+
+			"  if ($running) {\r\n"+
+			"    \"$(Get-Date -Format s) app running after relaunch (pid $(($running | Select-Object -First 1).Id))\" | Out-File -FilePath '%[3]s' -Append\r\n"+
+			"    $relaunched = $true\r\n"+
+			"    break\r\n"+
+			"  }\r\n"+
+			"  \"$(Get-Date -Format s) app not running after relaunch; starting it again (try $try)\" | Out-File -FilePath '%[3]s' -Append\r\n"+
+			"  explorer.exe 'shell:AppsFolder\\%[2]s!%[7]s'\r\n"+
+			"}\r\n"+
+			"if (-not $relaunched) {\r\n"+
+			"  Start-Sleep -Seconds 15\r\n"+
+			"  if (Get-Process -Name '%[9]s' -ErrorAction SilentlyContinue) {\r\n"+
+			"    \"$(Get-Date -Format s) app running after the second start\" | Out-File -FilePath '%[3]s' -Append\r\n"+
+			"  } else {\r\n"+
+			"    \"$(Get-Date -Format s) app STILL not running; giving up\" | Out-File -FilePath '%[3]s' -Append\r\n"+
+			"  }\r\n"+
+			"}\r\n"+
 			// Tray-icon visibility: Windows 11 keys "show by the clock" to the exe
 			// PATH, which changes every MSIX version — each update would re-hide the
 			// icon. Migrate the choice to the new version's NotifyIconSettings entry
@@ -241,10 +280,12 @@ func applyUpdate(msixURL string) error {
 			"schtasks /delete /tn %[4]s /f | Out-Null\r\n"+
 			"Remove-Item -LiteralPath '%[5]s' -Force -ErrorAction SilentlyContinue\r\n"+
 			"Remove-Item -LiteralPath '%[10]s' -Force -ErrorAction SilentlyContinue\r\n",
-		msixURL, pfn, logf, taskName, taskXML, pkgName, brand.Current.AppID, exeRegex, procName, vbs)
-	if err := os.WriteFile(ps1, []byte(script), 0o644); err != nil {
-		return err
-	}
+		msixURL, pfn, logf, taskName, taskXML, pkgName, appID, exeRegex, procName, vbs)
+}
+
+// scheduleUpdater writes the windowless launcher and the task definition for
+// the updater script, then registers and starts the task.
+func scheduleUpdater(ps1, vbs, taskXML, taskName string) error {
 	// The task cannot run powershell.exe directly: a console process gets its
 	// conhost window created BEFORE -WindowStyle Hidden is processed, flashing
 	// a black box at the user mid-update. wscript.exe is a windowless host, and
