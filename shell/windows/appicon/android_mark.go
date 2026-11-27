@@ -51,24 +51,25 @@ var stockPalette = markPalette{
 }
 
 // markVariants are the supporter launcher icons (Android activity-aliases
-// LauncherForest/Ember/Slate): the same mark, geometry and safe-zone scale,
-// each in its own palette. The ring keeps at least 7:1 contrast against its
-// tile so it still reads at 48 px.
+// LauncherForest/Ember/Slate): the same mark, geometry and safe-zone scale on
+// the same slate tile, each ringed in an Other family colour (rebrand brief,
+// Nov 2026). The ring holds at least 3:1 against the tile so it still reads
+// at 48 px (pinned by TestMarkVariantsReadable).
 var markVariants = map[string]markPalette{
 	"forest": {
 		name: "forest", label: "Forest",
-		tileCentre: color.RGBA{0x11, 0x2A, 0x1C, 0xff}, tileEdge: color.RGBA{0x07, 0x14, 0x0D, 0xff},
-		ring: color.RGBA{0x5E, 0xE3, 0x6A, 0xff}, glyph: color.RGBA{0xF2, 0xEF, 0xE6, 0xff}, dot: color.RGBA{0xBB, 0xF7, 0xC4, 0xff},
+		tileCentre: tileCentre, tileEdge: tileEdge,
+		ring: color.RGBA{0x4E, 0x9A, 0x9A, 0xff}, glyph: brandmark.Chalk, dot: color.RGBA{0x4E, 0x9A, 0x9A, 0xff}, // estuary teal
 	},
 	"ember": {
 		name: "ember", label: "Ember",
-		tileCentre: color.RGBA{0x26, 0x16, 0x0E, 0xff}, tileEdge: color.RGBA{0x14, 0x0A, 0x06, 0xff},
-		ring: color.RGBA{0xFB, 0x92, 0x3C, 0xff}, glyph: color.RGBA{0xFA, 0xF0, 0xE1, 0xff}, dot: color.RGBA{0xFC, 0xD3, 0x4D, 0xff},
+		tileCentre: tileCentre, tileEdge: tileEdge,
+		ring: color.RGBA{0xD9, 0x77, 0x3C, 0xff}, glyph: brandmark.Chalk, dot: color.RGBA{0xD9, 0x77, 0x3C, 0xff}, // gorse orange
 	},
 	"slate": {
 		name: "slate", label: "Slate",
-		tileCentre: color.RGBA{0x26, 0x32, 0x41, 0xff}, tileEdge: color.RGBA{0x13, 0x1A, 0x24, 0xff},
-		ring: color.RGBA{0xCB, 0xD5, 0xE1, 0xff}, glyph: color.RGBA{0xFF, 0xFF, 0xFF, 0xff}, dot: color.RGBA{0x93, 0xC5, 0xFD, 0xff},
+		tileCentre: tileCentre, tileEdge: tileEdge,
+		ring: color.RGBA{0x6A, 0x92, 0xBC, 0xff}, glyph: brandmark.Chalk, dot: color.RGBA{0x6A, 0x92, 0xBC, 0xff}, // slate blue
 	},
 }
 

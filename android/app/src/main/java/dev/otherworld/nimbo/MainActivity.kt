@@ -30,6 +30,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import dev.otherworld.nimbo.ui.theme.resolveDark
 import dev.otherworld.nimbo.ui.theme.parseThemeColor
+import dev.otherworld.nimbo.ui.theme.resolveAccentArgb
+import dev.otherworld.nimbo.supporter.supporterAccentArgb
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -159,10 +161,14 @@ class MainActivity : ComponentActivity(), NimboHost {
             CompositionLocalProvider(LocalNimboHost provides host) {
                 NimboTheme(
                     darkTheme = darkTheme,
-                    // A Patron's chosen accent, else the user's Nextcloud colour
-                    // as the desktop client does.
-                    accent = supporter.effectiveAccent.argb?.let { Color(it) }
-                        ?: parseThemeColor(state.themeColor),
+                    // A Patron's chosen colour, else the Accent colour setting:
+                    // OtherSync's own green (null = Theme.kt's palette) or the
+                    // Nextcloud server's colour, as on the desktop.
+                    accent = resolveAccentArgb(
+                        supporterArgb = supporterAccentArgb(supporter.effectiveAccent, supporter.customAccent, darkTheme),
+                        source = state.accentSource,
+                        serverColor = parseThemeColor(state.themeColor),
+                    )?.let { Color(it) },
                 ) {
                     NimboNav(viewModel, supporterVm)
                 }

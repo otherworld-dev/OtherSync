@@ -23,6 +23,7 @@ import dev.otherworld.nimbo.core.SyncPair
 import dev.otherworld.nimbo.core.SyncProgress
 import dev.otherworld.nimbo.core.TrashItem
 import dev.otherworld.nimbo.platform.LocalDir
+import dev.otherworld.nimbo.ui.theme.AccentSource
 import dev.otherworld.nimbo.ui.theme.AppearancePreference
 
 /** The three top-level tabs behind [Route.HOME]. */
@@ -79,6 +80,8 @@ data class UiState(
     /** What Nextcloud reports for appearance: dark / light / default. */
     val serverAppearance: String = "",
     val appearance: AppearancePreference = AppearancePreference.FOLLOW_NEXTCLOUD,
+    /** Where the accent comes from when no supporter colour is chosen. */
+    val accentSource: AccentSource = AccentSource.BRAND,
     /** Where Back from the Support screen goes: Settings or the Sync tab. */
     val supportReturn: Route = Route.SETTINGS,
     val status: String = "",

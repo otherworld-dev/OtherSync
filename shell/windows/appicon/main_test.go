@@ -313,8 +313,10 @@ func TestMarkVariantsAreTheMarkRecoloured(t *testing.T) {
 		}
 		seen[p.ring] = v
 		for _, tile := range []color.RGBA{p.tileCentre, p.tileEdge} {
-			if c := contrast(p.ring, tile); c < 7 {
-				t.Errorf("%s: ring %s on tile %s is %.1f:1, want at least 7:1", v, hexOf(p.ring), hexOf(tile), c)
+			// 3:1 is the brand rule for shapes; the stock valley-green ring on
+			// this tile is about 3.5:1, and the variants are held to the same.
+			if c := contrast(p.ring, tile); c < 3 {
+				t.Errorf("%s: ring %s on tile %s is %.1f:1, want at least 3:1", v, hexOf(p.ring), hexOf(tile), c)
 			}
 			if c := contrast(p.glyph, tile); c < 10 {
 				t.Errorf("%s: glyph %s on tile %s is %.1f:1, want at least 10:1", v, hexOf(p.glyph), hexOf(tile), c)

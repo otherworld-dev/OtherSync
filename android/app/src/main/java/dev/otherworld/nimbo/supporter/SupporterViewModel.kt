@@ -69,4 +69,12 @@ class SupporterViewModel(app: Application) : AndroidViewModel(app) {
         prefs.accent = accent
         choices.value = choices.value.copy(accent = accent)
     }
+
+    /** Saves a custom colour and switches the accent to it. */
+    fun setCustomAccent(argb: Long) {
+        val colour = argb or 0xFF000000
+        prefs.customAccent = colour
+        prefs.accent = AccentChoice.CUSTOM
+        choices.value = choices.value.copy(customAccent = colour, accent = AccentChoice.CUSTOM)
+    }
 }
