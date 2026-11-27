@@ -54,8 +54,15 @@ import dev.otherworld.nimbo.supporter.AccentChoice
 import dev.otherworld.nimbo.supporter.AppIcon
 import dev.otherworld.nimbo.supporter.SupporterTier
 import dev.otherworld.nimbo.supporter.SupporterUi
+import dev.otherworld.nimbo.supporter.supporterAccentArgb
+import dev.otherworld.nimbo.ui.theme.AccentSource
 import dev.otherworld.nimbo.ui.theme.AppearancePreference
+import dev.otherworld.nimbo.ui.theme.fitAccentArgb
 import dev.otherworld.nimbo.ui.theme.parseThemeColor
+import androidx.compose.foundation.background
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,8 +70,11 @@ fun SettingsScreen(
     appearance: AppearancePreference,
     serverAppearance: String,
     themeColor: String,
+    accentSource: AccentSource,
     supporter: SupporterUi,
     onAppearanceChange: (AppearancePreference) -> Unit,
+    onAccentSourceChange: (AccentSource) -> Unit,
+    onCustomAccent: (Long) -> Unit,
     onIconChange: (AppIcon) -> Unit,
     onAccentChange: (AccentChoice) -> Unit,
     onOpenSupport: () -> Unit,
@@ -99,17 +109,63 @@ fun SettingsScreen(
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-            SectionHeader("Colour")
-            AccentRow(themeColor)
+            SectionHeader("Accent colour")
+            Column(modifier = Modifier.selectableGroup()) {
+                AccentSource.entries.forEach { source ->
+                    AccentSourceRow(
+                        source = source,
+                        themeColor = themeColor,
+                        selected = source == accentSource,
+                        onSelect = { onAccentSourceChange(source) },
+                    )
+                }
+            }
+            if (supporter.effectiveAccent != AccentChoice.FOLLOW_NEXTCLOUD) {
+                Text(
+                    "Your supporter colour below is in use. Pick Default there to go back to this setting.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
             if (supporter.perks.accents) {
+                var editingCustom by remember { mutableStateOf(false) }
+                val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+                Text(
+                    "Supporter colours",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
                 Column(modifier = Modifier.selectableGroup()) {
-                    AccentChoice.entries.forEach { choice ->
+                    AccentChoice.entries.filter { it != AccentChoice.CUSTOM }.forEach { choice ->
                         AccentChoiceRow(
-                            choice = choice,
+                            label = choice.label,
+                            swatch = choice.argbFor(dark),
                             selected = choice == supporter.accent,
                             onSelect = { onAccentChange(choice) },
                         )
                     }
+                    AccentChoiceRow(
+                        label = if (supporter.customAccent == null) "Custom (pick a colour)" else "Custom",
+                        swatch = supporterAccentArgb(AccentChoice.CUSTOM, supporter.customAccent, dark),
+                        selected = supporter.accent == AccentChoice.CUSTOM,
+                        onSelect = {
+                            if (supporter.customAccent == null) editingCustom = true
+                            else onAccentChange(AccentChoice.CUSTOM)
+                        },
+                        trailing = { TextButton(onClick = { editingCustom = true }) { Text("Change") } },
+                    )
+                }
+                if (editingCustom) {
+                    CustomAccentDialog(
+                        initial = supporter.customAccent,
+                        onDismiss = { editingCustom = false },
+                        onSave = { argb ->
+                            editingCustom = false
+                            onCustomAccent(argb)
+                        },
+                    )
                 }
             } else {
                 LockedPerkRow("Accent colours", SupporterTier.PATRON, onOpenSupport)
@@ -226,48 +282,38 @@ private fun AppearanceRow(
 }
 
 /**
- * The accent is the Nextcloud colour unless a Patron picks one below.
- * This row exists to show the current base, because a colour arriving from
- * somewhere else is otherwise a mystery.
+ * One choice of the free Accent colour setting. The server option shows the
+ * colour the server actually gives, because a colour arriving from somewhere
+ * else is otherwise a mystery.
  */
 @Composable
-private fun AccentRow(themeColor: String) {
-    val parsed = parseThemeColor(themeColor)
+private fun AccentSourceRow(source: AccentSource, themeColor: String, selected: Boolean, onSelect: () -> Unit) {
+    val server = parseThemeColor(themeColor)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier
-                .size(28.dp)
-                .clip(CircleShape),
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Circle,
-                contentDescription = null,
-                tint = parsed ?: MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(28.dp),
-            )
-        }
-        Spacer(Modifier.width(14.dp))
+        RadioButton(selected = selected, onClick = null)
+        Spacer(Modifier.width(8.dp))
         Column(modifier = Modifier.weight(1f)) {
+            Text(source.label, style = MaterialTheme.typography.bodyLarge)
             Text(
-                text = if (parsed != null) "From your Nextcloud theme" else "OtherSync's own colour",
-                style = MaterialTheme.typography.bodyLarge,
-            )
-            Text(
-                text = when {
-                    parsed != null -> themeColor.trim().uppercase()
-                    else -> "Your server hasn't given one, so the app uses its own"
+                text = when (source) {
+                    AccentSource.BRAND -> "Valley green"
+                    AccentSource.SERVER -> if (server != null) themeColor.trim().uppercase()
+                    else "Your server has not given one, so OtherSync's colour is used"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        if (source == AccentSource.SERVER && server != null) {
+            Icon(Icons.Filled.Circle, contentDescription = null, tint = server, modifier = Modifier.size(24.dp))
+        }
     }
-    Spacer(Modifier.height(16.dp))
 }
 
 /** First in Settings: the way in to supporting, and where the badge lives. */
@@ -329,7 +375,13 @@ private fun IconRow(icon: AppIcon, selected: Boolean, onSelect: () -> Unit) {
 }
 
 @Composable
-private fun AccentChoiceRow(choice: AccentChoice, selected: Boolean, onSelect: () -> Unit) {
+private fun AccentChoiceRow(
+    label: String,
+    swatch: Long?,
+    selected: Boolean,
+    onSelect: () -> Unit,
+    trailing: (@Composable () -> Unit)? = null,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -342,10 +394,75 @@ private fun AccentChoiceRow(choice: AccentChoice, selected: Boolean, onSelect: (
         Icon(
             imageVector = Icons.Filled.Circle,
             contentDescription = null,
-            tint = choice.argb?.let { Color(it) } ?: MaterialTheme.colorScheme.outline,
+            tint = swatch?.let { Color(it) } ?: MaterialTheme.colorScheme.outline,
             modifier = Modifier.size(24.dp),
         )
         Spacer(Modifier.width(12.dp))
-        Text(choice.label, style = MaterialTheme.typography.bodyLarge)
+        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        trailing?.invoke()
+    }
+}
+
+/**
+ * Pick a custom accent by colour code. Shows the colour as it will actually be
+ * used on the light and dark themes: fitAccentArgb nudges it lighter or
+ * darker where needed so it always stands out and keeps text readable.
+ */
+@Composable
+private fun CustomAccentDialog(initial: Long?, onDismiss: () -> Unit, onSave: (Long) -> Unit) {
+    var text by remember {
+        mutableStateOf(initial?.let { "#%06X".format(it and 0xFFFFFF) } ?: "#")
+    }
+    val argb = parseThemeColor(text)?.toArgb()?.toLong()?.and(0xFFFFFFFFL)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Custom colour") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it.take(7) },
+                    label = { Text("Colour code, e.g. #3A7BD5") },
+                    singleLine = true,
+                    isError = text.length > 1 && argb == null,
+                )
+                Spacer(Modifier.height(12.dp))
+                if (argb != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        PreviewChip("Light", fitAccentArgb(argb, dark = false), Color(0xFFF4F0E8))
+                        Spacer(Modifier.width(16.dp))
+                        PreviewChip("Dark", fitAccentArgb(argb, dark = true), Color(0xFF23262B))
+                    }
+                    Text(
+                        "Adjusted where needed so it stays readable.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { argb?.let(onSave) }, enabled = argb != null) { Text("Use colour") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** The accent as it will look, on the theme's own background. */
+@Composable
+private fun PreviewChip(label: String, argb: Long, background: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(background),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.Circle, contentDescription = null, tint = Color(argb), modifier = Modifier.size(24.dp))
+        }
+        Spacer(Modifier.width(6.dp))
+        Text(label, style = MaterialTheme.typography.bodySmall)
     }
 }

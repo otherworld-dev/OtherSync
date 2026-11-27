@@ -28,6 +28,11 @@ class SupporterPrefs(context: Context) : StatusCache {
         get() = AccentChoice.fromStored(string(KEY_ACCENT))
         set(value) = save { putString(KEY_ACCENT, value.name) }
 
+    /** The supporter's custom accent (0xAARRGGBB), null until one is saved. */
+    var customAccent: Long?
+        get() = runCatching { if (prefs.contains(KEY_CUSTOM_ACCENT)) prefs.getLong(KEY_CUSTOM_ACCENT, 0L) else null }.getOrNull()
+        set(value) = save { if (value == null) remove(KEY_CUSTOM_ACCENT) else putLong(KEY_CUSTOM_ACCENT, value) }
+
     var firstSeenAt: Long
         get() = runCatching { prefs.getLong(KEY_FIRST_SEEN, 0L) }.getOrDefault(0L)
         set(value) = save { putLong(KEY_FIRST_SEEN, value) }
@@ -39,6 +44,7 @@ class SupporterPrefs(context: Context) : StatusCache {
     fun choices() = SupporterChoices(
         icon = icon,
         accent = accent,
+        customAccent = customAccent,
         firstSeenAt = firstSeenAt,
         nudgeRetired = nudgeRetired,
     )
@@ -56,6 +62,7 @@ class SupporterPrefs(context: Context) : StatusCache {
         const val KEY_STATUS = "status"
         const val KEY_ICON = "icon"
         const val KEY_ACCENT = "accent"
+        const val KEY_CUSTOM_ACCENT = "custom_accent"
         const val KEY_FIRST_SEEN = "first_seen_at"
         const val KEY_NUDGE_RETIRED = "nudge_retired"
     }

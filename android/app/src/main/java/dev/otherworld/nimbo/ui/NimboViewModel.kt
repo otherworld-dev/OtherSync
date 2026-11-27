@@ -14,6 +14,7 @@ package dev.otherworld.nimbo.ui
 import android.app.Application
 import android.net.Uri
 import android.util.Log
+import dev.otherworld.nimbo.ui.theme.AccentSource
 import dev.otherworld.nimbo.ui.theme.AppearancePreference
 import androidx.core.content.edit
 import android.content.SharedPreferences
@@ -62,6 +63,7 @@ class NimboViewModel(app: Application) : AndroidViewModel(app) {
     private companion object {
         const val PREFS_UI = "ui_prefs"
         const val KEY_APPEARANCE = "appearance"
+        const val KEY_ACCENT_SOURCE = "accent_source"
     }
 
 
@@ -75,7 +77,13 @@ class NimboViewModel(app: Application) : AndroidViewModel(app) {
                     app.getSharedPreferences(PREFS_UI, Application.MODE_PRIVATE)
                         .getString(KEY_APPEARANCE, null)
                 }.getOrNull()
-            )
+            ),
+            accentSource = AccentSource.fromStored(
+                runCatching {
+                    app.getSharedPreferences(PREFS_UI, Application.MODE_PRIVATE)
+                        .getString(KEY_ACCENT_SOURCE, null)
+                }.getOrNull()
+            ),
         )
     )
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -246,6 +254,16 @@ class NimboViewModel(app: Application) : AndroidViewModel(app) {
             runCatching {
                 prefs().edit { putString(KEY_APPEARANCE, preference.stored) }
             }.onFailure { Log.w(TAG, "could not save the appearance preference", it) }
+        }
+    }
+
+    /** Records where the accent comes from and applies it immediately. */
+    fun setAccentSource(source: AccentSource) {
+        _state.update { it.copy(accentSource = source) }
+        viewModelScope.launch {
+            runCatching {
+                prefs().edit { putString(KEY_ACCENT_SOURCE, source.stored) }
+            }.onFailure { Log.w(TAG, "could not save the accent setting", it) }
         }
     }
 

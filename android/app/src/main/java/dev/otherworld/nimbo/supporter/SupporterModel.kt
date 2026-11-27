@@ -70,6 +70,8 @@ data class SupporterNotice(val text: String, val isError: Boolean = false)
 data class SupporterChoices(
     val icon: AppIcon = AppIcon.DEFAULT,
     val accent: AccentChoice = AccentChoice.FOLLOW_NEXTCLOUD,
+    /** The supporter's own colour for [AccentChoice.CUSTOM] (0xAARRGGBB), null until set. */
+    val customAccent: Long? = null,
     /** First time the Sync tab's Home was shown with an account (ms); 0 = not yet. */
     val firstSeenAt: Long = 0L,
     val nudgeRetired: Boolean = false,
@@ -87,6 +89,7 @@ data class SupporterUi(
     val accent: AccentChoice = AccentChoice.FOLLOW_NEXTCLOUD,
     val effectiveIcon: AppIcon = AppIcon.DEFAULT,
     val effectiveAccent: AccentChoice = AccentChoice.FOLLOW_NEXTCLOUD,
+    val customAccent: Long? = null,
     val firstSeenAt: Long = 0L,
     val nudgeRetired: Boolean = false,
 )
@@ -103,6 +106,7 @@ fun supporterUi(status: SupporterStatus, notice: SupporterNotice?, choices: Supp
         accent = choices.accent,
         effectiveIcon = effectiveIcon(choices.icon, perks),
         effectiveAccent = effectiveAccent(choices.accent, perks),
+        customAccent = choices.customAccent,
         firstSeenAt = choices.firstSeenAt,
         nudgeRetired = choices.nudgeRetired,
     )

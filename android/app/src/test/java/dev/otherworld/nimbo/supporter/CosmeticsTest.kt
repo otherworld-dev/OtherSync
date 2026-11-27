@@ -2,6 +2,7 @@ package dev.otherworld.nimbo.supporter
 
 import dev.otherworld.nimbo.ui.theme.readableOnArgb
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.pow
@@ -12,21 +13,21 @@ class CosmeticsTest {
     fun `a lapsed supporter sees the defaults but keeps their choices`() {
         val lapsed = Perks.of(SupporterTier.NONE)
         assertEquals(AppIcon.DEFAULT, effectiveIcon(AppIcon.EMBER, lapsed))
-        assertEquals(AccentChoice.FOLLOW_NEXTCLOUD, effectiveAccent(AccentChoice.TEAL, lapsed))
+        assertEquals(AccentChoice.FOLLOW_NEXTCLOUD, effectiveAccent(AccentChoice.ESTUARY, lapsed))
 
-        val ui = supporterUi(SupporterStatus(), null, SupporterChoices(icon = AppIcon.EMBER, accent = AccentChoice.TEAL))
+        val ui = supporterUi(SupporterStatus(), null, SupporterChoices(icon = AppIcon.EMBER, accent = AccentChoice.ESTUARY))
         assertEquals(AppIcon.EMBER, ui.icon)
         assertEquals(AppIcon.DEFAULT, ui.effectiveIcon)
-        assertEquals(AccentChoice.TEAL, ui.accent)
+        assertEquals(AccentChoice.ESTUARY, ui.accent)
         assertEquals(AccentChoice.FOLLOW_NEXTCLOUD, ui.effectiveAccent)
     }
 
     @Test
     fun `resubscribing brings the choices straight back`() {
         assertEquals(AppIcon.EMBER, effectiveIcon(AppIcon.EMBER, Perks.of(SupporterTier.BACKER)))
-        assertEquals(AccentChoice.TEAL, effectiveAccent(AccentChoice.TEAL, Perks.of(SupporterTier.PATRON)))
+        assertEquals(AccentChoice.ESTUARY, effectiveAccent(AccentChoice.ESTUARY, Perks.of(SupporterTier.PATRON)))
         // A Backer has icons but not accents.
-        assertEquals(AccentChoice.FOLLOW_NEXTCLOUD, effectiveAccent(AccentChoice.TEAL, Perks.of(SupporterTier.BACKER)))
+        assertEquals(AccentChoice.FOLLOW_NEXTCLOUD, effectiveAccent(AccentChoice.ESTUARY, Perks.of(SupporterTier.BACKER)))
     }
 
     @Test
@@ -37,20 +38,30 @@ class CosmeticsTest {
     }
 
     @Test
-    fun `a supporter who saved Indigo before the rename still gets Indigo`() {
-        // SupporterPrefs stores the enum name; the Nimbo-era colour must survive.
-        val saved = AccentChoice.fromStored("INDIGO")
-        assertEquals(AccentChoice.INDIGO, saved)
-        assertEquals(0xFF5856E0, saved.argb)
-        assertEquals(AccentChoice.INDIGO, effectiveAccent(saved, Perks.of(SupporterTier.PATRON)))
+    fun `Nimbo-era colours load as their nearest family colour`() {
+        // SupporterPrefs stores the enum name; an old choice must not reset to nothing.
+        assertEquals(AccentChoice.DAMSON, AccentChoice.fromStored("INDIGO"))
+        assertEquals(AccentChoice.DAMSON, AccentChoice.fromStored("VIOLET"))
+        assertEquals(AccentChoice.ESTUARY, AccentChoice.fromStored("TEAL"))
+        assertEquals(AccentChoice.SLATE_BLUE, AccentChoice.fromStored("OCEAN"))
+        assertEquals(AccentChoice.DRAGON, AccentChoice.fromStored("CRIMSON"))
+        // Forest green is OtherSync's own colour now.
+        assertEquals(AccentChoice.FOLLOW_NEXTCLOUD, AccentChoice.fromStored("FOREST"))
     }
 
     @Test
-    fun `every saved accent name still loads`() {
-        // Renaming an entry would silently reset that supporter's choice.
-        for (name in listOf("FOLLOW_NEXTCLOUD", "INDIGO", "TEAL", "FOREST", "CRIMSON", "OCEAN", "VIOLET")) {
-            assertEquals(name, AccentChoice.fromStored(name).name)
+    fun `every current accent name round-trips`() {
+        for (choice in AccentChoice.entries) {
+            assertEquals(choice, AccentChoice.fromStored(choice.name))
         }
+    }
+
+    @Test
+    fun `a custom colour applies only once one is saved`() {
+        assertNull(supporterAccentArgb(AccentChoice.CUSTOM, null, dark = false))
+        assertEquals(0xFFB3262DL, supporterAccentArgb(AccentChoice.CUSTOM, 0xFFB3262DL, dark = false))
+        assertNull(supporterAccentArgb(AccentChoice.FOLLOW_NEXTCLOUD, 0xFFB3262DL, dark = true))
+        assertEquals(0xFFDA4D3FL, supporterAccentArgb(AccentChoice.DRAGON, null, dark = true))
     }
 
     // WCAG relative luminance — the yardstick the fixed accents are held to.
@@ -68,22 +79,23 @@ class CosmeticsTest {
     }
 
     @Test
-    fun `every fixed accent is readable under its own text colour`() {
+    fun `every fixed accent is readable under its own text colour, on both themes`() {
         for (accent in AccentChoice.entries) {
-            val argb = accent.argb ?: continue
-            val ratio = contrast(argb, readableOnArgb(argb))
-            assertTrue("${accent.label}: $ratio", ratio >= 4.5)
+            for (dark in listOf(false, true)) {
+                val argb = accent.argbFor(dark) ?: continue
+                val ratio = contrast(argb, readableOnArgb(argb))
+                assertTrue("${accent.label} dark=$dark: $ratio", ratio >= 4.5)
+            }
         }
     }
 
     @Test
-    fun `every fixed accent stands out on both the light and the dark theme`() {
-        val lightSurface = 0xFFFCFCFF
-        val darkSurface = 0xFF1A1C1E
+    fun `every fixed accent stands out on its theme's surface`() {
+        val lightSurface = 0xFFF4F0E8 // chalk
+        val darkSurface = 0xFF23262B // slate
         for (accent in AccentChoice.entries) {
-            val argb = accent.argb ?: continue
-            assertTrue("${accent.label} on light", contrast(argb, lightSurface) >= 3.0)
-            assertTrue("${accent.label} on dark", contrast(argb, darkSurface) >= 3.0)
+            accent.argbFor(false)?.let { assertTrue("${accent.label} on light", contrast(it, lightSurface) >= 3.0) }
+            accent.argbFor(true)?.let { assertTrue("${accent.label} on dark", contrast(it, darkSurface) >= 3.0) }
         }
     }
 }
