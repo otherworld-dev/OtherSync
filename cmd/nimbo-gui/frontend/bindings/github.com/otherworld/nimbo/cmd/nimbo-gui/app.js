@@ -478,8 +478,9 @@ export function FreeSpace(dir) {
 
 /**
  * GetAccentSource returns where the windows take their accent colour from:
- * "brand" (default, the product's own accent) or "server" (the Nextcloud
- * server's theme colour, as every version before the valley-green rebrand did).
+ * "brand" (default, the product's own accent), "server" (the Nextcloud
+ * server's theme colour, as every version before the valley-green rebrand
+ * did) or "custom" (the user's own colour, GetCustomAccent).
  * @returns {$CancellablePromise<string>}
  */
 export function GetAccentSource() {
@@ -515,6 +516,14 @@ export function GetBaseDir(acct) {
  */
 export function GetConflictPolicy() {
     return $Call.ByID(2413247111);
+}
+
+/**
+ * GetCustomAccent returns the user's own accent ("#RRGGBB"), or "" if none.
+ * @returns {$CancellablePromise<string>}
+ */
+export function GetCustomAccent() {
+    return $Call.ByID(967905746);
 }
 
 /**
@@ -1145,7 +1154,7 @@ export function Search(term) {
 
 /**
  * SetAccentSource persists the accent source and tells every window to
- * re-apply its accent.
+ * re-apply its accent. "custom" only sticks once a custom colour is saved.
  * @param {string} src
  * @returns {$CancellablePromise<void>}
  */
@@ -1238,6 +1247,16 @@ export function SetBetaUpdates(on) {
  */
 export function SetConflictPolicy(policy) {
     return $Call.ByID(2608990779, policy);
+}
+
+/**
+ * SetCustomAccent saves the user's own accent and switches to it. Returns
+ * false (and changes nothing) unless hex is a "#RRGGBB" colour.
+ * @param {string} hex
+ * @returns {$CancellablePromise<boolean>}
+ */
+export function SetCustomAccent(hex) {
+    return $Call.ByID(2766029334, hex);
 }
 
 /**

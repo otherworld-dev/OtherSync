@@ -10,6 +10,7 @@
   import Dialog from "./Dialog.svelte";
   import { Events } from "@wailsio/runtime";
   import { App } from "../bindings/github.com/otherworld/nimbo/cmd/nimbo-gui";
+  import { darken, fitAccent, isHex, onAccent } from "./accent";
 
   // Each Wails window loads a different hash route.
   let route = $state(window.location.hash.replace("#", ""));
@@ -31,6 +32,7 @@
     else dark = sysDark.matches;                         // default/unknown -> OS
     if (dark) document.documentElement.setAttribute("data-theme", "dark");
     else document.documentElement.removeAttribute("data-theme");
+    applyAccent(); // a custom accent is fitted per theme
   }
   sysDark.addEventListener("change", applyTheme);
   Events.On("theme", (e: any) => { themeMode = e.data || "system"; applyTheme(); });
@@ -57,26 +59,13 @@
   let accentSource = "brand";
   let brandAccent = "";  // the build's accentHex ("" until App.Brand answers)
   let serverAccent = ""; // the Nextcloud theme colour ("" until known)
-  const isHex = (h: string) => /^#[0-9a-fA-F]{6}$/.test(h || "");
-  function darken(hex: string, f: number): string {
-    const m = hex.replace("#", "");
-    if (m.length !== 6) return hex;
-    const c = [0, 2, 4].map(i => Math.max(0, Math.round(parseInt(m.slice(i, i + 2), 16) * f)));
-    return "#" + c.map(x => x.toString(16).padStart(2, "0")).join("");
-  }
-  // onAccent is whichever of white and slate reads better on the accent.
-  function onAccent(hex: string): string {
-    const lin = (v: number) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
-    const m = hex.replace("#", "");
-    const [r, g, b] = [0, 2, 4].map(i => lin(parseInt(m.slice(i, i + 2), 16)));
-    const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    const slate = 0.0189; // relative luminance of #23262B
-    return 1.05 / (l + 0.05) >= (l + 0.05) / (slate + 0.05) ? "#FFFFFF" : "#23262B";
-  }
+  let customAccent = ""; // the user's own colour, "#RRGGBB" ("" = none)
   function applyAccent() {
     const root = document.documentElement;
     let hex = "";
-    if (accentSource === "server" && isHex(serverAccent)) hex = serverAccent;
+    if (accentSource === "custom" && isHex(customAccent)) {
+      hex = fitAccent(customAccent, root.getAttribute("data-theme") === "dark");
+    } else if (accentSource === "server" && isHex(serverAccent)) hex = serverAccent;
     else if (isHex(brandAccent) && brandAccent.toLowerCase() !== STOCK_ACCENT) hex = brandAccent;
     if (hex) {
       root.style.setProperty("--accent", hex);
@@ -96,6 +85,10 @@
     .then((s: string) => { accentSource = s || "brand"; applyAccent(); })
     .catch(() => { /* brand */ });
   Events.On("accentSource", (e: any) => { accentSource = e.data || "brand"; applyAccent(); });
+  App.GetCustomAccent()
+    .then((h: string) => { customAccent = h || ""; applyAccent(); })
+    .catch(() => { /* none */ });
+  Events.On("customAccent", (e: any) => { customAccent = e.data || ""; applyAccent(); });
   // The engine pushes the server theme when it starts (this window may load
   // long before that: on a fresh install the flyout exists while the user is
   // still signing in, and on an account switch the colour changes). Re-read

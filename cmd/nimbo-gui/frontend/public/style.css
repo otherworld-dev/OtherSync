@@ -101,6 +101,10 @@ input, textarea {
   -webkit-user-select: text;
 }
 
+/* Tick boxes, radio buttons and range sliders take the accent instead of the
+   browser's stock blue. */
+input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color: var(--accent); }
+
 /* Theme the WebView2 (Chromium) scrollbars so they don't clash with the panel.
    The thumb sits inset (border in the bg colour) and uses the border palette,
    so it adapts to light/dark and the accent-derived surfaces. */
