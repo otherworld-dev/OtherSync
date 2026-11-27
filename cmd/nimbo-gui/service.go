@@ -2295,31 +2295,88 @@ func (a *App) SetTheme(mode string) {
 }
 
 // GetAccentSource returns where the windows take their accent colour from:
-// "brand" (default, the product's own accent) or "server" (the Nextcloud
-// server's theme colour, as every version before the valley-green rebrand did).
+// "brand" (default, the product's own accent), "server" (the Nextcloud
+// server's theme colour, as every version before the valley-green rebrand
+// did) or "custom" (the user's own colour, GetCustomAccent).
 func (a *App) GetAccentSource() string {
 	if d, err := config.Resolve(); err == nil {
-		if s, e := d.LoadSettings(); e == nil && s.AccentSource == "server" {
-			return "server"
+		if s, e := d.LoadSettings(); e == nil {
+			return normalizeAccentSource(s.AccentSource, s.AccentCustom)
 		}
 	}
 	return "brand"
 }
 
+// normalizeAccentSource maps a stored source to one the windows understand:
+// anything unknown is "brand", and "custom" needs a colour to be custom.
+func normalizeAccentSource(src, custom string) string {
+	switch {
+	case src == "server":
+		return "server"
+	case src == "custom" && validAccentHex(custom):
+		return "custom"
+	}
+	return "brand"
+}
+
+// validAccentHex reports whether s is a "#RRGGBB" colour.
+func validAccentHex(s string) bool {
+	if len(s) != 7 || s[0] != '#' {
+		return false
+	}
+	for _, c := range s[1:] {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", c) {
+			return false
+		}
+	}
+	return true
+}
+
 // SetAccentSource persists the accent source and tells every window to
-// re-apply its accent.
+// re-apply its accent. "custom" only sticks once a custom colour is saved.
 func (a *App) SetAccentSource(src string) {
-	if src != "server" {
+	if src != "server" && src != "custom" {
 		src = "brand"
 	}
 	if d, err := config.Resolve(); err == nil {
 		_ = d.UpdateSettings(func(s *config.Settings) {
 			s.AccentSource = src
+			src = normalizeAccentSource(s.AccentSource, s.AccentCustom)
 		})
 	}
 	if a.app != nil {
 		a.app.Event.Emit("accentSource", src)
 	}
+}
+
+// GetCustomAccent returns the user's own accent ("#RRGGBB"), or "" if none.
+func (a *App) GetCustomAccent() string {
+	if d, err := config.Resolve(); err == nil {
+		if s, e := d.LoadSettings(); e == nil && validAccentHex(s.AccentCustom) {
+			return strings.ToUpper(s.AccentCustom)
+		}
+	}
+	return ""
+}
+
+// SetCustomAccent saves the user's own accent and switches to it. Returns
+// false (and changes nothing) unless hex is a "#RRGGBB" colour.
+func (a *App) SetCustomAccent(hex string) bool {
+	hex = strings.ToUpper(strings.TrimSpace(hex))
+	if !validAccentHex(hex) {
+		return false
+	}
+	if d, err := config.Resolve(); err == nil {
+		_ = d.UpdateSettings(func(s *config.Settings) {
+			s.AccentCustom = hex
+			s.AccentSource = "custom"
+		})
+	}
+	if a.app != nil {
+		a.app.Event.Emit("customAccent", hex)
+		a.app.Event.Emit("accentSource", "custom")
+	}
+	return true
 }
 
 // FlyoutAppearanceDTO carries the flyout's appearance settings to the UI.

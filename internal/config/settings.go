@@ -66,8 +66,12 @@ type Settings struct {
 	// Theme: "system" (default), "light", or "dark".
 	Theme string `json:"theme"`
 	// AccentSource picks the windows' accent colour: "brand" (default: the
-	// product's own accent) or "server" (the Nextcloud server's theme colour).
+	// product's own accent), "server" (the Nextcloud server's theme colour) or
+	// "custom" (AccentCustom).
 	AccentSource string `json:"accentSource,omitempty"`
+	// AccentCustom is the user's own accent, "#RRGGBB", used when AccentSource
+	// is "custom". The windows fit it per theme so it stays readable.
+	AccentCustom string `json:"accentCustom,omitempty"`
 	// SyncMode: "live" (default; real files, full two-way sync) or "ondemand"
 	// (experimental; online-only placeholders that download when opened).
 	SyncMode string `json:"syncMode"`

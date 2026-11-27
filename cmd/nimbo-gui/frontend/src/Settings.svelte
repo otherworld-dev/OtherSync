@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { DARK_BG, LIGHT_BG, fitAccent, isHex } from "./accent";
   import { App } from "../bindings/github.com/otherworld/nimbo/cmd/nimbo-gui";
   import { ask, tell } from "./dialogs.svelte";
   import { Events } from "@wailsio/runtime";
@@ -228,8 +229,25 @@
   (async () => { theme = await App.GetTheme(); })();
   function saveTheme() { App.SetTheme(theme); }
   let accentSource = $state("brand");
-  (async () => { accentSource = await App.GetAccentSource(); })();
-  function saveAccentSource() { App.SetAccentSource(accentSource); }
+  let customAccent = $state("");      // saved custom colour, "" = none yet
+  let customPick = $state("#3A7BD5"); // what the picker shows
+  (async () => {
+    accentSource = await App.GetAccentSource();
+    customAccent = await App.GetCustomAccent();
+    if (customAccent) customPick = customAccent;
+  })();
+  function saveAccentSource() {
+    // Custom with nothing saved yet: wait for a colour to be picked.
+    if (accentSource === "custom" && !customAccent) return;
+    App.SetAccentSource(accentSource);
+  }
+  async function saveCustomAccent(hex: string) {
+    hex = hex.trim();
+    if (!hex.startsWith("#")) hex = "#" + hex;
+    if (!isHex(hex)) return;
+    customPick = hex.toUpperCase();
+    if (await App.SetCustomAccent(customPick)) customAccent = customPick;
+  }
 
   let onDemandSupported = $state(false);
   let syncMode = $state("live");
@@ -810,8 +828,26 @@
         <select bind:value={accentSource} onchange={saveAccentSource}>
           <option value="brand">{brandName} colour</option>
           <option value="server">Match Nextcloud theme colour</option>
+          <option value="custom">Custom colour</option>
         </select>
       </div>
+      {#if accentSource === "custom"}
+        <div class="field customaccent">
+          <label for="custom-accent-code">Your colour</label>
+          <div class="row">
+            <input type="color" value={customPick}
+                   onchange={(e) => saveCustomAccent((e.currentTarget as HTMLInputElement).value)}
+                   aria-label="Pick a colour" />
+            <input id="custom-accent-code" class="hexcode" value={customPick} maxlength="7"
+                   onchange={(e) => saveCustomAccent((e.currentTarget as HTMLInputElement).value)} />
+            <span class="swatch" style="background:{LIGHT_BG}"><span style="background:{fitAccent(customPick, false)}"></span></span>
+            <span class="fhint">Light</span>
+            <span class="swatch" style="background:{DARK_BG}"><span style="background:{fitAccent(customPick, true)}"></span></span>
+            <span class="fhint">Dark</span>
+          </div>
+          <p class="fhint">{customAccent ? "Adjusted lighter or darker where needed so text stays readable." : "Pick a colour to use it."}</p>
+        </div>
+      {/if}
       <label class="check"><input type="checkbox" checked={notifyOn} onchange={toggleNotify} /> Show desktop notifications</label>
 
       <h3>System integration</h3>
@@ -1148,4 +1184,11 @@
   .about { color: var(--muted); font-size: 12px; }
   .updaterow { margin-top: 20px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .upmsg { color: var(--fg2); font-size: 12px; }
+  .customaccent .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .customaccent input[type="color"] { width: 36px; height: 28px; padding: 0; border: 1px solid var(--border-2);
+                                     border-radius: 6px; background: var(--panel); cursor: pointer; }
+  .customaccent .hexcode { width: 90px; font-family: inherit; }
+  .customaccent .swatch { width: 28px; height: 28px; border-radius: 50%; display: inline-flex;
+                          align-items: center; justify-content: center; border: 1px solid var(--border); }
+  .customaccent .swatch span { width: 16px; height: 16px; border-radius: 50%; }
 </style>
